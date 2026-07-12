@@ -1,0 +1,186 @@
+import { db } from "@/lib/db";
+import { demoPortfolioName } from "@/lib/demo";
+import { calculatePercentChange } from "@/lib/portfolio/calculations";
+import { getDemoRiskAlerts } from "@/lib/portfolio/alerts-data";
+import { getDemoPortfolioAnalytics } from "@/lib/portfolio/analytics";
+import { getPeriodStartDate } from "@/lib/portfolio/performance";
+import {
+  PERFORMANCE_PERIODS,
+  type PerformancePeriod,
+  type SnapshotPoint,
+} from "@/lib/portfolio/types";
+
+function toNumber(value: { toNumber: () => number } | number | null) {
+  if (value === null) {
+    return 0;
+  }
+
+  return typeof value === "number" ? value : value.toNumber();
+}
+
+function findPriceAtOrBefore<T extends { timestamp: Date }>(
+  prices: T[],
+  targetDate: Date,
+) {
+  return [...prices]
+    .reverse()
+    .find((price) => price.timestamp.getTime() <= targetDate.getTime());
+}
+
+export type StockDetailData = {
+  stock: {
+    ticker: string;
+    companyName: string;
+    sector: string;
+    industry: string;
+    exchange: string;
+    currency: string;
+  };
+  latestPrice: number;
+  asOf: string;
+  priceChart: SnapshotPoint[];
+  periodReturns: Record<PerformancePeriod, number>;
+  position: {
+    shares: number;
+    averageCost: number;
+    marketValue: number;
+    costBasis: number;
+    totalGainLoss: number;
+    totalGainLossPercent: number;
+    allocationPercent: number;
+  } | null;
+  watchlist: {
+    targetPrice: number | null;
+    notes: string | null;
+  } | null;
+  relatedAlerts: Awaited<ReturnType<typeof getDemoRiskAlerts>>;
+};
+
+export async function getDemoStockDetail(
+  ticker: string,
+): Promise<StockDetailData | null> {
+  const symbol = ticker.toUpperCase();
+  const [stock, alerts, analyticsByPeriod] = await Promise.all([
+    db.stock.findUnique({
+      where: {
+        ticker: symbol,
+      },
+      include: {
+        holdings: {
+          where: {
+            portfolio: {
+              name: demoPortfolioName,
+            },
+          },
+        },
+        prices: {
+          orderBy: {
+            timestamp: "asc",
+          },
+        },
+        watchlistItems: {
+          where: {
+            user: {
+              portfolios: {
+                some: {
+                  name: demoPortfolioName,
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+    getDemoRiskAlerts(),
+    Promise.all(
+      PERFORMANCE_PERIODS.map(async (period) => ({
+        period,
+        analytics: await getDemoPortfolioAnalytics(period),
+      })),
+    ),
+  ]);
+
+  if (!stock || stock.prices.length === 0) {
+    return null;
+  }
+
+  const latestPrice = stock.prices.at(-1);
+
+  if (!latestPrice) {
+    return null;
+  }
+
+  const periodReturns = Object.fromEntries(
+    PERFORMANCE_PERIODS.map((period) => {
+      const analytics = analyticsByPeriod.find((item) => item.period === period)
+        ?.analytics;
+      const holdingReturn = analytics?.holdings.find(
+        (holding) => holding.ticker === symbol,
+      )?.periodReturn;
+
+      if (holdingReturn !== undefined) {
+        return [period, holdingReturn];
+      }
+
+      const periodStartDate = getPeriodStartDate(latestPrice.timestamp, period);
+      const periodStartPrice =
+        findPriceAtOrBefore(stock.prices, periodStartDate) ?? stock.prices[0];
+
+      return [
+        period,
+        calculatePercentChange(
+          toNumber(periodStartPrice.close),
+          toNumber(latestPrice.close),
+        ),
+      ];
+    }),
+  ) as Record<PerformancePeriod, number>;
+
+  const oneMonthAnalytics = analyticsByPeriod.find(
+    (item) => item.period === "1M",
+  )?.analytics;
+  const holdingAnalytics = oneMonthAnalytics?.holdings.find(
+    (holding) => holding.ticker === symbol,
+  );
+  const holding = stock.holdings[0];
+  const watchlistItem = stock.watchlistItems[0];
+
+  return {
+    stock: {
+      ticker: stock.ticker,
+      companyName: stock.companyName,
+      sector: stock.sector,
+      industry: stock.industry,
+      exchange: stock.exchange,
+      currency: stock.currency,
+    },
+    latestPrice: toNumber(latestPrice.close),
+    asOf: latestPrice.timestamp.toISOString(),
+    priceChart: stock.prices.slice(-90).map((price) => ({
+      date: price.timestamp.toISOString(),
+      value: toNumber(price.close),
+    })),
+    periodReturns,
+    position:
+      holding && holdingAnalytics
+        ? {
+            shares: toNumber(holding.shares),
+            averageCost: toNumber(holding.averageCost),
+            marketValue: holdingAnalytics.marketValue,
+            costBasis: holdingAnalytics.costBasis,
+            totalGainLoss: holdingAnalytics.totalGainLoss,
+            totalGainLossPercent: holdingAnalytics.totalGainLossPercent,
+            allocationPercent: holdingAnalytics.allocationPercent,
+          }
+        : null,
+    watchlist: watchlistItem
+      ? {
+          targetPrice: watchlistItem.targetPrice
+            ? toNumber(watchlistItem.targetPrice)
+            : null,
+          notes: watchlistItem.notes,
+        }
+      : null,
+    relatedAlerts: alerts.filter((alert) => alert.ticker === symbol),
+  };
+}

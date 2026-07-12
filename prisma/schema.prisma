@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PriceInterval {
+  DAY
+}
+
+enum AlertType {
+  DRAWDOWN
+  CONCENTRATION
+  VOLATILITY
+  PRICE_MOVE
+  WATCHLIST_MOVE
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AlertStatus {
+  ACTIVE
+  RESOLVED
+}
+
+enum ResearchStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum AgentName {
+  NEWS
+  FINANCIALS
+  COMPETITORS
+  POLITICAL_ACTIVITY
+  RISK
+  SYNTHESIS
+}
+
+enum AgentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum AgentRating {
+  BEARISH
+  NEUTRAL
+  BULLISH
+  MIXED
+}
+
+model User {
+  id             String          @id @default(cuid())
+  name           String
+  email          String          @unique
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  portfolios     Portfolio[]
+  watchlistItems WatchlistItem[]
+  alerts         Alert[]
+  researchJobs   ResearchJob[]
+}
+
+model Portfolio {
+  id           String              @id @default(cuid())
+  userId       String
+  name         String
+  baseCurrency String              @default("USD")
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holdings     Holding[]
+  snapshots    PortfolioSnapshot[]
+  alerts       Alert[]
+
+  @@index([userId])
+}
+
+model Holding {
+  id          String            @id @default(cuid())
+  portfolioId String
+  stockId     String
+  shares      Decimal           @db.Decimal(18, 6)
+  averageCost Decimal           @db.Decimal(18, 4)
+  costBasis   Decimal           @db.Decimal(18, 4)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  portfolio   Portfolio         @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  stock       Stock             @relation(fields: [stockId], references: [id], onDelete: Restrict)
+  snapshots   HoldingSnapshot[]
+
+  @@unique([portfolioId, stockId])
+  @@index([stockId])
+}
+
+model WatchlistItem {
+  id          String   @id @default(cuid())
+  userId      String
+  stockId     String
+  targetPrice Decimal? @db.Decimal(18, 4)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stock       Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stockId])
+  @@index([stockId])
+}
+
+model Stock {
+  id             String           @id @default(cuid())
+  ticker         String           @unique
+  companyName    String
+  sector         String
+  industry       String
+  exchange       String
+  currency       String           @default("USD")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  holdings       Holding[]
+  watchlistItems WatchlistItem[]
+  prices         StockPrice[]
+  alerts         Alert[]
+  researchJobs   ResearchJob[]
+  reports        ResearchReport[]
+}
+
+model StockPrice {
+  id        String        @id @default(cuid())
+  stockId   String
+  timestamp DateTime
+  open      Decimal       @db.Decimal(18, 4)
+  high      Decimal       @db.Decimal(18, 4)
+  low       Decimal       @db.Decimal(18, 4)
+  close     Decimal       @db.Decimal(18, 4)
+  volume    BigInt
+  interval  PriceInterval @default(DAY)
+  stock     Stock         @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([stockId, timestamp, interval])
+  @@index([timestamp])
+}
+
+model PortfolioSnapshot {
+  id                   String    @id @default(cuid())
+  portfolioId          String
+  timestamp            DateTime
+  totalValue           Decimal   @db.Decimal(18, 4)
+  totalCostBasis       Decimal   @db.Decimal(18, 4)
+  totalGainLoss        Decimal   @db.Decimal(18, 4)
+  totalGainLossPercent Decimal   @db.Decimal(10, 6)
+  portfolio            Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, timestamp])
+  @@index([timestamp])
+}
+
+model HoldingSnapshot {
+  id              String   @id @default(cuid())
+  holdingId       String
+  timestamp       DateTime
+  price           Decimal  @db.Decimal(18, 4)
+  marketValue     Decimal  @db.Decimal(18, 4)
+  gainLoss        Decimal  @db.Decimal(18, 4)
+  gainLossPercent Decimal  @db.Decimal(10, 6)
+  holding         Holding  @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+
+  @@unique([holdingId, timestamp])
+  @@index([timestamp])
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  userId      String
+  stockId     String?
+  portfolioId String?
+  type        AlertType
+  severity    AlertSeverity
+  title       String
+  message     String
+  status      AlertStatus   @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  resolvedAt  DateTime?
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stock       Stock?        @relation(fields: [stockId], references: [id], onDelete: SetNull)
+  portfolio   Portfolio?    @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([stockId])
+  @@index([portfolioId])
+}
+
+model ResearchJob {
+  id              String          @id @default(cuid())
+  userId          String
+  stockId         String
+  status          ResearchStatus  @default(PENDING)
+  requestedAgents AgentName[]
+  createdAt       DateTime        @default(now())
+  completedAt     DateTime?
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stock           Stock           @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  agentRuns       AgentRun[]
+  report          ResearchReport?
+
+  @@index([userId, stockId])
+  @@index([status])
+}
+
+model AgentRun {
+  id            String       @id @default(cuid())
+  researchJobId String
+  agentName     AgentName
+  status        AgentStatus  @default(PENDING)
+  rating        AgentRating?
+  confidence    Decimal?     @db.Decimal(4, 3)
+  summary       String
+  findingsJson  Json
+  sourcesJson   Json
+  warningsJson  Json
+  startedAt     DateTime     @default(now())
+  completedAt   DateTime?
+  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+
+  @@unique([researchJobId, agentName])
+  @@index([agentName])
+}
+
+model ResearchReport {
+  id              String      @id @default(cuid())
+  researchJobId   String      @unique
+  stockId         String
+  overview        String
+  bullCaseJson    Json
+  bearCaseJson    Json
+  risksJson       Json
+  missingDataJson Json
+  confidence      Decimal     @db.Decimal(4, 3)
+  generatedAt     DateTime    @default(now())
+  expiresAt       DateTime
+  researchJob     ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  stock           Stock       @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId])
+}
