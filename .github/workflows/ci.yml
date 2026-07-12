@@ -13,21 +13,21 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: portfolio_pulse
-          POSTGRES_USER: portfolio_pulse
-          POSTGRES_PASSWORD: portfolio_pulse
+          POSTGRES_DB: portfolio_scope
+          POSTGRES_USER: portfolio_scope
+          POSTGRES_PASSWORD: portfolio_scope
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U portfolio_pulse -d portfolio_pulse"
+          --health-cmd "pg_isready -U portfolio_scope -d portfolio_scope"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://portfolio_pulse:portfolio_pulse@localhost:5432/portfolio_pulse?schema=public
+      DATABASE_URL: postgresql://portfolio_scope:portfolio_scope@localhost:5432/portfolio_scope?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
-      DEMO_USER_EMAIL: demo@portfoliopulse.dev
+      DEMO_USER_EMAIL: demo@portfolioscope.dev
 
     steps:
       - name: Checkout

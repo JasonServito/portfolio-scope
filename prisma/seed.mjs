@@ -13,7 +13,7 @@ import {
 const prisma = new PrismaClient();
 
 const anchorDate = new Date("2026-06-26T21:00:00.000Z");
-const demoUserEmail = process.env.DEMO_USER_EMAIL ?? "demo@portfoliopulse.dev";
+const demoUserEmail = process.env.DEMO_USER_EMAIL ?? "demo@portfolioscope.dev";
 
 const stocks = [
   {
@@ -429,8 +429,8 @@ async function seedResearch(user, stockRecords) {
           ],
           sourcesJson: [
             {
-              title: "PortfolioPulse seeded dataset",
-              url: "seed://portfolio-pulse/demo-research",
+              title: "PortfolioScope seeded dataset",
+              url: "seed://portfolio-scope/demo-research",
             },
           ],
           warningsJson:

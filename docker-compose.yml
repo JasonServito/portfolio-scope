@@ -2,24 +2,24 @@ services:
   app:
     build:
       context: .
-    container_name: portfolio-pulse-app
+    container_name: portfolio-scope-app
     depends_on:
       - postgres
     environment:
-      DATABASE_URL: postgresql://portfolio_pulse:portfolio_pulse@postgres:5432/portfolio_pulse?schema=public
+      DATABASE_URL: postgresql://portfolio_scope:portfolio_scope@postgres:5432/portfolio_scope?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
-      DEMO_USER_EMAIL: demo@portfoliopulse.dev
+      DEMO_USER_EMAIL: demo@portfolioscope.dev
     ports:
       - "3000:3000"
 
   postgres:
     image: postgres:16-alpine
-    container_name: portfolio-pulse-postgres
+    container_name: portfolio-scope-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: portfolio_pulse
-      POSTGRES_USER: portfolio_pulse
-      POSTGRES_PASSWORD: portfolio_pulse
+      POSTGRES_DB: portfolio_scope
+      POSTGRES_USER: portfolio_scope
+      POSTGRES_PASSWORD: portfolio_scope
     ports:
       - "5432:5432"
     volumes:

@@ -1,4 +1,4 @@
-export const APP_NAME = "PortfolioPulse";
+export const APP_NAME = "PortfolioScope";
 
 export const ROUTES = {
   home: "/",

@@ -16,7 +16,7 @@ export default function Home() {
 
           <div className="space-y-4">
             <h1 className="max-w-3xl text-4xl font-semibold tracking-normal sm:text-5xl">
-              PortfolioPulse
+              PortfolioScope
             </h1>
             <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
               A clean investing dashboard shell for monitoring holdings,

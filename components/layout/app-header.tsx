@@ -22,7 +22,7 @@ export function AppHeader() {
       <div className="flex min-h-16 items-center gap-3 px-4 sm:px-6">
         <Link className="flex items-center gap-2 lg:hidden" href="/dashboard">
           <span className="size-3 rounded-full bg-emerald-500" />
-          <span className="text-sm font-semibold">PortfolioPulse</span>
+          <span className="text-sm font-semibold">PortfolioScope</span>
         </Link>
 
         <div className="hidden flex-1 items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground md:flex">

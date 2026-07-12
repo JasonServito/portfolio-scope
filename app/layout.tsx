@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PortfolioPulse",
+  title: "PortfolioScope",
   description: "A recruiter-ready full-stack portfolio analytics dashboard foundation.",
 };
 

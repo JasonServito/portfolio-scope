@@ -16,7 +16,7 @@ export default function StockNotFound() {
             Watchlist
           </Link>
         }
-        description="The requested ticker is not part of the seeded PortfolioPulse demo dataset."
+        description="The requested ticker is not part of the seeded PortfolioScope demo dataset."
         eyebrow="Stock detail"
         title="Stock unavailable"
       >

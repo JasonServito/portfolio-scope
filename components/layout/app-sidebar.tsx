@@ -62,7 +62,7 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
           </span>
           <span>
             <span className="block text-sm font-semibold leading-5">
-              PortfolioPulse
+              PortfolioScope
             </span>
             <span className="block text-xs text-muted-foreground">
               Demo investing workspace

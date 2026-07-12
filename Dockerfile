@@ -4,14 +4,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN apk add --no-cache openssl
 
 FROM base AS deps
-ENV DATABASE_URL=postgresql://portfolio_pulse:portfolio_pulse@localhost:5432/portfolio_pulse?schema=public
+ENV DATABASE_URL=postgresql://portfolio_scope:portfolio_scope@localhost:5432/portfolio_scope?schema=public
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 RUN npm ci
 
 FROM base AS builder
-ENV DATABASE_URL=postgresql://portfolio_pulse:portfolio_pulse@localhost:5432/portfolio_pulse?schema=public
+ENV DATABASE_URL=postgresql://portfolio_scope:portfolio_scope@localhost:5432/portfolio_scope?schema=public
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
