@@ -1,36 +1,129 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PortfolioScope
 
-## Getting Started
+PortfolioScope is a full-stack portfolio analytics and explainable stock-research demo built for long-term investors. It combines period-based performance, holding contribution analysis, deterministic risk alerts, and specialist research agents in a polished recruiter-ready experience.
 
-First, run the development server:
+> This is an educational analytics demo, not a brokerage or financial-advice product. Market and research data are deterministic and seeded; the app does not place trades, predict prices, or issue buy/sell/hold recommendations.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Product highlights
+
+- Portfolio performance across 1D, 1W, 1M, 3M, and 1Y periods
+- Holding-level returns, gain/loss, allocation, and contribution analysis
+- Winners, losers, sector allocation, and portfolio value history
+- Explainable, rule-based concentration, drawdown, price-move, and watchlist alerts
+- Stock detail views with position context, price history, and related risks
+- Structured research agents for news, financials, competitors, political activity, and risk
+- Deterministic seeded data for a stable, repeatable demo
+- Responsive Next.js UI backed by typed services, APIs, Prisma, and PostgreSQL
+
+## Product tour
+
+Screenshot assets are kept in [`public/screenshots`](public/screenshots). The recommended capture set is documented in [`DEMO.md`](DEMO.md); images can be added without changing README copy.
+
+| View         | What it demonstrates                                            |
+| ------------ | --------------------------------------------------------------- |
+| Landing      | Clear product positioning and one-click demo entry              |
+| Dashboard    | Period analytics, allocation, winners/losers, and alert context |
+| Holdings     | Comparable return windows and position-level performance        |
+| Alerts       | Transparent risk rules with links to affected securities        |
+| Stock detail | Price, position, risks, and explainable specialist research     |
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI[Next.js App Router UI] --> API[Route handlers]
+  API --> Services[Portfolio, alert, and research services]
+  Services --> Providers[Deterministic seeded providers]
+  Services --> Prisma[Prisma ORM]
+  Providers --> Agents[Specialist research agents]
+  Agents --> Synthesis[Research synthesis]
+  Prisma --> Postgres[(PostgreSQL)]
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The application keeps presentation, orchestration, domain calculations, providers, and persistence separate. Providers supply facts; specialist agents interpret structured inputs; synthesis combines their outputs while preserving findings, confidence, warnings, and sources.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tech stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Next.js 15, React 19, and TypeScript
+- Tailwind CSS and shadcn/ui-style components
+- Recharts for portfolio and stock visualizations
+- Prisma ORM and PostgreSQL
+- Zod for runtime validation
+- Vitest for unit and route-level integration tests
+- ESLint, Docker, and GitHub Actions
 
-## Learn More
+## Run locally
 
-To learn more about Next.js, take a look at the following resources:
+Prerequisites: Node.js 20.19+, npm, and Docker Desktop (or another PostgreSQL 16 instance).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+git clone <your-repository-url>
+cd PortfolioScope
+cp .env.example .env
+npm ci
+docker compose up -d postgres
+npm run db:deploy
+npm run db:seed
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+On Windows PowerShell, replace the copy command with `Copy-Item .env.example .env`.
 
-## Deploy on Vercel
+Open [http://localhost:3000](http://localhost:3000), then select **Continue as demo investor**. The default `.env.example` credentials match the local Docker database.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Quality checks
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
+
+CI runs the same checks against PostgreSQL after applying migrations and loading deterministic demo data.
+
+## Demo guide
+
+The focused recruiter walkthrough takes about three minutes:
+
+1. Enter demo mode and establish the product’s analytics-first positioning.
+2. Change the dashboard period to show server-side performance recalculation.
+3. Compare holding returns and contribution across time windows.
+4. Open an alert and explain the deterministic trigger.
+5. Open a stock’s research tabs and trace a synthesis insight back to specialist findings and sources.
+
+Detailed talking points, fallback steps, and screenshot framing are in [`DEMO.md`](DEMO.md).
+
+## Deployment
+
+The M11 deployment foundation targets Vercel and Neon PostgreSQL. Runtime traffic uses the pooled `DATABASE_URL`; Prisma migration commands use the direct `DIRECT_URL`. Preview and production must use different Neon databases and environment-scoped Vercel variables.
+
+The repository includes:
+
+- GitHub Actions checks backed by PostgreSQL
+- Safe, repeatable Prisma migrations and an idempotent demo-seed integration check
+- `GET /api/health` for liveness and `GET /api/ready` for database readiness
+- Optional Sentry client, server, edge, and App Router error instrumentation
+- A production guard that keeps the public demo read-only
+- A multi-stage production `Dockerfile` and local PostgreSQL in `docker-compose.yml`
+
+Follow [`RUNBOOK.md`](RUNBOOK.md) for the environment matrix, first deployment, monitoring, smoke tests, and rollback procedure.
+
+No public demo URL is claimed here until a deployment is verified.
+
+## Project documentation
+
+- [`README.md`](README.md) — product, architecture, setup, deployment, and roadmap
+- [`DEMO.md`](DEMO.md) — recruiter walkthrough and screenshot capture checklist
+
+- [`RUNBOOK.md`](RUNBOOK.md) — production deployment, monitoring, and rollback
+
+## Roadmap
+
+- Portfolio and watchlist management with explicit validation
+- Replaceable live market-data providers
+- Production authentication and user ownership enforcement
+- Background research jobs and cache expiry
+- Benchmarking, dividends, and portfolio import
+
+Brokerage connectivity, trading, price prediction, and investment recommendations remain outside the product’s scope.

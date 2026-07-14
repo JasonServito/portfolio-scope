@@ -1,53 +1,48 @@
-import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
 
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { WatchlistManager } from "@/components/watchlist/watchlist-manager";
+import { getDemoWatchlist } from "@/lib/portfolio/management";
 
-export default function WatchlistPage() {
+export const dynamic = "force-dynamic";
+
+export default async function WatchlistPage() {
+  const items = await getDemoWatchlist();
   return (
     <AppLayout>
       <PageShell
-        description="A focused monitoring surface for stocks outside the portfolio, with movement and research readiness."
+        description="Track seeded companies you want to research without changing your portfolio."
         eyebrow="Research queue"
         title="Watchlist"
       >
-        <section className="grid gap-4 lg:grid-cols-2">
-          {[
-            ["AMD", "Advanced Micro Devices", "Semiconductors", "+6.4%"],
-            ["SHOP", "Shopify", "Software", "-1.8%"],
-            ["GOOGL", "Alphabet", "Communication services", "+2.7%"],
-            ["AMZN", "Amazon", "Consumer discretionary", "+3.1%"],
-          ].map(([ticker, company, sector, move]) => (
-            <Link href={`/stocks/${ticker.toLowerCase()}`} key={ticker}>
-              <Card className="transition hover:bg-muted/30">
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <CardTitle>{ticker}</CardTitle>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {company}
-                      </p>
-                    </div>
-                    <Badge
-                      className={
-                        move.startsWith("+")
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-rose-50 text-rose-700"
-                      }
-                    >
-                      {move}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
-                  {sector}
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </section>
+        {!items ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+              <span className="flex size-11 items-center justify-center rounded-md bg-muted">
+                <AlertTriangle className="size-5" />
+              </span>
+              <div>
+                <p className="font-medium">Watchlist data is unavailable.</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Seed the database to manage the demo investor watchlist.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <WatchlistManager
+            items={items.map((item) => ({
+              id: item.id,
+              ticker: item.stock.ticker,
+              companyName: item.stock.companyName,
+              sector: item.stock.sector,
+              targetPrice: item.targetPrice ? Number(item.targetPrice) : null,
+              notes: item.notes,
+            }))}
+          />
+        )}
       </PageShell>
     </AppLayout>
   );

@@ -18,6 +18,7 @@ import {
 } from "@/lib/formatters";
 import { PERFORMANCE_PERIODS } from "@/lib/portfolio/types";
 import type { HoldingsPageRow } from "@/lib/portfolio/dashboard-data";
+import { HoldingRowActions } from "@/components/holdings/holding-actions";
 
 type HoldingsTableProps = {
   holdings: HoldingsPageRow[];
@@ -61,7 +62,10 @@ export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
                 {period}
               </TableHead>
             ))}
-            <TableHead className="min-w-36 text-right">Total gain/loss</TableHead>
+            <TableHead className="min-w-36 text-right">
+              Total gain/loss
+            </TableHead>
+            <TableHead className="text-right">Manage</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -80,7 +84,8 @@ export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
                 <div>
                   <p className="font-medium">{holding.companyName}</p>
                   <p className="text-xs text-muted-foreground">
-                    {holding.sector} | {formatPercent(holding.allocationPercent)}
+                    {holding.sector} |{" "}
+                    {formatPercent(holding.allocationPercent)}
                   </p>
                 </div>
               </TableCell>
@@ -100,7 +105,9 @@ export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
               </TableCell>
               {PERFORMANCE_PERIODS.map((period) => (
                 <TableCell className="text-right" key={period}>
-                  <Badge className={returnBadgeClass(holding.periodReturns[period])}>
+                  <Badge
+                    className={returnBadgeClass(holding.periodReturns[period])}
+                  >
                     {formatSignedPercent(holding.periodReturns[period])}
                   </Badge>
                 </TableCell>
@@ -112,6 +119,14 @@ export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
                 <p className="text-xs text-muted-foreground">
                   {formatSignedPercent(holding.totalGainLossPercent)}
                 </p>
+              </TableCell>
+              <TableCell className="text-right">
+                <HoldingRowActions
+                  averageCost={holding.averageCost}
+                  id={holding.id}
+                  shares={holding.shares}
+                  ticker={holding.ticker}
+                />
               </TableCell>
             </TableRow>
           ))}

@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PortfolioScope",
-  description: "A recruiter-ready full-stack portfolio analytics dashboard foundation.",
+  title: {
+    default: "PortfolioScope",
+    template: "%s | PortfolioScope",
+  },
+  description:
+    "Portfolio analytics, deterministic risk alerts, and explainable stock research in a polished full-stack demo.",
 };
 
 export default function RootLayout({

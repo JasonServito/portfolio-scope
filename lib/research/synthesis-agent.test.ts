@@ -1,40 +1,54 @@
 import { describe, expect, it } from "vitest";
 
-import { createResearchReport } from "./orchestrator";
 import { synthesizeResearch } from "./synthesis-agent";
+import type { AgentResult } from "./types";
 
-describe("research output shaping", () => {
-  it("uses a deterministic placeholder when no research signals exist", () => {
-    expect(synthesizeResearch([])).toBe(
-      "Research synthesis placeholder. No live LLM calls are configured.",
-    );
+function result(overrides: Partial<AgentResult> = {}): AgentResult {
+  return {
+    agentName: "NEWS",
+    status: "COMPLETED",
+    rating: "NEUTRAL",
+    confidence: 0.8,
+    summary: "Seeded operating context is stable.",
+    findings: [
+      { label: "Context", detail: "Revenue growth remained resilient." },
+    ],
+    sources: [
+      {
+        title: "Seeded source",
+        reference: "seed://test",
+        detail: "Test input",
+      },
+    ],
+    warnings: [],
+    ...overrides,
+  };
+}
+
+describe("research synthesis", () => {
+  it("returns an explicit missing-data report without specialist results", () => {
+    expect(synthesizeResearch("Example Corp", [])).toMatchObject({
+      confidence: 0,
+      missingData: ["All specialist agent outputs are missing."],
+    });
   });
 
-  it("combines signal summaries without creating recommendations", () => {
-    const synthesis = synthesizeResearch([
-      {
-        source: "Seeded news",
-        summary: "Revenue growth remained resilient.",
-        confidence: "high",
-      },
-      {
-        source: "Seeded risk",
-        summary: "Valuation sensitivity is elevated.",
-        confidence: "medium",
-      },
+  it("combines specialist evidence without creating recommendations", () => {
+    const report = synthesizeResearch("Example Corp", [
+      result({ rating: "BULLISH" }),
+      result({
+        agentName: "RISK",
+        rating: "MIXED",
+        confidence: 0.6,
+        warnings: ["Valuation sensitivity is elevated."],
+      }),
     ]);
 
-    expect(synthesis).toBe(
-      "Revenue growth remained resilient. Valuation sensitivity is elevated.",
+    expect(report.bullCase).toEqual(["Revenue growth remained resilient."]);
+    expect(report.risks).toEqual(["Valuation sensitivity is elevated."]);
+    expect(report.confidence).toBe(0.7);
+    expect(JSON.stringify(report).toLowerCase()).not.toMatch(
+      /\b(buy|sell|hold)\b/,
     );
-    expect(synthesis.toLowerCase()).not.toMatch(/\b(buy|sell|hold)\b/);
-  });
-
-  it("normalizes report tickers and avoids live external calls", async () => {
-    await expect(createResearchReport("nvda")).resolves.toEqual({
-      ticker: "NVDA",
-      signals: [],
-      synthesis: "Research synthesis placeholder. No live LLM calls are configured.",
-    });
   });
 });

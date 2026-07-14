@@ -1,6 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 
 import { HoldingsTable } from "@/components/holdings/holdings-table";
+import { AddHoldingForm } from "@/components/holdings/holding-actions";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -83,7 +84,10 @@ export default async function HoldingsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Current positions</CardTitle>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle>Current positions</CardTitle>
+                  <AddHoldingForm />
+                </div>
               </CardHeader>
               <CardContent>
                 <HoldingsTable

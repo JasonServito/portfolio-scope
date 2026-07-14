@@ -7,6 +7,7 @@ services:
       - postgres
     environment:
       DATABASE_URL: postgresql://portfolio_scope:portfolio_scope@postgres:5432/portfolio_scope?schema=public
+      DIRECT_URL: postgresql://portfolio_scope:portfolio_scope@postgres:5432/portfolio_scope?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       DEMO_USER_EMAIL: demo@portfolioscope.dev
     ports:

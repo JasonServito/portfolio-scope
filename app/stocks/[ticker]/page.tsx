@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { StockPriceChart } from "@/components/stocks/stock-price-chart";
+import { ResearchTabs } from "@/components/research/research-tabs";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/formatters";
 import { getDemoStockDetail } from "@/lib/portfolio/stock-detail";
 import { PERFORMANCE_PERIODS } from "@/lib/portfolio/types";
+import { getLatestResearch } from "@/lib/research/orchestrator";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +28,10 @@ type StockPageProps = {
 
 export default async function StockPage({ params }: StockPageProps) {
   const { ticker } = await params;
-  const data = await getDemoStockDetail(ticker);
+  const [data, research] = await Promise.all([
+    getDemoStockDetail(ticker),
+    getLatestResearch(ticker),
+  ]);
 
   if (!data) {
     notFound();
@@ -39,7 +44,10 @@ export default async function StockPage({ params }: StockPageProps) {
     <AppLayout>
       <PageShell
         actions={
-          <Link className={buttonVariants({ variant: "outline" })} href="/watchlist">
+          <Link
+            className={buttonVariants({ variant: "outline" })}
+            href="/watchlist"
+          >
             <ArrowLeft className="size-4" />
             Watchlist
           </Link>
@@ -86,7 +94,10 @@ export default async function StockPage({ params }: StockPageProps) {
             [
               "Portfolio weight",
               data.position
-                ? formatSignedPercent(data.position.allocationPercent).replace("+", "")
+                ? formatSignedPercent(data.position.allocationPercent).replace(
+                    "+",
+                    "",
+                  )
                 : "Not held",
               data.position ? "Demo portfolio exposure" : "Watchlist context",
             ],
@@ -178,7 +189,10 @@ export default async function StockPage({ params }: StockPageProps) {
                     </span>
                     <span className="text-sm font-medium">
                       {data.watchlist.targetPrice
-                        ? formatCurrency(data.watchlist.targetPrice, stock.currency)
+                        ? formatCurrency(
+                            data.watchlist.targetPrice,
+                            stock.currency,
+                          )
                         : "No target"}
                     </span>
                   </div>
@@ -238,7 +252,9 @@ export default async function StockPage({ params }: StockPageProps) {
                       >
                         {alert.severity.toLowerCase()}
                       </Badge>
-                      <Badge variant="outline">{alert.type.toLowerCase()}</Badge>
+                      <Badge variant="outline">
+                        {alert.type.toLowerCase()}
+                      </Badge>
                     </div>
                     <p className="mt-3 font-medium">{alert.title}</p>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -270,6 +286,22 @@ export default async function StockPage({ params }: StockPageProps) {
               ))}
             </CardContent>
           </Card>
+        </section>
+
+        <section className="space-y-4">
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">
+              AI research layer
+            </p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+              Explainable stock research
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Deterministic specialist agents interpret seeded facts, surface
+              missing data, and preserve their evidence alongside the synthesis.
+            </p>
+          </div>
+          <ResearchTabs initialResearch={research} ticker={stock.ticker} />
         </section>
       </PageShell>
     </AppLayout>

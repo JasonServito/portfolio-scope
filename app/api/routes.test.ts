@@ -3,11 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getAlerts } from "./alerts/route";
 import { GET as getHoldings } from "./holdings/route";
 import { GET as getPortfolio } from "./portfolio/route";
-import { GET as getResearch } from "./research/[ticker]/route";
+import {
+  GET as getResearch,
+  POST as postResearch,
+} from "./research/[ticker]/route";
 
 import { getDemoRiskAlerts } from "@/lib/portfolio/alerts-data";
 import { getDemoPortfolioAnalytics } from "@/lib/portfolio/analytics";
 import type { PortfolioAnalytics } from "@/lib/portfolio/types";
+import { getLatestResearch, runResearch } from "@/lib/research/orchestrator";
+import type { StockResearch } from "@/lib/research/types";
 
 vi.mock("@/lib/portfolio/alerts-data", () => ({
   getDemoRiskAlerts: vi.fn(),
@@ -17,8 +22,15 @@ vi.mock("@/lib/portfolio/analytics", () => ({
   getDemoPortfolioAnalytics: vi.fn(),
 }));
 
+vi.mock("@/lib/research/orchestrator", () => ({
+  getLatestResearch: vi.fn(),
+  runResearch: vi.fn(),
+}));
+
 const mockedGetDemoPortfolioAnalytics = vi.mocked(getDemoPortfolioAnalytics);
 const mockedGetDemoRiskAlerts = vi.mocked(getDemoRiskAlerts);
+const mockedGetLatestResearch = vi.mocked(getLatestResearch);
+const mockedRunResearch = vi.mocked(runResearch);
 
 const analyticsResponse: PortfolioAnalytics = {
   portfolio: {
@@ -66,6 +78,24 @@ const analyticsResponse: PortfolioAnalytics = {
   topLosers: [],
 };
 
+const researchResponse: StockResearch = {
+  jobId: "research-1",
+  ticker: "AAPL",
+  companyName: "Apple Inc.",
+  status: "COMPLETED",
+  generatedAt: "2026-06-30T21:00:00.000Z",
+  expiresAt: "2026-07-30T21:00:00.000Z",
+  agents: [],
+  report: {
+    overview: "Deterministic overview.",
+    bullCase: [],
+    bearCase: [],
+    risks: [],
+    missingData: [],
+    confidence: 0.7,
+  },
+};
+
 describe("API route contracts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -86,7 +116,9 @@ describe("API route contracts", () => {
   it("defaults invalid portfolio periods to 1M", async () => {
     mockedGetDemoPortfolioAnalytics.mockResolvedValue(analyticsResponse);
 
-    await getPortfolio(new Request("http://localhost/api/portfolio?period=YTD"));
+    await getPortfolio(
+      new Request("http://localhost/api/portfolio?period=YTD"),
+    );
 
     expect(mockedGetDemoPortfolioAnalytics).toHaveBeenCalledWith("1M");
   });
@@ -94,7 +126,9 @@ describe("API route contracts", () => {
   it("returns a not found response when portfolio analytics are unavailable", async () => {
     mockedGetDemoPortfolioAnalytics.mockResolvedValue(null);
 
-    const response = await getPortfolio(new Request("http://localhost/api/portfolio"));
+    const response = await getPortfolio(
+      new Request("http://localhost/api/portfolio"),
+    );
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
@@ -122,7 +156,9 @@ describe("API route contracts", () => {
   it("returns a not found response when holdings analytics are unavailable", async () => {
     mockedGetDemoPortfolioAnalytics.mockResolvedValue(null);
 
-    const response = await getHoldings(new Request("http://localhost/api/holdings"));
+    const response = await getHoldings(
+      new Request("http://localhost/api/holdings"),
+    );
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
@@ -157,16 +193,49 @@ describe("API route contracts", () => {
     });
   });
 
-  it("normalizes research route tickers without running external services", async () => {
+  it("returns the latest deterministic research for a normalized ticker", async () => {
+    mockedGetLatestResearch.mockResolvedValue(researchResponse);
+
     const response = await getResearch(new Request("http://localhost"), {
       params: Promise.resolve({ ticker: "aapl" }),
     });
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(researchResponse);
+    expect(mockedGetLatestResearch).toHaveBeenCalledWith("AAPL");
+  });
+
+  it("rejects invalid research tickers before querying data", async () => {
+    const response = await getResearch(new Request("http://localhost"), {
+      params: Promise.resolve({ ticker: "AAPL<script>" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mockedGetLatestResearch).not.toHaveBeenCalled();
+  });
+
+  it("persists a deterministic research run", async () => {
+    mockedRunResearch.mockResolvedValue(researchResponse);
+
+    const response = await postResearch(new Request("http://localhost"), {
+      params: Promise.resolve({ ticker: "aapl" }),
+    });
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual(researchResponse);
+    expect(mockedRunResearch).toHaveBeenCalledWith("AAPL");
+  });
+
+  it("returns a stable JSON error when research generation fails", async () => {
+    mockedRunResearch.mockRejectedValue(new Error("provider failure"));
+
+    const response = await postResearch(new Request("http://localhost"), {
+      params: Promise.resolve({ ticker: "NVDA" }),
+    });
+
+    expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      status: "placeholder",
-      resource: "research",
-      ticker: "AAPL",
+      error: "The deterministic research pipeline could not complete.",
     });
   });
 });

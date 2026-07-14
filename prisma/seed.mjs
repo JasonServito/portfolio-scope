@@ -14,6 +14,17 @@ const prisma = new PrismaClient();
 
 const anchorDate = new Date("2026-06-26T21:00:00.000Z");
 const demoUserEmail = process.env.DEMO_USER_EMAIL ?? "demo@portfolioscope.dev";
+const demoPortfolioName = "Recruiter Demo Portfolio";
+const seededResearchCreatedAt = addDays(anchorDate, -1);
+
+const demoIds = {
+  user: "portfolioscope-demo-user",
+  portfolio: "portfolioscope-demo-portfolio",
+  alert: (ticker, type) =>
+    `portfolioscope-demo-alert-${ticker.toLowerCase()}-${type.toLowerCase()}`,
+  researchJob: (ticker) =>
+    `portfolioscope-demo-research-${ticker.toLowerCase()}`,
+};
 
 const stocks = [
   {
@@ -184,7 +195,9 @@ function priceForDay(stock, dayIndex) {
     high: round(high),
     low: round(low),
     close: round(close),
-    volume: BigInt(Math.round(stock.volume * (1 + Math.sin(dayIndex / 11) * 0.18))),
+    volume: BigInt(
+      Math.round(stock.volume * (1 + Math.sin(dayIndex / 11) * 0.18)),
+    ),
   };
 }
 
@@ -200,20 +213,6 @@ function createPriceRows(stockRecord, stockSeed) {
       interval: PriceInterval.DAY,
       ...price,
     };
-  });
-}
-
-async function resetDemoData() {
-  await prisma.user.deleteMany({
-    where: { email: demoUserEmail },
-  });
-
-  await prisma.stockPrice.deleteMany({
-    where: {
-      stock: {
-        ticker: { in: stocks.map((stock) => stock.ticker) },
-      },
-    },
   });
 }
 
@@ -243,6 +242,7 @@ async function seedStocks() {
     records.set(stock.ticker, record);
     await prisma.stockPrice.createMany({
       data: createPriceRows(record, stock),
+      skipDuplicates: true,
     });
   }
 
@@ -250,21 +250,49 @@ async function seedStocks() {
 }
 
 async function seedPortfolio(user, stockRecords) {
-  const portfolio = await prisma.portfolio.create({
-    data: {
+  const existingPortfolio = await prisma.portfolio.findFirst({
+    where: {
       userId: user.id,
-      name: "Recruiter Demo Portfolio",
-      baseCurrency: "USD",
+      name: demoPortfolioName,
     },
+    orderBy: { createdAt: "asc" },
   });
+
+  const portfolio = existingPortfolio
+    ? await prisma.portfolio.update({
+        where: { id: existingPortfolio.id },
+        data: {
+          name: demoPortfolioName,
+          baseCurrency: "USD",
+        },
+      })
+    : await prisma.portfolio.create({
+        data: {
+          id: demoIds.portfolio,
+          userId: user.id,
+          name: demoPortfolioName,
+          baseCurrency: "USD",
+        },
+      });
 
   const holdingRecords = [];
 
   for (const holding of holdings) {
     const stock = stockRecords.get(holding.ticker);
     const costBasis = round(holding.shares * holding.averageCost);
-    const record = await prisma.holding.create({
-      data: {
+    const record = await prisma.holding.upsert({
+      where: {
+        portfolioId_stockId: {
+          portfolioId: portfolio.id,
+          stockId: stock.id,
+        },
+      },
+      update: {
+        shares: holding.shares,
+        averageCost: holding.averageCost,
+        costBasis,
+      },
+      create: {
         portfolioId: portfolio.id,
         stockId: stock.id,
         shares: holding.shares,
@@ -273,14 +301,31 @@ async function seedPortfolio(user, stockRecords) {
       },
     });
 
-    holdingRecords.push({ ...holding, id: record.id, stockId: stock.id, costBasis });
+    holdingRecords.push({
+      ...holding,
+      id: record.id,
+      stockId: stock.id,
+      costBasis,
+    });
   }
 
   for (const item of watchlistItems) {
-    await prisma.watchlistItem.create({
-      data: {
+    const stockId = stockRecords.get(item.ticker).id;
+
+    await prisma.watchlistItem.upsert({
+      where: {
+        userId_stockId: {
+          userId: user.id,
+          stockId,
+        },
+      },
+      update: {
+        targetPrice: item.targetPrice,
+        notes: item.notes,
+      },
+      create: {
         userId: user.id,
-        stockId: stockRecords.get(item.ticker).id,
+        stockId,
         targetPrice: item.targetPrice,
         notes: item.notes,
       },
@@ -310,16 +355,31 @@ async function seedSnapshots(portfolio, holdingRecords) {
     let totalCostBasis = 0;
 
     for (const holding of holdingRecords) {
-      const price = priceMap.get(`${holding.stockId}:${timestamp.toISOString()}`);
+      const price = priceMap.get(
+        `${holding.stockId}:${timestamp.toISOString()}`,
+      );
       const marketValue = round(holding.shares * price);
       const gainLoss = round(marketValue - holding.costBasis);
-      const gainLossPercent = holding.costBasis === 0 ? 0 : round(gainLoss / holding.costBasis, 6);
+      const gainLossPercent =
+        holding.costBasis === 0 ? 0 : round(gainLoss / holding.costBasis, 6);
 
       totalValue += marketValue;
       totalCostBasis += holding.costBasis;
 
-      await prisma.holdingSnapshot.create({
-        data: {
+      await prisma.holdingSnapshot.upsert({
+        where: {
+          holdingId_timestamp: {
+            holdingId: holding.id,
+            timestamp,
+          },
+        },
+        update: {
+          price,
+          marketValue,
+          gainLoss,
+          gainLossPercent,
+        },
+        create: {
           holdingId: holding.id,
           timestamp,
           price,
@@ -331,14 +391,28 @@ async function seedSnapshots(portfolio, holdingRecords) {
     }
 
     const totalGainLoss = round(totalValue - totalCostBasis);
-    await prisma.portfolioSnapshot.create({
-      data: {
+    const totalGainLossPercent = round(totalGainLoss / totalCostBasis, 6);
+
+    await prisma.portfolioSnapshot.upsert({
+      where: {
+        portfolioId_timestamp: {
+          portfolioId: portfolio.id,
+          timestamp,
+        },
+      },
+      update: {
+        totalValue: round(totalValue),
+        totalCostBasis: round(totalCostBasis),
+        totalGainLoss,
+        totalGainLossPercent,
+      },
+      create: {
         portfolioId: portfolio.id,
         timestamp,
         totalValue: round(totalValue),
         totalCostBasis: round(totalCostBasis),
         totalGainLoss,
-        totalGainLossPercent: round(totalGainLoss / totalCostBasis, 6),
+        totalGainLossPercent,
       },
     });
   }
@@ -373,20 +447,156 @@ async function seedAlerts(user, portfolio, stockRecords) {
   ];
 
   for (const alert of alerts) {
-    await prisma.alert.create({
-      data: {
-        userId: user.id,
-        portfolioId: portfolio.id,
-        stockId: stockRecords.get(alert.stock).id,
-        type: alert.type,
-        severity: alert.severity,
-        title: alert.title,
-        message: alert.message,
-        status: AlertStatus.ACTIVE,
-        createdAt: addDays(anchorDate, -2),
+    const stockId = stockRecords.get(alert.stock).id;
+    const alertId = demoIds.alert(alert.stock, alert.type);
+    const existingAlert = await prisma.alert.findFirst({
+      where: {
+        OR: [
+          { id: alertId },
+          {
+            userId: user.id,
+            portfolioId: portfolio.id,
+            stockId,
+            type: alert.type,
+            title: alert.title,
+          },
+        ],
       },
+      orderBy: { createdAt: "asc" },
     });
+    const data = {
+      userId: user.id,
+      portfolioId: portfolio.id,
+      stockId,
+      type: alert.type,
+      severity: alert.severity,
+      title: alert.title,
+      message: alert.message,
+      status: AlertStatus.ACTIVE,
+      createdAt: addDays(anchorDate, -2),
+      resolvedAt: null,
+    };
+
+    if (existingAlert) {
+      await prisma.alert.update({
+        where: { id: existingAlert.id },
+        data,
+      });
+    } else {
+      await prisma.alert.create({
+        data: {
+          id: alertId,
+          ...data,
+        },
+      });
+    }
   }
+}
+
+function seededAgentOutput(stock, agentName) {
+  const label = agentName.toLowerCase().replaceAll("_", " ");
+  const baseSource = {
+    title: `PortfolioScope seeded ${label} dataset`,
+    reference: `seed://research/${stock.ticker}/${label.replaceAll(" ", "-")}`,
+    detail: "Deterministic demo input; no live API or LLM was used.",
+  };
+
+  const outputs = {
+    [AgentName.NEWS]: {
+      rating: AgentRating.MIXED,
+      confidence: 0.76,
+      summary: `${stock.companyName} has a seeded operating narrative tied to execution in ${stock.industry.toLowerCase()}.`,
+      findings: [
+        {
+          label: "Seeded research scenario",
+          detail: `Track execution and demand signals for ${stock.ticker} without treating the scenario as current news.`,
+        },
+      ],
+      sources: [baseSource],
+      warnings: [
+        "This scenario is illustrative and may not reflect current events.",
+      ],
+    },
+    [AgentName.FINANCIALS]: {
+      rating: AgentRating.NEUTRAL,
+      confidence: 0.72,
+      summary: `${stock.companyName} has a qualitative seeded financial profile for research workflow demonstrations.`,
+      findings: [
+        {
+          label: "Growth",
+          detail: `Seeded ${stock.sector.toLowerCase()} growth profile`,
+        },
+        {
+          label: "Margins",
+          detail:
+            "Margins remain sensitive to investment and operating mix in the demo scenario.",
+        },
+        {
+          label: "Balance sheet",
+          detail: "Seeded financial capacity is modeled as adequate.",
+        },
+      ],
+      sources: [baseSource],
+      warnings: [
+        "The MVP does not include live filings, estimates, or valuation data.",
+      ],
+    },
+    [AgentName.COMPETITORS]: {
+      rating: AgentRating.NEUTRAL,
+      confidence: 0.68,
+      summary: `${stock.companyName} is positioned within the seeded ${stock.industry.toLowerCase()} peer context.`,
+      findings: [
+        { label: "Industry", detail: stock.industry },
+        { label: "Sector", detail: stock.sector },
+      ],
+      sources: [baseSource],
+      warnings: ["Peer coverage is limited to the ten-stock demo universe."],
+    },
+    [AgentName.POLITICAL_ACTIVITY]: {
+      rating: AgentRating.NEUTRAL,
+      confidence: 0.3,
+      summary:
+        "No verified political activity is included in the deterministic demo dataset.",
+      findings: [],
+      sources: [],
+      warnings: [
+        "Absence of seeded data is not evidence that no political activity occurred.",
+      ],
+    },
+    [AgentName.RISK]: {
+      rating: AgentRating.MIXED,
+      confidence: 0.82,
+      summary: `${stock.ticker} risk context is derived from deterministic price, sector, and portfolio inputs.`,
+      findings: [
+        {
+          label: "Primary context",
+          detail: `${stock.sector} exposure and seeded price variability should be reviewed together.`,
+        },
+      ],
+      sources: [baseSource],
+      warnings: [
+        "Market and company-specific risk remain present even when rule thresholds are not triggered.",
+      ],
+    },
+    [AgentName.SYNTHESIS]: {
+      rating: AgentRating.MIXED,
+      confidence: 0.66,
+      summary: `${stock.companyName} has five visible deterministic specialist views with explicit evidence gaps.`,
+      findings: [
+        {
+          label: "Research posture",
+          detail:
+            "Balance operating context against visible risk and missing live data.",
+        },
+      ],
+      sources: [baseSource],
+      warnings: [
+        "This research context is not financial advice or an investment recommendation.",
+      ],
+    },
+  };
+
+  return outputs[agentName];
 }
 
 async function seedResearch(user, stockRecords) {
@@ -401,70 +611,114 @@ async function seedResearch(user, stockRecords) {
 
   for (const stock of stocks) {
     const stockRecord = stockRecords.get(stock.ticker);
-    const job = await prisma.researchJob.create({
-      data: {
-        userId: user.id,
-        stockId: stockRecord.id,
-        status: ResearchStatus.COMPLETED,
-        requestedAgents: agentNames,
-        createdAt: addDays(anchorDate, -1),
-        completedAt: anchorDate,
+    const researchJobId = demoIds.researchJob(stock.ticker);
+    const existingJob = await prisma.researchJob.findFirst({
+      where: {
+        OR: [
+          { id: researchJobId },
+          {
+            userId: user.id,
+            stockId: stockRecord.id,
+            createdAt: seededResearchCreatedAt,
+            completedAt: anchorDate,
+          },
+        ],
       },
+      orderBy: { id: "asc" },
     });
+    const jobData = {
+      userId: user.id,
+      stockId: stockRecord.id,
+      status: ResearchStatus.COMPLETED,
+      requestedAgents: agentNames,
+      createdAt: seededResearchCreatedAt,
+      completedAt: anchorDate,
+    };
+    const job = existingJob
+      ? await prisma.researchJob.update({
+          where: { id: existingJob.id },
+          data: jobData,
+        })
+      : await prisma.researchJob.create({
+          data: {
+            id: researchJobId,
+            ...jobData,
+          },
+        });
 
     for (const agentName of agentNames) {
-      await prisma.agentRun.create({
-        data: {
+      const output = seededAgentOutput(stock, agentName);
+      await prisma.agentRun.upsert({
+        where: {
+          researchJobId_agentName: {
+            researchJobId: job.id,
+            agentName,
+          },
+        },
+        update: {
+          status: AgentStatus.COMPLETED,
+          rating: output.rating,
+          confidence: output.confidence,
+          summary: output.summary,
+          findingsJson: output.findings,
+          sourcesJson: output.sources,
+          warningsJson: output.warnings,
+          startedAt: seededResearchCreatedAt,
+          completedAt: anchorDate,
+        },
+        create: {
           researchJobId: job.id,
           agentName,
           status: AgentStatus.COMPLETED,
-          rating: agentName === AgentName.RISK ? AgentRating.MIXED : AgentRating.NEUTRAL,
-          confidence: agentName === AgentName.POLITICAL_ACTIVITY ? 0.62 : 0.78,
-          summary: `${stock.ticker} ${agentName.toLowerCase().replaceAll("_", " ")} placeholder seeded for deterministic demos.`,
-          findingsJson: [
-            {
-              label: "Seeded input",
-              detail: `${stock.companyName} has structured placeholder research for the future M8 agent UI.`,
-            },
-          ],
-          sourcesJson: [
-            {
-              title: "PortfolioScope seeded dataset",
-              url: "seed://portfolio-scope/demo-research",
-            },
-          ],
-          warningsJson:
-            agentName === AgentName.POLITICAL_ACTIVITY
-              ? ["Political activity data is intentionally placeholder-only in the MVP seed."]
-              : [],
-          startedAt: addDays(anchorDate, -1),
+          rating: output.rating,
+          confidence: output.confidence,
+          summary: output.summary,
+          findingsJson: output.findings,
+          sourcesJson: output.sources,
+          warningsJson: output.warnings,
+          startedAt: seededResearchCreatedAt,
           completedAt: anchorDate,
         },
       });
     }
 
-    await prisma.researchReport.create({
-      data: {
+    const reportData = {
+      stockId: stockRecord.id,
+      overview: `${stock.companyName} has five deterministic specialist views. The synthesis balances seeded operating context, peer coverage, and visible risk inputs; it is research context, not financial advice.`,
+      bullCaseJson: [
+        `The seeded ${stock.sector.toLowerCase()} profile provides supportive operating context.`,
+      ],
+      bearCaseJson: [
+        "The demo does not include live valuation, estimates, or event data.",
+      ],
+      risksJson: ["Market, execution, and sector-specific risks remain relevant."],
+      missingDataJson: [
+        "Political activity and live filings are not included in the seeded dataset.",
+      ],
+      confidence: 0.66,
+      generatedAt: anchorDate,
+      expiresAt: addDays(anchorDate, 30),
+    };
+
+    await prisma.researchReport.upsert({
+      where: { researchJobId: job.id },
+      update: reportData,
+      create: {
         researchJobId: job.id,
-        stockId: stockRecord.id,
-        overview: `${stock.ticker} has deterministic placeholder research data. Later milestones can replace this with provider-backed agent outputs.`,
-        bullCaseJson: ["Recognizable company profile supports a realistic demo dataset."],
-        bearCaseJson: ["Seeded research should not be interpreted as financial advice."],
-        risksJson: ["Market, valuation, and concentration risks are modeled as structured placeholders."],
-        missingDataJson: ["No external news, filings, or LLM calls are used in M2."],
-        confidence: 0.74,
-        generatedAt: anchorDate,
-        expiresAt: addDays(anchorDate, 30),
+        ...reportData,
       },
     });
   }
 }
 
 async function main() {
-  await resetDemoData();
-
-  const user = await prisma.user.create({
-    data: {
+  const user = await prisma.user.upsert({
+    where: { email: demoUserEmail },
+    update: {
+      name: "Demo Investor",
+    },
+    create: {
+      id: demoIds.user,
       name: "Demo Investor",
       email: demoUserEmail,
       createdAt: addDays(anchorDate, -365),

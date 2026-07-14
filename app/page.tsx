@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, Bell, LineChart, ShieldCheck, WalletCards } from "lucide-react";
+import {
+  ArrowRight,
+  Bell,
+  LineChart,
+  ShieldCheck,
+  WalletCards,
+} from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,9 +25,9 @@ export default function Home() {
               PortfolioScope
             </h1>
             <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-              A clean investing dashboard shell for monitoring holdings,
-              watchlists, risk alerts, and stock research in one recruiter-ready
-              full-stack product.
+              Analyze portfolio performance, understand risk, and explore
+              evidence-backed stock research in one recruiter-ready full-stack
+              product.
             </p>
           </div>
 
@@ -72,7 +78,10 @@ export default function Home() {
                 ["MSFT", "18.1%", "bg-sky-500"],
                 ["NVDA", "15.8%", "bg-violet-500"],
               ].map(([ticker, value, color]) => (
-                <div className="rounded-lg border bg-background p-3" key={ticker}>
+                <div
+                  className="rounded-lg border bg-background p-3"
+                  key={ticker}
+                >
                   <div className="flex items-center justify-between text-sm">
                     <span className="font-medium">{ticker}</span>
                     <span className="text-muted-foreground">{value}</span>
@@ -91,22 +100,22 @@ export default function Home() {
         {[
           {
             title: "Portfolio",
-            description: "Track holdings and allocation.",
+            description: "Track holdings, contribution, and allocation.",
             icon: WalletCards,
           },
           {
             title: "Performance",
-            description: "Prepare period analytics surfaces.",
+            description: "Compare returns across five time periods.",
             icon: LineChart,
           },
           {
             title: "Alerts",
-            description: "Show rule-based risk monitoring.",
+            description: "Understand transparent rule-based risk signals.",
             icon: Bell,
           },
           {
             title: "Research",
-            description: "Reserve space for explainable AI tabs.",
+            description: "Trace structured insights back to their evidence.",
             icon: ShieldCheck,
           },
         ].map(({ description, icon: Icon, title }) => (
