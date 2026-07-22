@@ -1,5 +1,4 @@
 import { db } from "@/lib/db";
-import { demoPortfolioName } from "@/lib/demo";
 import { calculatePercentChange } from "@/lib/portfolio/calculations";
 import type {
   ResearchProvider,
@@ -99,16 +98,26 @@ function toNumber(value: { toNumber: () => number } | number) {
 }
 
 export const seededResearchProvider: ResearchProvider = {
-  async getResearchData(ticker): Promise<ResearchProviderData | null> {
+  async getResearchData(
+    ticker,
+    { userId },
+  ): Promise<ResearchProviderData | null> {
     const stock = await db.stock.findUnique({
       where: { ticker: ticker.toUpperCase() },
       include: {
         prices: { orderBy: { timestamp: "desc" }, take: 31 },
         holdings: {
-          where: { portfolio: { name: demoPortfolioName } },
+          where: { portfolio: { userId } },
           include: { portfolio: { include: { holdings: true } } },
         },
-        alerts: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" } },
+        alerts: {
+          where: {
+            status: "ACTIVE",
+            userId,
+            OR: [{ portfolioId: null }, { portfolio: { userId } }],
+          },
+          orderBy: { createdAt: "desc" },
+        },
       },
     });
 

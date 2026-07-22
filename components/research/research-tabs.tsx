@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { AlertTriangle, RefreshCw, Sparkles } from "lucide-react";
 
 import { AgentResultCard } from "@/components/research/agent-result-card";
@@ -104,6 +104,55 @@ function Overview({ research }: { research: StockResearch }) {
 export function ResearchTabs({
   ticker,
   initialResearch,
+  readOnly = false,
+}: {
+  ticker: string;
+  initialResearch: StockResearch | null;
+  readOnly?: boolean;
+}) {
+  return readOnly ? (
+    <ReadOnlyResearchTabs research={initialResearch} />
+  ) : (
+    <EditableResearchTabs initialResearch={initialResearch} ticker={ticker} />
+  );
+}
+
+function ReadOnlyResearchTabs({
+  research,
+}: {
+  research: StockResearch | null;
+}) {
+  if (!research) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center px-6 py-12 text-center">
+          <Sparkles aria-hidden="true" className="size-8" />
+          <h3 className="mt-4 text-lg font-semibold">
+            Sample research is unavailable
+          </h3>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+            The public demo is read-only and cannot start a research job. Try
+            another seeded company to inspect an existing deterministic report.
+          </p>
+          <Badge className="mt-5" variant="outline">
+            Read-only demo
+          </Badge>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <ResearchReportContent
+      action={<Badge variant="outline">Read-only sample</Badge>}
+      research={research}
+    />
+  );
+}
+
+function EditableResearchTabs({
+  ticker,
+  initialResearch,
 }: {
   ticker: string;
   initialResearch: StockResearch | null;
@@ -162,6 +211,32 @@ export function ResearchTabs({
     );
   }
 
+  return (
+    <ResearchReportContent
+      action={
+        <Button disabled={isRunning} onClick={run} variant="outline">
+          <RefreshCw
+            aria-hidden="true"
+            className={`size-4 ${isRunning ? "animate-spin" : ""}`}
+          />
+          {isRunning ? "Running…" : "Refresh research"}
+        </Button>
+      }
+      error={error}
+      research={research}
+    />
+  );
+}
+
+function ResearchReportContent({
+  action,
+  error,
+  research,
+}: {
+  action: ReactNode;
+  error?: string | null;
+  research: StockResearch;
+}) {
   const sources = research.agents
     .filter((agent) => agent.agentName !== "SYNTHESIS")
     .flatMap((agent) =>
@@ -183,14 +258,14 @@ export function ResearchTabs({
             traced.
           </p>
         </div>
-        <Button disabled={isRunning} onClick={run} variant="outline">
-          <RefreshCw className={`size-4 ${isRunning ? "animate-spin" : ""}`} />
-          {isRunning ? "Running…" : "Refresh research"}
-        </Button>
+        {action}
       </div>
       {error ? (
-        <div className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <AlertTriangle className="size-4" />
+        <div
+          className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+          role="alert"
+        >
+          <AlertTriangle aria-hidden="true" className="size-4" />
           {error}
         </div>
       ) : null}

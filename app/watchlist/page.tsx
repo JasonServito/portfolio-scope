@@ -13,7 +13,7 @@ export default async function WatchlistPage() {
   return (
     <AppLayout>
       <PageShell
-        description="Track seeded companies you want to research without changing your portfolio."
+        description="Explore curated companies and their research without changing the public demo watchlist."
         eyebrow="Research queue"
         title="Watchlist"
       >
@@ -41,6 +41,7 @@ export default async function WatchlistPage() {
               targetPrice: item.targetPrice ? Number(item.targetPrice) : null,
               notes: item.notes,
             }))}
+            readOnly
           />
         )}
       </PageShell>

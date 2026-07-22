@@ -28,5 +28,8 @@ export type ResearchProviderData = {
 };
 
 export interface ResearchProvider {
-  getResearchData(ticker: string): Promise<ResearchProviderData | null>;
+  getResearchData(
+    ticker: string,
+    context: { userId: string },
+  ): Promise<ResearchProviderData | null>;
 }

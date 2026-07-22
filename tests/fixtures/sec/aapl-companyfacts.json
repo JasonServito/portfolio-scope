@@ -1,0 +1,125 @@
+{
+  "_fixtureMetadata": {
+    "source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+    "description": "Clipped SEC Company Facts fixture retaining reported Apple observations and unknown concepts."
+  },
+  "cik": 320193,
+  "entityName": "Apple Inc.",
+  "facts": {
+    "us-gaap": {
+      "RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "label": "Revenue",
+        "description": "Revenue from contracts with customers.",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-09-29",
+              "end": "2025-09-27",
+              "val": 416161000000,
+              "accn": "0000320193-25-000079",
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-10-31",
+              "frame": "CY2025"
+            },
+            {
+              "start": "2025-03-30",
+              "end": "2025-06-28",
+              "val": 94036000000,
+              "accn": "0000320193-25-000057",
+              "fy": 2025,
+              "fp": "Q3",
+              "form": "10-Q",
+              "filed": "2025-08-01",
+              "frame": "CY2025Q2"
+            },
+            {
+              "start": "2024-09-29",
+              "end": "2025-06-28",
+              "val": 293753000000,
+              "accn": "0000320193-25-000057",
+              "fy": 2025,
+              "fp": "Q3",
+              "form": "10-Q",
+              "filed": "2025-08-01"
+            }
+          ]
+        }
+      },
+      "NetIncomeLoss": {
+        "label": "Net income",
+        "description": "Net income attributable to the reporting entity.",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-09-29",
+              "end": "2025-09-27",
+              "val": 112010000000,
+              "accn": "0000320193-25-000079",
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-10-31",
+              "frame": "CY2025"
+            }
+          ]
+        }
+      },
+      "Assets": {
+        "label": "Assets",
+        "description": "Total assets.",
+        "units": {
+          "USD": [
+            {
+              "end": "2025-09-27",
+              "val": 359241000000,
+              "accn": "0000320193-25-000079",
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-10-31",
+              "frame": "CY2025Q3I"
+            }
+          ]
+        }
+      },
+      "EarningsPerShareDiluted": {
+        "label": "Diluted earnings per share",
+        "description": "Diluted earnings per share.",
+        "units": {
+          "USD/shares": [
+            {
+              "start": "2024-09-29",
+              "end": "2025-09-27",
+              "val": 7.46,
+              "accn": "0000320193-25-000079",
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-10-31",
+              "frame": "CY2025"
+            }
+          ]
+        }
+      },
+      "UnknownFutureConcept": {
+        "label": "Unknown future concept",
+        "description": "Ensures unknown concepts remain in raw storage without entering canonical facts.",
+        "units": {
+          "USD": [
+            {
+              "end": "2025-09-27",
+              "val": 1,
+              "accn": "0000320193-25-000079",
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-10-31"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

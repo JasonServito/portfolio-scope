@@ -36,10 +36,10 @@ export type StockDetailData = {
     exchange: string;
     currency: string;
   };
-  latestPrice: number;
-  asOf: string;
+  latestPrice: number | null;
+  asOf: string | null;
   priceChart: SnapshotPoint[];
-  periodReturns: Record<PerformancePeriod, number>;
+  periodReturns: Record<PerformancePeriod, number | null>;
   position: {
     shares: number;
     averageCost: number;
@@ -70,6 +70,7 @@ export async function getDemoStockDetail(
           where: {
             portfolio: {
               name: demoPortfolioName,
+              user: { isDemo: true },
             },
           },
         },
@@ -80,13 +81,7 @@ export async function getDemoStockDetail(
         },
         watchlistItems: {
           where: {
-            user: {
-              portfolios: {
-                some: {
-                  name: demoPortfolioName,
-                },
-              },
-            },
+            user: { isDemo: true },
           },
         },
       },
@@ -100,15 +95,11 @@ export async function getDemoStockDetail(
     ),
   ]);
 
-  if (!stock || stock.prices.length === 0) {
+  if (!stock) {
     return null;
   }
 
   const latestPrice = stock.prices.at(-1);
-
-  if (!latestPrice) {
-    return null;
-  }
 
   const periodReturns = Object.fromEntries(
     PERFORMANCE_PERIODS.map((period) => {
@@ -120,6 +111,10 @@ export async function getDemoStockDetail(
 
       if (holdingReturn !== undefined) {
         return [period, holdingReturn];
+      }
+
+      if (!latestPrice || stock.prices.length === 0) {
+        return [period, null];
       }
 
       const periodStartDate = getPeriodStartDate(latestPrice.timestamp, period);
@@ -134,7 +129,7 @@ export async function getDemoStockDetail(
         ),
       ];
     }),
-  ) as Record<PerformancePeriod, number>;
+  ) as Record<PerformancePeriod, number | null>;
 
   const oneMonthAnalytics = analyticsByPeriod.find(
     (item) => item.period === "1M",
@@ -154,8 +149,8 @@ export async function getDemoStockDetail(
       exchange: stock.exchange,
       currency: stock.currency,
     },
-    latestPrice: toNumber(latestPrice.close),
-    asOf: latestPrice.timestamp.toISOString(),
+    latestPrice: latestPrice ? toNumber(latestPrice.close) : null,
+    asOf: latestPrice?.timestamp.toISOString() ?? null,
     priceChart: stock.prices.slice(-90).map((price) => ({
       date: price.timestamp.toISOString(),
       value: toNumber(price.close),

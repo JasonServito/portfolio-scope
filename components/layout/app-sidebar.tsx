@@ -79,10 +79,10 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
       <div className="m-3 rounded-lg border bg-background p-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-medium">Demo Mode</p>
-          <Badge variant="outline">M1</Badge>
+          <Badge variant="outline">Read-only</Badge>
         </div>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Static page shells now. Seeded analytics and live views arrive in the next milestones.
+          Seeded data stays available without OAuth and cannot be changed in the public deployment.
         </p>
       </div>
     </aside>

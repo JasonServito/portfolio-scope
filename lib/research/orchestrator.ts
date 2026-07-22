@@ -1,14 +1,18 @@
-import { AgentName, Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+
+import {
+  AgentName,
+  BackgroundJobType,
+  Prisma,
+  ResearchStatus,
+} from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { demoPortfolioName } from "@/lib/demo";
-import { runCompetitorsAgent } from "@/lib/research/agents/competitors-agent";
-import { runFinancialsAgent } from "@/lib/research/agents/financials-agent";
-import { runNewsAgent } from "@/lib/research/agents/news-agent";
-import { runPoliticalActivityAgent } from "@/lib/research/agents/political-activity-agent";
-import { runRiskAgent } from "@/lib/research/agents/risk-agent";
-import { seededResearchProvider } from "@/lib/research/providers/seeded-provider";
-import { synthesizeResearch } from "@/lib/research/synthesis-agent";
+import { requireMutableUser } from "@/lib/auth/authorization";
+import { isBackgroundFeatureEnabled } from "@/lib/jobs/config";
+import { JobErrorCode, JobRequestError } from "@/lib/jobs/errors";
+import type { JobPublisher } from "@/lib/jobs/qstash";
+import { enqueueBackgroundJob } from "@/lib/jobs/service";
 import {
   SPECIALIST_AGENT_NAMES,
   type AgentResult,
@@ -19,13 +23,9 @@ import {
 } from "@/lib/research/types";
 
 const ALL_AGENT_NAMES = [...SPECIALIST_AGENT_NAMES, "SYNTHESIS"] as const;
-const REPORT_TTL_DAYS = 30;
-
-function expiresAtFrom(date: Date) {
-  const expiresAt = new Date(date);
-  expiresAt.setUTCDate(expiresAt.getUTCDate() + REPORT_TTL_DAYS);
-  return expiresAt;
-}
+type ResearchJobWithResults = Prisma.ResearchJobGetPayload<{
+  include: { stock: true; agentRuns: true; report: true };
+}>;
 
 function jsonArray<T>(value: Prisma.JsonValue): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
@@ -60,7 +60,7 @@ export async function getLatestResearch(
   const job = await db.researchJob.findFirst({
     where: {
       stock: { ticker: symbol },
-      user: { portfolios: { some: { name: demoPortfolioName } } },
+      user: { isDemo: true },
       status: "COMPLETED",
       report: { isNot: null },
     },
@@ -68,6 +68,65 @@ export async function getLatestResearch(
     orderBy: { completedAt: "desc" },
   });
 
+  return shapeResearch(job);
+}
+
+export async function getLatestResearchForUser(
+  userId: string,
+  ticker: string,
+): Promise<StockResearch | null> {
+  const job = await db.researchJob.findFirst({
+    where: {
+      userId,
+      stock: { ticker: ticker.toUpperCase() },
+      status: "COMPLETED",
+      report: { isNot: null },
+    },
+    include: { stock: true, agentRuns: true, report: true },
+    orderBy: { completedAt: "desc" },
+  });
+
+  return shapeResearch(job);
+}
+
+export async function getOwnedResearchJob(
+  userId: string,
+  jobId: string,
+) {
+  const job = await db.researchJob.findFirst({
+    where: { id: jobId, userId },
+    include: { stock: true, agentRuns: true, report: true },
+  });
+
+  if (!job) return null;
+
+  return {
+    id: job.id,
+    status: job.status,
+    ticker: job.stock.ticker,
+    companyName: job.stock.companyName,
+    createdAt: job.createdAt.toISOString(),
+    completedAt: job.completedAt?.toISOString() ?? null,
+    research: shapeResearch(job),
+  };
+}
+
+export async function listResearchJobs(userId: string) {
+  return db.researchJob.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      completedAt: true,
+      stock: { select: { ticker: true, companyName: true } },
+      report: { select: { generatedAt: true, expiresAt: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+function shapeResearch(job: ResearchJobWithResults | null): StockResearch | null {
   if (!job?.report) return null;
   const order = new Map(ALL_AGENT_NAMES.map((name, index) => [name, index]));
 
@@ -96,100 +155,161 @@ export async function getLatestResearch(
 }
 
 export async function runResearch(
+  userId: string,
   ticker: string,
-): Promise<StockResearch | null> {
+  dependencies: {
+    publisher?: JobPublisher;
+    environment?: NodeJS.ProcessEnv;
+    now?: () => Date;
+  } = {},
+) {
   const symbol = ticker.toUpperCase();
-  const [user, stock] = await Promise.all([
-    db.user.findFirst({
-      where: { portfolios: { some: { name: demoPortfolioName } } },
-    }),
-    db.stock.findUnique({ where: { ticker: symbol } }),
-  ]);
-  if (!user || !stock) return null;
+  await requireMutableUser(userId);
+  const environment = dependencies.environment ?? process.env;
+  if (!isBackgroundFeatureEnabled("RESEARCH_GENERATION_ENABLED", environment)) {
+    throw new JobRequestError(
+      JobErrorCode.CONFIGURATION_ERROR,
+      503,
+      "Research generation is disabled.",
+    );
+  }
+  const stock = await db.stock.findUnique({ where: { ticker: symbol } });
+  if (!stock) return null;
 
-  const job = await db.researchJob.create({
-    data: {
-      userId: user.id,
+  const now = dependencies.now?.() ?? new Date();
+  const fresh = await db.researchJob.findFirst({
+    where: {
+      userId,
       stockId: stock.id,
-      status: "RUNNING",
-      requestedAgents: ALL_AGENT_NAMES.map((name) => AgentName[name]),
+      status: ResearchStatus.COMPLETED,
+      report: { is: { expiresAt: { gt: now } } },
     },
+    include: { stock: true, agentRuns: true, report: true },
+    orderBy: { completedAt: "desc" },
   });
+  if (fresh) {
+    const research = shapeResearch(fresh);
+    if (research) return { ...research, reused: true };
+  }
+
+  const active = await db.researchJob.findFirst({
+    where: {
+      userId,
+      stockId: stock.id,
+      status: {
+        in: [
+          ResearchStatus.PENDING,
+          ResearchStatus.RUNNING,
+          ResearchStatus.PARTIALLY_COMPLETED,
+        ],
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  if (active) {
+    return {
+      jobId: active.id,
+      ticker: stock.ticker,
+      companyName: stock.companyName,
+      status: active.status,
+      correlationId: active.correlationId,
+      reused: true,
+    };
+  }
+
+  const correlationId = randomUUID();
+  let job;
+  try {
+    job = await db.$transaction(async (transaction) => {
+      const created = await transaction.researchJob.create({
+        data: {
+          userId,
+          stockId: stock.id,
+          status: ResearchStatus.PENDING,
+          correlationId,
+          requestedAgents: ALL_AGENT_NAMES.map((name) => AgentName[name]),
+        },
+      });
+      await transaction.agentRun.createMany({
+        data: SPECIALIST_AGENT_NAMES.map((agentName) => ({
+          researchJobId: created.id,
+          agentName,
+          status: "PENDING" as const,
+          summary: "",
+          findingsJson: [],
+          sourcesJson: [],
+          warningsJson: [],
+        })),
+      });
+      return created;
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      const concurrent = await db.researchJob.findFirst({
+        where: {
+          userId,
+          stockId: stock.id,
+          status: {
+            in: [
+              ResearchStatus.PENDING,
+              ResearchStatus.RUNNING,
+              ResearchStatus.PARTIALLY_COMPLETED,
+            ],
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+      if (concurrent) {
+        return {
+          jobId: concurrent.id,
+          ticker: stock.ticker,
+          companyName: stock.companyName,
+          status: concurrent.status,
+          correlationId: concurrent.correlationId,
+          reused: true,
+        };
+      }
+    }
+    throw error;
+  }
 
   try {
-    const providerData = await seededResearchProvider.getResearchData(symbol);
-    if (!providerData)
-      throw new Error("Seeded research inputs are unavailable.");
-
-    const agents = [
-      runNewsAgent(providerData),
-      runFinancialsAgent(providerData),
-      runCompetitorsAgent(providerData),
-      runPoliticalActivityAgent(providerData),
-      runRiskAgent(providerData),
-    ];
-    const report = synthesizeResearch(stock.companyName, agents);
-    const synthesis: AgentResult = {
-      agentName: "SYNTHESIS",
-      status: "COMPLETED",
-      rating: "MIXED",
-      confidence: report.confidence,
-      summary: report.overview,
-      findings: [
-        ...report.bullCase.map((detail) => ({
-          label: "Supportive context",
-          detail,
-        })),
-        ...report.bearCase.map((detail) => ({ label: "Counterpoint", detail })),
-      ],
-      sources: agents.flatMap((agent) => agent.sources),
-      warnings: report.risks,
-    };
-    const completedAt = new Date();
-
-    await db.$transaction([
-      ...[...agents, synthesis].map((result) =>
-        db.agentRun.create({
-          data: {
+    await Promise.all(
+      SPECIALIST_AGENT_NAMES.map((agentName) =>
+        enqueueBackgroundJob(
+          {
+            type: BackgroundJobType.RESEARCH_AGENT_RUN,
+            idempotencyKey: `research:${job.id}:agent:${agentName}`,
+            correlationId,
+            payload: { researchJobId: job.id, agentName },
+            userId,
             researchJobId: job.id,
-            agentName: AgentName[result.agentName],
-            status: result.status,
-            rating: result.rating,
-            confidence: result.confidence,
-            summary: result.summary,
-            findingsJson: result.findings,
-            sourcesJson: result.sources,
-            warningsJson: result.warnings,
-            completedAt,
+            agentName,
           },
-        }),
+          {
+            publisher: dependencies.publisher,
+            environment,
+          },
+        ),
       ),
-      db.researchReport.create({
-        data: {
-          researchJobId: job.id,
-          stockId: stock.id,
-          overview: report.overview,
-          bullCaseJson: report.bullCase,
-          bearCaseJson: report.bearCase,
-          risksJson: report.risks,
-          missingDataJson: report.missingData,
-          confidence: report.confidence,
-          generatedAt: completedAt,
-          expiresAt: expiresAtFrom(completedAt),
-        },
-      }),
-      db.researchJob.update({
-        where: { id: job.id },
-        data: { status: "COMPLETED", completedAt },
-      }),
-    ]);
+    );
   } catch (error) {
     await db.researchJob.update({
       where: { id: job.id },
-      data: { status: "FAILED", completedAt: new Date() },
+      data: { status: ResearchStatus.PARTIALLY_COMPLETED },
     });
     throw error;
   }
 
-  return getLatestResearch(symbol);
+  return {
+    jobId: job.id,
+    ticker: stock.ticker,
+    companyName: stock.companyName,
+    status: job.status,
+    correlationId,
+    reused: false,
+  };
 }

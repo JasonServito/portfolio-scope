@@ -1,54 +1,46 @@
 import { NextResponse } from "next/server";
 
-import { demoReadOnlyMessage, isPublicDemoReadOnly } from "@/lib/demo";
-import { getDemoPortfolioAnalytics } from "@/lib/portfolio/analytics";
-import { isPerformancePeriod } from "@/lib/portfolio/performance";
-import { createHolding, ManagementError } from "@/lib/portfolio/management";
+import { apiErrorResponse } from "@/lib/api/errors";
+import { requireApiUser, requireMutableUser } from "@/lib/auth/authorization";
+import { enforcePortfolioMutationLimits } from "@/lib/rate-limit";
+import {
+  createHolding,
+  listHoldings,
+} from "@/lib/portfolio/management";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const requestedPeriod = searchParams.get("period") ?? "1M";
-  const period = isPerformancePeriod(requestedPeriod) ? requestedPeriod : "1M";
-  const analytics = await getDemoPortfolioAnalytics(period);
+  try {
+    const user = await requireApiUser();
+    const portfolioId = new URL(request.url).searchParams.get("portfolioId");
+    if (!portfolioId) {
+      return NextResponse.json(
+        { error: "portfolioId is required." },
+        { status: 400 },
+      );
+    }
 
-  if (!analytics) {
-    return NextResponse.json(
-      { error: "Demo holdings analytics are unavailable." },
-      { status: 404 },
-    );
+    const portfolio = await listHoldings(user.id, portfolioId);
+    if (!portfolio) {
+      return NextResponse.json(
+        { error: "Portfolio was not found." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json(portfolio);
+  } catch (error) {
+    return apiErrorResponse(error, "Holdings could not be loaded.");
   }
-
-  return NextResponse.json({
-    portfolio: analytics.portfolio,
-    period: analytics.period,
-    asOf: analytics.asOf,
-    holdings: analytics.holdings,
-  });
 }
 
 export async function POST(request: Request) {
-  if (isPublicDemoReadOnly()) {
-    return NextResponse.json(
-      { error: demoReadOnlyMessage },
-      { status: 403 },
-    );
-  }
-
   try {
-    const holding = await createHolding(await request.json());
+    const user = await requireApiUser();
+    await requireMutableUser(user.id);
+    await enforcePortfolioMutationLimits(request, user.id);
+    const holding = await createHolding(user.id, await request.json());
     return NextResponse.json({ id: holding.id }, { status: 201 });
   } catch (error) {
-    const known = error instanceof ManagementError;
-    const malformed = error instanceof SyntaxError;
-    return NextResponse.json(
-      {
-        error: known
-          ? error.message
-          : malformed
-            ? "Request body must be valid JSON."
-            : "The holding could not be created.",
-      },
-      { status: known ? error.status : malformed ? 400 : 500 },
-    );
+    return apiErrorResponse(error, "The holding could not be created.");
   }
 }

@@ -8,9 +8,17 @@ import {
   PriceInterval,
   PrismaClient,
   ResearchStatus,
+  UserRole,
 } from "@prisma/client";
+import { readFileSync } from "node:fs";
 
 const prisma = new PrismaClient();
+const supportedCompanies = JSON.parse(
+  readFileSync(
+    new URL("../data/supported-companies.json", import.meta.url),
+    "utf8",
+  ),
+);
 
 const anchorDate = new Date("2026-06-26T21:00:00.000Z");
 const demoUserEmail = process.env.DEMO_USER_EMAIL ?? "demo@portfolioscope.dev";
@@ -148,6 +156,8 @@ const holdings = [
   { ticker: "COST", shares: 8, averageCost: 702.5 },
 ];
 
+const requiredLegacyHoldingTickers = holdings.map(({ ticker }) => ticker);
+
 const watchlistItems = [
   {
     ticker: "AMD",
@@ -219,25 +229,84 @@ function createPriceRows(stockRecord, stockSeed) {
 async function seedStocks() {
   const records = new Map();
 
-  for (const stock of stocks) {
-    const record = await prisma.stock.upsert({
-      where: { ticker: stock.ticker },
+  for (const companySeed of supportedCompanies) {
+    const company = await prisma.company.upsert({
+      where: { slug: companySeed.slug },
       update: {
-        companyName: stock.companyName,
-        sector: stock.sector,
-        industry: stock.industry,
-        exchange: stock.exchange,
-        currency: "USD",
+        name: companySeed.companyName,
+        currency: companySeed.currency,
+        isActive: true,
+        isSupported: true,
       },
       create: {
-        ticker: stock.ticker,
-        companyName: stock.companyName,
-        sector: stock.sector,
-        industry: stock.industry,
-        exchange: stock.exchange,
-        currency: "USD",
+        slug: companySeed.slug,
+        name: companySeed.companyName,
+        currency: companySeed.currency,
+        isActive: true,
+        isSupported: true,
       },
     });
+
+    await prisma.secEntity.upsert({
+      where: { cik: companySeed.cik },
+      update: {
+        companyId: company.id,
+        legalName: companySeed.companyName,
+      },
+      create: {
+        companyId: company.id,
+        cik: companySeed.cik,
+        legalName: companySeed.companyName,
+      },
+    });
+
+    const stock = await prisma.stock.upsert({
+      where: { ticker: companySeed.ticker },
+      update: {
+        companyId: company.id,
+        companyName: companySeed.companyName,
+        sector: companySeed.sector,
+        industry: companySeed.industry,
+        exchange: companySeed.exchange,
+        currency: companySeed.currency,
+      },
+      create: {
+        companyId: company.id,
+        ticker: companySeed.ticker,
+        companyName: companySeed.companyName,
+        sector: companySeed.sector,
+        industry: companySeed.industry,
+        exchange: companySeed.exchange,
+        currency: companySeed.currency,
+      },
+    });
+
+    records.set(companySeed.ticker, stock);
+  }
+
+  for (const stock of stocks) {
+    const record =
+      records.get(stock.ticker) ??
+      (await prisma.stock.upsert({
+        where: { ticker: stock.ticker },
+        update: {
+          companyId: null,
+          companyName: stock.companyName,
+          sector: stock.sector,
+          industry: stock.industry,
+          exchange: stock.exchange,
+          currency: "USD",
+        },
+        create: {
+          companyId: null,
+          ticker: stock.ticker,
+          companyName: stock.companyName,
+          sector: stock.sector,
+          industry: stock.industry,
+          exchange: stock.exchange,
+          currency: "USD",
+        },
+      }));
 
     records.set(stock.ticker, record);
     await prisma.stockPrice.createMany({
@@ -250,14 +319,46 @@ async function seedStocks() {
 }
 
 async function seedPortfolio(user, stockRecords) {
-  const existingPortfolio = await prisma.portfolio.findFirst({
-    where: {
-      userId: user.id,
-      name: demoPortfolioName,
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  const [namedPortfolios, stableIdPortfolio] = await Promise.all([
+    prisma.portfolio.findMany({
+      where: {
+        userId: user.id,
+        name: demoPortfolioName,
+      },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    }),
+    prisma.portfolio.findUnique({
+      where: { id: demoIds.portfolio },
+      select: { id: true, userId: true },
+    }),
+  ]);
 
+  if (namedPortfolios.length > 1) {
+    throw new Error(
+      "Multiple recruiter demo portfolios exist for the demo owner. Resolve the ambiguity before seeding.",
+    );
+  }
+
+  if (stableIdPortfolio && stableIdPortfolio.userId !== user.id) {
+    throw new Error(
+      "The stable demo portfolio ID belongs to a non-demo user. Refusing to reassign it.",
+    );
+  }
+
+  const namedPortfolio = namedPortfolios[0];
+
+  if (
+    namedPortfolio &&
+    stableIdPortfolio &&
+    namedPortfolio.id !== stableIdPortfolio.id
+  ) {
+    throw new Error(
+      "The stable demo portfolio ID conflicts with the existing recruiter demo portfolio.",
+    );
+  }
+
+  const existingPortfolio = namedPortfolio ?? stableIdPortfolio;
   const portfolio = existingPortfolio
     ? await prisma.portfolio.update({
         where: { id: existingPortfolio.id },
@@ -349,10 +450,11 @@ async function seedSnapshots(portfolio, holdingRecords) {
     priceMap.set(key, Number(price.close));
   }
 
+  const canonicalTimestamps = [];
+
   for (let index = 0; index < 366; index += 1) {
     const timestamp = addDays(anchorDate, index - 365);
-    let totalValue = 0;
-    let totalCostBasis = 0;
+    canonicalTimestamps.push(timestamp);
 
     for (const holding of holdingRecords) {
       const price = priceMap.get(
@@ -362,9 +464,6 @@ async function seedSnapshots(portfolio, holdingRecords) {
       const gainLoss = round(marketValue - holding.costBasis);
       const gainLossPercent =
         holding.costBasis === 0 ? 0 : round(gainLoss / holding.costBasis, 6);
-
-      totalValue += marketValue;
-      totalCostBasis += holding.costBasis;
 
       await prisma.holdingSnapshot.upsert({
         where: {
@@ -389,9 +488,53 @@ async function seedSnapshots(portfolio, holdingRecords) {
         },
       });
     }
+  }
+
+  const [portfolioHoldings, existingPortfolioSnapshots] = await Promise.all([
+    prisma.holding.findMany({
+      where: { portfolioId: portfolio.id },
+      select: {
+        costBasis: true,
+        snapshots: {
+          select: { timestamp: true, marketValue: true },
+        },
+      },
+    }),
+    prisma.portfolioSnapshot.findMany({
+      where: { portfolioId: portfolio.id },
+      select: { timestamp: true },
+    }),
+  ]);
+
+  const totalCostBasis = portfolioHoldings.reduce(
+    (total, holding) => total + Number(holding.costBasis),
+    0,
+  );
+  const totalsByTimestamp = new Map(
+    [
+      ...canonicalTimestamps,
+      ...existingPortfolioSnapshots.map((item) => item.timestamp),
+    ].map((timestamp) => [timestamp.getTime(), 0]),
+  );
+
+  for (const holding of portfolioHoldings) {
+    for (const snapshot of holding.snapshots) {
+      const timestamp = snapshot.timestamp.getTime();
+      totalsByTimestamp.set(
+        timestamp,
+        (totalsByTimestamp.get(timestamp) ?? 0) + Number(snapshot.marketValue),
+      );
+    }
+  }
+
+  for (const [time, totalValue] of [...totalsByTimestamp].sort(
+    ([left], [right]) => left - right,
+  )) {
+    const timestamp = new Date(time);
 
     const totalGainLoss = round(totalValue - totalCostBasis);
-    const totalGainLossPercent = round(totalGainLoss / totalCostBasis, 6);
+    const totalGainLossPercent =
+      totalCostBasis === 0 ? 0 : round(totalGainLoss / totalCostBasis, 6);
 
     await prisma.portfolioSnapshot.upsert({
       where: {
@@ -449,23 +592,31 @@ async function seedAlerts(user, portfolio, stockRecords) {
   for (const alert of alerts) {
     const stockId = stockRecords.get(alert.stock).id;
     const alertId = demoIds.alert(alert.stock, alert.type);
-    const existingAlert = await prisma.alert.findFirst({
-      where: {
-        OR: [
-          { id: alertId },
-          {
-            userId: user.id,
-            portfolioId: portfolio.id,
-            stockId,
-            type: alert.type,
-            title: alert.title,
-          },
-        ],
-      },
-      orderBy: { createdAt: "asc" },
+    const idOwner = await prisma.alert.findUnique({
+      where: { id: alertId },
+      select: { id: true, userId: true },
     });
-    const data = {
-      userId: user.id,
+
+    if (idOwner && idOwner.userId !== user.id) {
+      throw new Error(
+        `The deterministic demo alert ID ${alertId} belongs to a non-demo user. Refusing to reassign it.`,
+      );
+    }
+
+    const existingAlert =
+      idOwner ??
+      (await prisma.alert.findFirst({
+        where: {
+          userId: user.id,
+          portfolioId: portfolio.id,
+          stockId,
+          type: alert.type,
+          title: alert.title,
+        },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      }));
+    const updateData = {
       portfolioId: portfolio.id,
       stockId,
       type: alert.type,
@@ -480,13 +631,14 @@ async function seedAlerts(user, portfolio, stockRecords) {
     if (existingAlert) {
       await prisma.alert.update({
         where: { id: existingAlert.id },
-        data,
+        data: updateData,
       });
     } else {
       await prisma.alert.create({
         data: {
           id: alertId,
-          ...data,
+          userId: user.id,
+          ...updateData,
         },
       });
     }
@@ -612,22 +764,30 @@ async function seedResearch(user, stockRecords) {
   for (const stock of stocks) {
     const stockRecord = stockRecords.get(stock.ticker);
     const researchJobId = demoIds.researchJob(stock.ticker);
-    const existingJob = await prisma.researchJob.findFirst({
-      where: {
-        OR: [
-          { id: researchJobId },
-          {
-            userId: user.id,
-            stockId: stockRecord.id,
-            createdAt: seededResearchCreatedAt,
-            completedAt: anchorDate,
-          },
-        ],
-      },
-      orderBy: { id: "asc" },
+    const idOwner = await prisma.researchJob.findUnique({
+      where: { id: researchJobId },
+      select: { id: true, userId: true },
     });
-    const jobData = {
-      userId: user.id,
+
+    if (idOwner && idOwner.userId !== user.id) {
+      throw new Error(
+        `The deterministic demo research ID ${researchJobId} belongs to a non-demo user. Refusing to reassign it.`,
+      );
+    }
+
+    const existingJob =
+      idOwner ??
+      (await prisma.researchJob.findFirst({
+        where: {
+          userId: user.id,
+          stockId: stockRecord.id,
+          createdAt: seededResearchCreatedAt,
+          completedAt: anchorDate,
+        },
+        orderBy: { id: "asc" },
+        select: { id: true },
+      }));
+    const jobUpdateData = {
       stockId: stockRecord.id,
       status: ResearchStatus.COMPLETED,
       requestedAgents: agentNames,
@@ -637,12 +797,13 @@ async function seedResearch(user, stockRecords) {
     const job = existingJob
       ? await prisma.researchJob.update({
           where: { id: existingJob.id },
-          data: jobData,
+          data: jobUpdateData,
         })
       : await prisma.researchJob.create({
           data: {
             id: researchJobId,
-            ...jobData,
+            userId: user.id,
+            ...jobUpdateData,
           },
         });
 
@@ -691,7 +852,9 @@ async function seedResearch(user, stockRecords) {
       bearCaseJson: [
         "The demo does not include live valuation, estimates, or event data.",
       ],
-      risksJson: ["Market, execution, and sector-specific risks remain relevant."],
+      risksJson: [
+        "Market, execution, and sector-specific risks remain relevant.",
+      ],
       missingDataJson: [
         "Political activity and live filings are not included in the seeded dataset.",
       ],
@@ -711,19 +874,130 @@ async function seedResearch(user, stockRecords) {
   }
 }
 
-async function main() {
-  const user = await prisma.user.upsert({
-    where: { email: demoUserEmail },
-    update: {
-      name: "Demo Investor",
+async function requireExpectedLegacyDemoPortfolio(userId, candidateLabel) {
+  const portfolios = await prisma.portfolio.findMany({
+    where: {
+      userId,
+      name: demoPortfolioName,
     },
-    create: {
-      id: demoIds.user,
-      name: "Demo Investor",
-      email: demoUserEmail,
-      createdAt: addDays(anchorDate, -365),
+    select: {
+      id: true,
+      holdings: {
+        select: {
+          stock: {
+            select: { ticker: true },
+          },
+        },
+      },
     },
   });
+
+  if (portfolios.length !== 1) {
+    throw new Error(
+      `${candidateLabel} does not own exactly one expected recruiter demo portfolio. Refusing ambiguous demo adoption.`,
+    );
+  }
+
+  const actualTickers = new Set(
+    portfolios[0].holdings.map(({ stock }) => stock.ticker),
+  );
+  const missingTickers = requiredLegacyHoldingTickers.filter(
+    (ticker) => !actualTickers.has(ticker),
+  );
+
+  if (missingTickers.length > 0) {
+    throw new Error(
+      `${candidateLabel} is missing expected recruiter demo holdings (${missingTickers.join(", ")}). Refusing demo adoption.`,
+    );
+  }
+
+  return portfolios[0];
+}
+
+async function resolveDemoUser() {
+  const [markedUsers, stableIdOwner, emailOwner] = await Promise.all([
+    prisma.user.findMany({
+      where: { isDemo: true },
+      orderBy: { id: "asc" },
+      take: 2,
+      select: { id: true, email: true, isDemo: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: demoIds.user },
+      select: { id: true, email: true, isDemo: true },
+    }),
+    prisma.user.findUnique({
+      where: { email: demoUserEmail },
+      select: { id: true, email: true, isDemo: true },
+    }),
+  ]);
+
+  if (markedUsers.length > 1) {
+    throw new Error(
+      "Multiple users are marked as demo owners. Resolve the ambiguity before seeding.",
+    );
+  }
+
+  let candidate = markedUsers[0] ?? null;
+
+  if (candidate) {
+    if (stableIdOwner && stableIdOwner.id !== candidate.id) {
+      throw new Error(
+        "The stable demo user ID belongs to a different user. Refusing to overwrite it.",
+      );
+    }
+
+    if (emailOwner && emailOwner.id !== candidate.id) {
+      throw new Error(
+        "DEMO_USER_EMAIL belongs to a non-demo user. Choose a dedicated demo address.",
+      );
+    }
+  } else if (stableIdOwner) {
+    if (emailOwner && emailOwner.id !== stableIdOwner.id) {
+      throw new Error(
+        "The stable demo user ID and DEMO_USER_EMAIL identify different users. Refusing ambiguous demo adoption.",
+      );
+    }
+
+    await requireExpectedLegacyDemoPortfolio(
+      stableIdOwner.id,
+      "The stable-ID user",
+    );
+    candidate = stableIdOwner;
+  } else if (emailOwner) {
+    await requireExpectedLegacyDemoPortfolio(
+      emailOwner.id,
+      "The configured-email user",
+    );
+    candidate = emailOwner;
+  }
+
+  if (!candidate) {
+    return prisma.user.create({
+      data: {
+        id: demoIds.user,
+        name: "Demo Investor",
+        email: demoUserEmail,
+        role: UserRole.USER,
+        isDemo: true,
+        createdAt: addDays(anchorDate, -365),
+      },
+    });
+  }
+
+  return prisma.user.update({
+    where: { id: candidate.id },
+    data: {
+      name: "Demo Investor",
+      email: demoUserEmail,
+      role: UserRole.USER,
+      isDemo: true,
+    },
+  });
+}
+
+async function main() {
+  const user = await resolveDemoUser();
 
   const stockRecords = await seedStocks();
   const { portfolio, holdingRecords } = await seedPortfolio(user, stockRecords);

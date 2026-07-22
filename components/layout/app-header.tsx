@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { Bell, Search } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -38,7 +38,11 @@ export function getSearchDestination(query: string) {
     : null;
 }
 
-export function AppHeader() {
+export function AppHeader({
+  sessionControls,
+}: {
+  sessionControls?: ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -104,17 +108,20 @@ export function AppHeader() {
           ) : null}
         </form>
 
-        <nav className="ml-auto hidden items-center gap-1 lg:flex">
-          <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/aapl">
-            AAPL
-          </Link>
-          <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/msft">
-            MSFT
-          </Link>
-          <Button aria-label="Open notifications" size="icon-sm" variant="outline">
-            <Bell className="size-4" />
-          </Button>
-        </nav>
+        <div className="ml-auto flex items-center gap-1">
+          <nav className="hidden items-center gap-1 lg:flex">
+            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/aapl">
+              AAPL
+            </Link>
+            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/msft">
+              MSFT
+            </Link>
+            <Button aria-label="Open notifications" size="icon-sm" variant="outline">
+              <Bell className="size-4" />
+            </Button>
+          </nav>
+          {sessionControls}
+        </div>
       </div>
 
       <nav className="flex gap-1 overflow-x-auto border-t px-3 py-2 lg:hidden">

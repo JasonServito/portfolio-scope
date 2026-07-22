@@ -2,7 +2,8 @@ import Link from "next/link";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
-import { StockPriceChart } from "@/components/stocks/stock-price-chart";
+import { SecFundamentals } from "@/components/stocks/sec-fundamentals";
+import { TradingViewWidget } from "@/components/stocks/tradingview-widget";
 import { ResearchTabs } from "@/components/research/research-tabs";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
@@ -17,6 +18,7 @@ import {
 import { getDemoStockDetail } from "@/lib/portfolio/stock-detail";
 import { PERFORMANCE_PERIODS } from "@/lib/portfolio/types";
 import { getLatestResearch } from "@/lib/research/orchestrator";
+import { secEdgarFundamentalsProvider } from "@/lib/sec/fundamentals-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +30,10 @@ type StockPageProps = {
 
 export default async function StockPage({ params }: StockPageProps) {
   const { ticker } = await params;
-  const [data, research] = await Promise.all([
+  const [data, research, fundamentals] = await Promise.all([
     getDemoStockDetail(ticker),
     getLatestResearch(ticker),
+    secEdgarFundamentalsProvider.getFundamentals(ticker),
   ]);
 
   if (!data) {
@@ -52,7 +55,7 @@ export default async function StockPage({ params }: StockPageProps) {
             Watchlist
           </Link>
         }
-        description={`${stock.companyName} stock context, seeded price history, position exposure, and deterministic risk signals.`}
+        description={`${stock.companyName} market context, SEC-derived fundamentals, demo position exposure, and deterministic risk signals.`}
         eyebrow="Stock detail"
         title={stock.ticker}
       >
@@ -71,10 +74,14 @@ export default async function StockPage({ params }: StockPageProps) {
           </div>
           <div className="md:text-right">
             <p className="text-3xl font-semibold tracking-normal">
-              {formatCurrency(data.latestPrice, stock.currency)}
+              {data.latestPrice !== null
+                ? formatCurrency(data.latestPrice, stock.currency)
+                : "Market widget below"}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Seeded as of {new Date(data.asOf).toLocaleDateString("en-US")}
+              {data.asOf
+                ? `Seeded portfolio fixture as of ${new Date(data.asOf).toLocaleDateString("en-US")}`
+                : "No PortfolioScope-owned price fixture for this ticker"}
             </p>
           </div>
         </section>
@@ -83,13 +90,17 @@ export default async function StockPage({ params }: StockPageProps) {
           {[
             [
               "Last price",
-              formatCurrency(data.latestPrice, stock.currency),
-              "Latest seeded close",
+              data.latestPrice !== null
+                ? formatCurrency(data.latestPrice, stock.currency)
+                : "Unavailable",
+              "Seeded fixture; TradingView is separate",
             ],
             [
               "1M move",
-              formatSignedPercent(data.periodReturns["1M"]),
-              "Price performance",
+              data.periodReturns["1M"] !== null
+                ? formatSignedPercent(data.periodReturns["1M"])
+                : "Unavailable",
+              "Seeded fixture performance",
             ],
             [
               "Portfolio weight",
@@ -124,12 +135,12 @@ export default async function StockPage({ params }: StockPageProps) {
         <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
           <Card>
             <CardHeader>
-              <CardTitle>Seeded price history</CardTitle>
+              <CardTitle>Public market chart</CardTitle>
             </CardHeader>
             <CardContent>
-              <StockPriceChart
-                currency={stock.currency}
-                data={data.priceChart}
+              <TradingViewWidget
+                exchange={stock.exchange}
+                ticker={stock.ticker}
               />
             </CardContent>
           </Card>
@@ -217,11 +228,20 @@ export default async function StockPage({ params }: StockPageProps) {
               </CardHeader>
               <CardContent>
                 <p className="text-xl font-semibold">
-                  {formatSignedPercent(data.periodReturns[period])}
+                  {data.periodReturns[period] !== null
+                    ? formatSignedPercent(data.periodReturns[period])
+                    : "Unavailable"}
                 </p>
               </CardContent>
             </Card>
           ))}
+        </section>
+
+        <section aria-labelledby="sec-fundamentals-heading">
+          <h2 className="sr-only" id="sec-fundamentals-heading">
+            SEC fundamentals and provenance
+          </h2>
+          <SecFundamentals data={fundamentals} />
         </section>
 
         <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
@@ -301,7 +321,11 @@ export default async function StockPage({ params }: StockPageProps) {
               missing data, and preserve their evidence alongside the synthesis.
             </p>
           </div>
-          <ResearchTabs initialResearch={research} ticker={stock.ticker} />
+          <ResearchTabs
+            initialResearch={research}
+            readOnly
+            ticker={stock.ticker}
+          />
         </section>
       </PageShell>
     </AppLayout>

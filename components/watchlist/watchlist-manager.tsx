@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowUpRight, Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/formatters";
@@ -26,7 +27,48 @@ async function responseError(response: Response, fallback: string) {
   }
 }
 
-export function WatchlistManager({ items }: { items: WatchlistRow[] }) {
+type WatchlistManagerProps = {
+  items: WatchlistRow[];
+  readOnly?: boolean;
+};
+
+export function WatchlistManager({
+  items,
+  readOnly = false,
+}: WatchlistManagerProps) {
+  return readOnly ? (
+    <ReadOnlyWatchlist items={items} />
+  ) : (
+    <EditableWatchlistManager items={items} />
+  );
+}
+
+function ReadOnlyWatchlist({ items }: { items: WatchlistRow[] }) {
+  return (
+    <div className="grid gap-6">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>Demo watchlist</CardTitle>
+            <Badge variant="outline">Read-only demo</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Explore the curated companies and open their research pages. Public
+            demo items cannot be added or removed.
+          </p>
+        </CardContent>
+      </Card>
+      <WatchlistItems
+        emptyMessage="No companies are available in the demo watchlist."
+        items={items}
+      />
+    </div>
+  );
+}
+
+function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
   const router = useRouter();
   const [form, setForm] = useState({ ticker: "", targetPrice: "", notes: "" });
   const [error, setError] = useState("");
@@ -136,57 +178,85 @@ export function WatchlistManager({ items }: { items: WatchlistRow[] }) {
           </form>
         </CardContent>
       </Card>
-      {items.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            Your watchlist is empty. Add a seeded ticker to start monitoring it.
+      <WatchlistItems
+        emptyMessage="Your watchlist is empty. Add a seeded ticker to start monitoring it."
+        items={items}
+        onRemove={remove}
+        removingId={removingId}
+      />
+    </div>
+  );
+}
+
+function WatchlistItems({
+  emptyMessage,
+  items,
+  onRemove,
+  removingId = null,
+}: {
+  emptyMessage: string;
+  items: WatchlistRow[];
+  onRemove?: (id: string, ticker: string) => void;
+  removingId?: string | null;
+}) {
+  if (items.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          {emptyMessage}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <section
+      aria-label="Watchlist companies"
+      className="grid gap-4 lg:grid-cols-2"
+    >
+      {items.map((item) => (
+        <Card key={item.id}>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle>
+                  <Link
+                    className="inline-flex items-center gap-2 hover:underline"
+                    href={`/stocks/${item.ticker.toLowerCase()}`}
+                  >
+                    {item.ticker}
+                    <ArrowUpRight aria-hidden="true" className="size-4" />
+                  </Link>
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {item.companyName}
+                </p>
+              </div>
+              {onRemove ? (
+                <Button
+                  aria-label={`Remove ${item.ticker}`}
+                  disabled={removingId !== null}
+                  onClick={() => onRemove(item.id, item.ticker)}
+                  size="icon-sm"
+                  variant="destructive"
+                >
+                  <Trash2 />
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-2 text-sm">
+            <p className="text-muted-foreground">{item.sector}</p>
+            {item.targetPrice !== null && (
+              <p>
+                <span className="text-muted-foreground">Target:</span>{" "}
+                {formatCurrency(item.targetPrice, "USD")}
+              </p>
+            )}
+            {item.notes && <p>{item.notes}</p>}
           </CardContent>
         </Card>
-      ) : (
-        <section className="grid gap-4 lg:grid-cols-2">
-          {items.map((item) => (
-            <Card key={item.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <CardTitle>
-                      <Link
-                        className="inline-flex items-center gap-2 hover:underline"
-                        href={`/stocks/${item.ticker.toLowerCase()}`}
-                      >
-                        {item.ticker}
-                        <ArrowUpRight className="size-4" />
-                      </Link>
-                    </CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {item.companyName}
-                    </p>
-                  </div>
-                  <Button
-                    aria-label={`Remove ${item.ticker}`}
-                    disabled={removingId !== null}
-                    onClick={() => remove(item.id, item.ticker)}
-                    size="icon-sm"
-                    variant="destructive"
-                  >
-                    <Trash2 />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="grid gap-2 text-sm">
-                <p className="text-muted-foreground">{item.sector}</p>
-                {item.targetPrice !== null && (
-                  <p>
-                    <span className="text-muted-foreground">Target:</span>{" "}
-                    {formatCurrency(item.targetPrice, "USD")}
-                  </p>
-                )}
-                {item.notes && <p>{item.notes}</p>}
-              </CardContent>
-            </Card>
-          ))}
-        </section>
-      )}
-    </div>
+      ))}
+    </section>
   );
 }

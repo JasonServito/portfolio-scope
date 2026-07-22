@@ -31,7 +31,15 @@ function Field({
   );
 }
 
-export function AddHoldingForm() {
+export function AddHoldingForm({ readOnly = false }: { readOnly?: boolean }) {
+  if (readOnly) {
+    return null;
+  }
+
+  return <EditableHoldingForm />;
+}
+
+function EditableHoldingForm() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<HoldingForm>({
@@ -125,6 +133,33 @@ export function AddHoldingForm() {
 }
 
 export function HoldingRowActions({
+  id,
+  shares,
+  averageCost,
+  ticker,
+  readOnly = false,
+}: {
+  id: string;
+  shares: number;
+  averageCost: number;
+  ticker: string;
+  readOnly?: boolean;
+}) {
+  if (readOnly) {
+    return null;
+  }
+
+  return (
+    <EditableHoldingRowActions
+      averageCost={averageCost}
+      id={id}
+      shares={shares}
+      ticker={ticker}
+    />
+  );
+}
+
+function EditableHoldingRowActions({
   id,
   shares,
   averageCost,

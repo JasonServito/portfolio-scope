@@ -4,6 +4,7 @@ import { HoldingsTable } from "@/components/holdings/holdings-table";
 import { AddHoldingForm } from "@/components/holdings/holding-actions";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   formatCurrency,
@@ -16,11 +17,12 @@ export const dynamic = "force-dynamic";
 
 export default async function HoldingsPage() {
   const data = await getDemoHoldingsPageData();
+  const readOnly = true;
 
   return (
     <AppLayout>
       <PageShell
-        description="A polished table shell for portfolio positions, allocation, cost basis, and period returns."
+        description="Explore public demo positions, allocation, cost basis, and period returns without changing the seeded portfolio."
         eyebrow="Portfolio"
         title="Holdings"
       >
@@ -86,13 +88,17 @@ export default async function HoldingsPage() {
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <CardTitle>Current positions</CardTitle>
-                  <AddHoldingForm />
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">Read-only demo</Badge>
+                    <AddHoldingForm readOnly={readOnly} />
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
                 <HoldingsTable
                   currency={data.portfolio.baseCurrency}
                   holdings={data.holdings}
+                  readOnly={readOnly}
                 />
               </CardContent>
             </Card>

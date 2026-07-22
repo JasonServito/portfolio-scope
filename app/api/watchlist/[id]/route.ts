@@ -1,35 +1,37 @@
 import { NextResponse } from "next/server";
 
-import { demoReadOnlyMessage, isPublicDemoReadOnly } from "@/lib/demo";
+import { apiErrorResponse } from "@/lib/api/errors";
+import { requireApiUser, requireMutableUser } from "@/lib/auth/authorization";
+import { enforcePortfolioMutationLimits } from "@/lib/rate-limit";
 import {
   deleteWatchlistItem,
-  ManagementError,
+  updateWatchlistItem,
 } from "@/lib/portfolio/management";
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  if (isPublicDemoReadOnly()) {
-    return NextResponse.json(
-      { error: demoReadOnlyMessage },
-      { status: 403 },
-    );
-  }
+type Context = { params: Promise<{ id: string }> };
 
+export async function PATCH(request: Request, { params }: Context) {
   try {
+    const user = await requireApiUser();
+    await requireMutableUser(user.id);
+    await enforcePortfolioMutationLimits(request, user.id);
     const { id } = await params;
-    await deleteWatchlistItem(id);
+    const item = await updateWatchlistItem(user.id, id, await request.json());
+    return NextResponse.json({ id: item.id });
+  } catch (error) {
+    return apiErrorResponse(error, "The watchlist item could not be updated.");
+  }
+}
+
+export async function DELETE(request: Request, { params }: Context) {
+  try {
+    const user = await requireApiUser();
+    await requireMutableUser(user.id);
+    await enforcePortfolioMutationLimits(request, user.id);
+    const { id } = await params;
+    await deleteWatchlistItem(user.id, id);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
-    const known = error instanceof ManagementError;
-    return NextResponse.json(
-      {
-        error: known
-          ? error.message
-          : "The watchlist item could not be deleted.",
-      },
-      { status: known ? error.status : 500 },
-    );
+    return apiErrorResponse(error, "The watchlist item could not be deleted.");
   }
 }

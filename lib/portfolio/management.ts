@@ -1,48 +1,99 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
-import { db } from "@/lib/db";
 import {
-  demoPortfolioName,
-  demoReadOnlyMessage,
-  isPublicDemoReadOnly,
-} from "@/lib/demo";
+  requireMutableUser,
+  requireOwnedHolding,
+  requireOwnedPortfolio,
+  requireOwnedWatchlistItem,
+} from "@/lib/auth/authorization";
+import { db } from "@/lib/db";
+import { queuePortfolioSnapshotRefresh } from "@/lib/portfolio/snapshot-jobs";
 
+async function queueSnapshotSafely(userId: string, portfolioId: string) {
+  try {
+    await queuePortfolioSnapshotRefresh(userId, portfolioId);
+  } catch {
+    // A mutation is already committed at this point. When publishing was
+    // attempted, the durable job records its failure for admin retry. A
+    // disabled local background system intentionally leaves no job.
+  }
+}
+
+const resourceIdSchema = z.string().trim().min(1).max(128);
 const tickerSchema = z
   .string()
   .trim()
   .toUpperCase()
   .regex(/^[A-Z][A-Z0-9.-]{0,9}$/, "Enter a valid ticker.");
+const currencySchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z]{3}$/, "Enter a three-letter currency code.");
 
-export const holdingInputSchema = z.object({
-  ticker: tickerSchema,
-  shares: z.coerce
-    .number()
-    .finite()
-    .positive("Shares must be greater than zero."),
-  averageCost: z.coerce
-    .number()
-    .finite()
-    .positive("Average cost must be greater than zero."),
-});
+export const portfolioInputSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1, "Portfolio name is required.")
+      .max(80, "Portfolio name must be 80 characters or fewer."),
+    baseCurrency: currencySchema.default("USD"),
+  })
+  .strict();
 
-export const watchlistInputSchema = z.object({
-  ticker: tickerSchema,
-  targetPrice: z
-    .union([
-      z.coerce
-        .number()
-        .finite()
-        .positive("Target price must be greater than zero."),
-      z.literal(""),
-    ])
-    .optional(),
-  notes: z
-    .string()
-    .trim()
-    .max(500, "Notes must be 500 characters or fewer.")
-    .optional(),
-});
+export const portfolioUpdateSchema = portfolioInputSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Provide a portfolio field to update.",
+  });
+
+export const holdingInputSchema = z
+  .object({
+    portfolioId: resourceIdSchema,
+    ticker: tickerSchema,
+    shares: z.coerce
+      .number()
+      .finite()
+      .positive("Shares must be greater than zero."),
+    averageCost: z.coerce
+      .number()
+      .finite()
+      .positive("Average cost must be greater than zero."),
+  })
+  .strict();
+
+export const holdingUpdateSchema = holdingInputSchema
+  .pick({ shares: true, averageCost: true })
+  .strict();
+
+export const watchlistInputSchema = z
+  .object({
+    ticker: tickerSchema,
+    targetPrice: z
+      .union([
+        z.coerce
+          .number()
+          .finite()
+          .positive("Target price must be greater than zero."),
+        z.literal(""),
+      ])
+      .optional(),
+    notes: z
+      .string()
+      .trim()
+      .max(500, "Notes must be 500 characters or fewer.")
+      .optional(),
+  })
+  .strict();
+
+export const watchlistUpdateSchema = watchlistInputSchema
+  .omit({ ticker: true })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Provide a watchlist field to update.",
+  });
 
 export class ManagementError extends Error {
   constructor(
@@ -57,35 +108,31 @@ function decimal(value: number) {
   return new Prisma.Decimal(value);
 }
 
-function requireWritableDemo() {
-  if (isPublicDemoReadOnly()) {
-    throw new ManagementError(demoReadOnlyMessage, 403);
+function parseInput<T>(
+  schema: z.ZodType<T>,
+  input: unknown,
+  fallback: string,
+): T {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) {
+    throw new ManagementError(parsed.error.issues[0]?.message ?? fallback, 400);
   }
-}
-
-async function getDemoPortfolio(tx: Prisma.TransactionClient) {
-  const portfolio = await tx.portfolio.findFirst({
-    where: { name: demoPortfolioName },
-    include: { user: true },
-  });
-  if (!portfolio)
-    throw new ManagementError("Demo portfolio is unavailable.", 404);
-  return portfolio;
+  return parsed.data;
 }
 
 async function rebuildPortfolioSnapshots(
   tx: Prisma.TransactionClient,
+  userId: string,
   portfolioId: string,
 ) {
-  const portfolio = await tx.portfolio.findUnique({
-    where: { id: portfolioId },
+  const portfolio = await tx.portfolio.findFirst({
+    where: { id: portfolioId, userId },
     include: {
       holdings: { include: { snapshots: true } },
       snapshots: { select: { timestamp: true } },
     },
   });
-  if (!portfolio)
-    throw new ManagementError("Demo portfolio is unavailable.", 404);
+  if (!portfolio) throw new ManagementError("Portfolio was not found.", 404);
 
   const timestamps = [
     ...new Set([
@@ -136,11 +183,12 @@ async function createHoldingSnapshots(
     where: { stockId },
     orderBy: { timestamp: "asc" },
   });
-  if (prices.length === 0)
+  if (prices.length === 0) {
     throw new ManagementError(
       "No seeded price history is available for that ticker.",
       422,
     );
+  }
   await tx.holdingSnapshot.createMany({
     data: prices.map((price) => {
       const marketValue = Number(price.close) * shares;
@@ -159,42 +207,115 @@ async function createHoldingSnapshots(
 
 async function findStock(tx: Prisma.TransactionClient, ticker: string) {
   const stock = await tx.stock.findUnique({ where: { ticker } });
-  if (!stock)
+  if (!stock) {
     throw new ManagementError(
       "Ticker is not available in the seeded stock catalog.",
       422,
     );
+  }
   return stock;
 }
 
-export async function createHolding(input: unknown) {
-  requireWritableDemo();
-  const parsed = holdingInputSchema.safeParse(input);
-  if (!parsed.success)
-    throw new ManagementError(
-      parsed.error.issues[0]?.message ?? "Invalid holding.",
-      400,
-    );
+export async function listPortfolios(userId: string) {
+  return db.portfolio.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      name: true,
+      baseCurrency: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: { select: { holdings: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+export async function getPortfolio(userId: string, portfolioId: string) {
+  return db.portfolio.findFirst({
+    where: { id: portfolioId, userId },
+    select: {
+      id: true,
+      name: true,
+      baseCurrency: true,
+      createdAt: true,
+      updatedAt: true,
+      holdings: {
+        select: {
+          id: true,
+          shares: true,
+          averageCost: true,
+          costBasis: true,
+          stock: {
+            select: { ticker: true, companyName: true, sector: true },
+          },
+        },
+        orderBy: { stock: { ticker: "asc" } },
+      },
+    },
+  });
+}
+
+export async function createPortfolio(userId: string, input: unknown) {
+  const data = parseInput(portfolioInputSchema, input, "Invalid portfolio.");
   return db.$transaction(async (tx) => {
-    const portfolio = await getDemoPortfolio(tx);
-    const stock = await findStock(tx, parsed.data.ticker);
+    await requireMutableUser(userId, tx);
+    return tx.portfolio.create({ data: { ...data, userId } });
+  });
+}
+
+export async function updatePortfolio(
+  userId: string,
+  portfolioId: string,
+  input: unknown,
+) {
+  const data = parseInput(
+    portfolioUpdateSchema,
+    input,
+    "Invalid portfolio update.",
+  );
+  return db.$transaction(async (tx) => {
+    await requireMutableUser(userId, tx);
+    await requireOwnedPortfolio(userId, portfolioId, tx);
+    return tx.portfolio.update({ where: { id: portfolioId }, data });
+  });
+}
+
+export async function deletePortfolio(userId: string, portfolioId: string) {
+  return db.$transaction(async (tx) => {
+    await requireMutableUser(userId, tx);
+    await requireOwnedPortfolio(userId, portfolioId, tx);
+    await tx.portfolio.delete({ where: { id: portfolioId } });
+  });
+}
+
+export async function createHolding(userId: string, input: unknown) {
+  const data = parseInput(holdingInputSchema, input, "Invalid holding.");
+  const holding = await db.$transaction(async (tx) => {
+    await requireMutableUser(userId, tx);
+    const portfolio = await requireOwnedPortfolio(userId, data.portfolioId, tx);
+    const stock = await findStock(tx, data.ticker);
     const duplicate = await tx.holding.findUnique({
       where: {
-        portfolioId_stockId: { portfolioId: portfolio.id, stockId: stock.id },
+        portfolioId_stockId: {
+          portfolioId: portfolio.id,
+          stockId: stock.id,
+        },
       },
     });
-    if (duplicate)
+    if (duplicate) {
       throw new ManagementError(
         "That ticker is already in the portfolio. Edit the existing holding instead.",
         409,
       );
-    const costBasis = parsed.data.shares * parsed.data.averageCost;
+    }
+    const costBasis = data.shares * data.averageCost;
     const holding = await tx.holding.create({
       data: {
         portfolioId: portfolio.id,
         stockId: stock.id,
-        shares: decimal(parsed.data.shares),
-        averageCost: decimal(parsed.data.averageCost),
+        shares: decimal(data.shares),
+        averageCost: decimal(data.averageCost),
         costBasis: decimal(costBasis),
       },
     });
@@ -202,122 +323,173 @@ export async function createHolding(input: unknown) {
       tx,
       holding.id,
       stock.id,
-      parsed.data.shares,
+      data.shares,
       costBasis,
     );
-    await rebuildPortfolioSnapshots(tx, portfolio.id);
+    await rebuildPortfolioSnapshots(tx, userId, portfolio.id);
     return holding;
   });
+  await queueSnapshotSafely(userId, holding.portfolioId);
+  return holding;
 }
 
-export async function updateHolding(id: string, input: unknown) {
-  requireWritableDemo();
-  const parsed = holdingInputSchema
-    .pick({ shares: true, averageCost: true })
-    .safeParse(input);
-  if (!parsed.success)
-    throw new ManagementError(
-      parsed.error.issues[0]?.message ?? "Invalid holding.",
-      400,
-    );
-  return db.$transaction(async (tx) => {
-    const portfolio = await getDemoPortfolio(tx);
-    const existing = await tx.holding.findFirst({
-      where: { id, portfolioId: portfolio.id },
-    });
-    if (!existing) throw new ManagementError("Holding was not found.", 404);
-    const costBasis = parsed.data.shares * parsed.data.averageCost;
+export async function listHoldings(userId: string, portfolioId: string) {
+  const portfolio = await db.portfolio.findFirst({
+    where: { id: portfolioId, userId },
+    select: {
+      id: true,
+      name: true,
+      baseCurrency: true,
+      holdings: {
+        select: {
+          id: true,
+          shares: true,
+          averageCost: true,
+          costBasis: true,
+          createdAt: true,
+          updatedAt: true,
+          stock: {
+            select: { ticker: true, companyName: true, sector: true },
+          },
+        },
+        orderBy: { stock: { ticker: "asc" } },
+      },
+    },
+  });
+
+  return portfolio;
+}
+
+export async function updateHolding(
+  userId: string,
+  holdingId: string,
+  input: unknown,
+) {
+  const data = parseInput(
+    holdingUpdateSchema,
+    input,
+    "Invalid holding update.",
+  );
+  const holding = await db.$transaction(async (tx) => {
+    await requireMutableUser(userId, tx);
+    const existing = await requireOwnedHolding(userId, holdingId, tx);
+    const costBasis = data.shares * data.averageCost;
     const holding = await tx.holding.update({
-      where: { id },
+      where: { id: holdingId },
       data: {
-        shares: decimal(parsed.data.shares),
-        averageCost: decimal(parsed.data.averageCost),
+        shares: decimal(data.shares),
+        averageCost: decimal(data.averageCost),
         costBasis: decimal(costBasis),
       },
     });
-    await tx.holdingSnapshot.deleteMany({ where: { holdingId: id } });
+    await tx.holdingSnapshot.deleteMany({ where: { holdingId } });
     await createHoldingSnapshots(
       tx,
-      id,
+      holdingId,
       existing.stockId,
-      parsed.data.shares,
+      data.shares,
       costBasis,
     );
-    await rebuildPortfolioSnapshots(tx, portfolio.id);
+    await rebuildPortfolioSnapshots(tx, userId, existing.portfolioId);
     return holding;
   });
+  await queueSnapshotSafely(userId, holding.portfolioId);
+  return holding;
 }
 
-export async function deleteHolding(id: string) {
-  requireWritableDemo();
-  return db.$transaction(async (tx) => {
-    const portfolio = await getDemoPortfolio(tx);
-    const existing = await tx.holding.findFirst({
-      where: { id, portfolioId: portfolio.id },
-    });
-    if (!existing) throw new ManagementError("Holding was not found.", 404);
-    await tx.holding.delete({ where: { id } });
-    await rebuildPortfolioSnapshots(tx, portfolio.id);
+export async function deleteHolding(userId: string, holdingId: string) {
+  const portfolioId = await db.$transaction(async (tx) => {
+    await requireMutableUser(userId, tx);
+    const existing = await requireOwnedHolding(userId, holdingId, tx);
+    await tx.holding.delete({ where: { id: holdingId } });
+    await rebuildPortfolioSnapshots(tx, userId, existing.portfolioId);
+    return existing.portfolioId;
   });
+  await queueSnapshotSafely(userId, portfolioId);
 }
 
 export async function getDemoWatchlist() {
-  const portfolio = await db.portfolio.findFirst({
-    where: { name: demoPortfolioName },
-  });
-  if (!portfolio) return null;
   return db.watchlistItem.findMany({
-    where: { userId: portfolio.userId },
+    where: { user: { isDemo: true } },
     include: { stock: true },
     orderBy: { stock: { ticker: "asc" } },
   });
 }
 
-export async function createWatchlistItem(input: unknown) {
-  requireWritableDemo();
-  const parsed = watchlistInputSchema.safeParse(input);
-  if (!parsed.success)
-    throw new ManagementError(
-      parsed.error.issues[0]?.message ?? "Invalid watchlist item.",
-      400,
-    );
+export async function getUserWatchlist(userId: string) {
+  return db.watchlistItem.findMany({
+    where: { userId },
+    include: { stock: true },
+    orderBy: { stock: { ticker: "asc" } },
+  });
+}
+
+export async function createWatchlistItem(userId: string, input: unknown) {
+  const data = parseInput(
+    watchlistInputSchema,
+    input,
+    "Invalid watchlist item.",
+  );
   return db.$transaction(async (tx) => {
-    const portfolio = await getDemoPortfolio(tx);
-    const stock = await findStock(tx, parsed.data.ticker);
+    await requireMutableUser(userId, tx);
+    const stock = await findStock(tx, data.ticker);
     const duplicate = await tx.watchlistItem.findUnique({
-      where: {
-        userId_stockId: { userId: portfolio.userId, stockId: stock.id },
-      },
+      where: { userId_stockId: { userId, stockId: stock.id } },
     });
-    if (duplicate)
+    if (duplicate) {
       throw new ManagementError(
         "That ticker is already on the watchlist.",
         409,
       );
+    }
     return tx.watchlistItem.create({
       data: {
-        userId: portfolio.userId,
+        userId,
         stockId: stock.id,
         targetPrice:
-          parsed.data.targetPrice === "" ||
-          parsed.data.targetPrice === undefined
+          data.targetPrice === "" || data.targetPrice === undefined
             ? null
-            : decimal(parsed.data.targetPrice),
-        notes: parsed.data.notes || null,
+            : decimal(data.targetPrice),
+        notes: data.notes || null,
       },
     });
   });
 }
 
-export async function deleteWatchlistItem(id: string) {
-  requireWritableDemo();
+export async function deleteWatchlistItem(userId: string, itemId: string) {
   return db.$transaction(async (tx) => {
-    const portfolio = await getDemoPortfolio(tx);
-    const existing = await tx.watchlistItem.findFirst({
-      where: { id, userId: portfolio.userId },
+    await requireMutableUser(userId, tx);
+    await requireOwnedWatchlistItem(userId, itemId, tx);
+    await tx.watchlistItem.delete({ where: { id: itemId } });
+  });
+}
+
+export async function updateWatchlistItem(
+  userId: string,
+  itemId: string,
+  input: unknown,
+) {
+  const data = parseInput(
+    watchlistUpdateSchema,
+    input,
+    "Invalid watchlist update.",
+  );
+
+  return db.$transaction(async (tx) => {
+    await requireMutableUser(userId, tx);
+    await requireOwnedWatchlistItem(userId, itemId, tx);
+
+    return tx.watchlistItem.update({
+      where: { id: itemId },
+      data: {
+        ...(data.targetPrice !== undefined
+          ? {
+              targetPrice:
+                data.targetPrice === "" ? null : decimal(data.targetPrice),
+            }
+          : {}),
+        ...(data.notes !== undefined ? { notes: data.notes || null } : {}),
+      },
     });
-    if (!existing)
-      throw new ManagementError("Watchlist item was not found.", 404);
-    await tx.watchlistItem.delete({ where: { id } });
   });
 }

@@ -123,8 +123,29 @@ function buildHoldingAnalytics(
 export async function getDemoPortfolioAnalytics(
   period: PerformancePeriod,
 ): Promise<PortfolioAnalytics | null> {
+  return getPortfolioAnalytics(
+    {
+      name: demoPortfolioName,
+      user: { isDemo: true },
+    },
+    period,
+  );
+}
+
+export async function getOwnedPortfolioAnalytics(
+  userId: string,
+  portfolioId: string,
+  period: PerformancePeriod,
+): Promise<PortfolioAnalytics | null> {
+  return getPortfolioAnalytics({ id: portfolioId, userId }, period);
+}
+
+async function getPortfolioAnalytics(
+  where: Prisma.PortfolioWhereInput,
+  period: PerformancePeriod,
+): Promise<PortfolioAnalytics | null> {
   const portfolio = await db.portfolio.findFirst({
-    where: { name: demoPortfolioName },
+    where,
     include: analyticsInclude,
   });
 

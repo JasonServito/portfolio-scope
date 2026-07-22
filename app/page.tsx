@@ -7,12 +7,27 @@ import {
   WalletCards,
 } from "lucide-react";
 
+import { SessionControls } from "@/components/auth/session-controls";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function Home() {
   return (
     <main className="min-h-screen bg-background">
+      <header className="border-b">
+        <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center gap-4 px-6 lg:px-8">
+          <Link className="flex items-center gap-2 text-sm font-semibold" href="/">
+            <span className="size-3 rounded-full bg-emerald-500" />
+            PortfolioScope
+          </Link>
+          <nav className="ml-auto flex items-center gap-2">
+            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/demo">
+              Demo
+            </Link>
+            <SessionControls />
+          </nav>
+        </div>
+      </header>
       <section className="mx-auto grid min-h-[88vh] w-full max-w-7xl items-center gap-10 px-6 py-12 lg:grid-cols-[1fr_0.9fr] lg:px-8">
         <div className="space-y-7">
           <div className="inline-flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
@@ -38,9 +53,9 @@ export default function Home() {
             </Link>
             <Link
               className={buttonVariants({ variant: "outline", size: "lg" })}
-              href="/dashboard"
+              href="/auth/signin"
             >
-              Open dashboard
+              Sign in to your workspace
             </Link>
           </div>
 

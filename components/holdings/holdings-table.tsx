@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -23,6 +24,7 @@ import { HoldingRowActions } from "@/components/holdings/holding-actions";
 type HoldingsTableProps = {
   holdings: HoldingsPageRow[];
   currency: string;
+  readOnly?: boolean;
 };
 
 function returnBadgeClass(value: number) {
@@ -37,7 +39,11 @@ function returnBadgeClass(value: number) {
   return "bg-muted text-muted-foreground";
 }
 
-export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
+export function HoldingsTable({
+  currency,
+  holdings,
+  readOnly = false,
+}: HoldingsTableProps) {
   if (holdings.length === 0) {
     return (
       <div className="rounded-lg border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
@@ -49,6 +55,11 @@ export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
   return (
     <div className="overflow-hidden rounded-lg border">
       <Table>
+        <TableCaption className="sr-only">
+          {readOnly
+            ? "Read-only public demo portfolio holdings."
+            : "Portfolio holdings with management controls."}
+        </TableCaption>
         <TableHeader>
           <TableRow className="bg-muted/50 hover:bg-muted/50">
             <TableHead className="min-w-28 px-4">Ticker</TableHead>
@@ -65,7 +76,9 @@ export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
             <TableHead className="min-w-36 text-right">
               Total gain/loss
             </TableHead>
-            <TableHead className="text-right">Manage</TableHead>
+            {!readOnly ? (
+              <TableHead className="text-right">Manage</TableHead>
+            ) : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -120,14 +133,16 @@ export function HoldingsTable({ currency, holdings }: HoldingsTableProps) {
                   {formatSignedPercent(holding.totalGainLossPercent)}
                 </p>
               </TableCell>
-              <TableCell className="text-right">
-                <HoldingRowActions
-                  averageCost={holding.averageCost}
-                  id={holding.id}
-                  shares={holding.shares}
-                  ticker={holding.ticker}
-                />
-              </TableCell>
+              {!readOnly ? (
+                <TableCell className="text-right">
+                  <HoldingRowActions
+                    averageCost={holding.averageCost}
+                    id={holding.id}
+                    shares={holding.shares}
+                    ticker={holding.ticker}
+                  />
+                </TableCell>
+              ) : null}
             </TableRow>
           ))}
         </TableBody>

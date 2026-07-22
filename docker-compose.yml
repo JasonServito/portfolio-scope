@@ -8,8 +8,34 @@ services:
     environment:
       DATABASE_URL: postgresql://portfolio_scope:portfolio_scope@postgres:5432/portfolio_scope?schema=public
       DIRECT_URL: postgresql://portfolio_scope:portfolio_scope@postgres:5432/portfolio_scope?schema=public
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
-      DEMO_USER_EMAIL: demo@portfolioscope.dev
+
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-demo@portfolioscope.dev}
+
+      AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in the ignored .env file}
+      LOCAL_DISPOSABLE_AUTH_ENABLED: ${LOCAL_DISPOSABLE_AUTH_ENABLED:-false}
+
+      SEC_USER_AGENT: ${SEC_USER_AGENT:?Set SEC_USER_AGENT in the ignored .env file}
+      SEC_CONTACT_EMAIL: ${SEC_CONTACT_EMAIL:?Set SEC_CONTACT_EMAIL in the ignored .env file}
+
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      SEC_LOCAL_MANUAL_INGESTION_ENABLED: ${SEC_LOCAL_MANUAL_INGESTION_ENABLED:-false}
+
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      QSTASH_TOKEN: ${QSTASH_TOKEN:-}
+      QSTASH_CURRENT_SIGNING_KEY: ${QSTASH_CURRENT_SIGNING_KEY:-}
+      QSTASH_NEXT_SIGNING_KEY: ${QSTASH_NEXT_SIGNING_KEY:-}
+
+      BACKGROUND_JOBS_ENABLED: ${BACKGROUND_JOBS_ENABLED:-false}
+      SEC_INGESTION_ENABLED: ${SEC_INGESTION_ENABLED:-false}
+      RESEARCH_GENERATION_ENABLED: ${RESEARCH_GENERATION_ENABLED:-false}
     ports:
       - "3000:3000"
 

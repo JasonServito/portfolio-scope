@@ -1,5 +1,4 @@
 import { db } from "@/lib/db";
-import { demoPortfolioName } from "@/lib/demo";
 import { calculatePercentChange } from "@/lib/portfolio/calculations";
 import { getDemoPortfolioAnalytics } from "@/lib/portfolio/analytics";
 import {
@@ -35,13 +34,7 @@ function calculateMaxDailyMove(prices: { close: { toNumber: () => number } }[]) 
 async function getWatchlistRiskInputs(): Promise<WatchlistRiskInput[]> {
   const items = await db.watchlistItem.findMany({
     where: {
-      user: {
-        portfolios: {
-          some: {
-            name: demoPortfolioName,
-          },
-        },
-      },
+      user: { isDemo: true },
     },
     include: {
       stock: {

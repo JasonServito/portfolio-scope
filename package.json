@@ -9,21 +9,27 @@
     "postinstall": "prisma generate",
     "lint": "eslint",
     "test": "vitest run --pool=threads",
-    "test:integration": "node scripts/verify-demo-seed.mjs",
+    "test:integration": "node scripts/verify-demo-seed.mjs && node scripts/verify-auth-persistence.mjs && vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "jobs:schedules": "node scripts/configure-qstash-schedules.mjs"
   },
   "dependencies": {
+    "@auth/prisma-adapter": "^2.11.2",
+    "@aws-sdk/client-s3": "^3.1087.0",
     "@base-ui/react": "^1.6.0",
     "@prisma/client": "^6.19.3",
     "@sentry/nextjs": "^10.42.0",
+    "@upstash/qstash": "^2.11.2",
+    "@upstash/redis": "^1.38.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.21.0",
     "next": "^15.5.19",
+    "next-auth": "^5.0.0-beta.31",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
@@ -44,6 +50,6 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.6"
   }
 }

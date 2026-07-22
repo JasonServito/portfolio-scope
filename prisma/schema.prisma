@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -34,8 +34,10 @@ enum AlertStatus {
 enum ResearchStatus {
   PENDING
   RUNNING
+  PARTIALLY_COMPLETED
   COMPLETED
   FAILED
+  CANCELLED
 }
 
 enum AgentName {
@@ -49,8 +51,42 @@ enum AgentName {
 
 enum AgentStatus {
   PENDING
+  RUNNING
   COMPLETED
   FAILED
+}
+
+enum BackgroundJobType {
+  SEC_SUBMISSIONS_SYNC
+  SEC_COMPANY_FACTS_SYNC
+  SEC_FILING_FETCH
+  SEC_FACT_NORMALIZATION
+  PORTFOLIO_SNAPSHOT_REFRESH
+  RESEARCH_AGENT_RUN
+  RESEARCH_SYNTHESIS
+  MAINTENANCE_CLEANUP
+}
+
+enum BackgroundJobStatus {
+  QUEUED
+  RUNNING
+  RETRYING
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum BackgroundJobAttemptStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum BackgroundJobControlAction {
+  RETRY
+  CANCEL
 }
 
 enum AgentRating {
@@ -60,29 +96,114 @@ enum AgentRating {
   MIXED
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SecRawSourceKind {
+  SUBMISSIONS
+  COMPANY_FACTS
+  FILING_DOCUMENT
+}
+
+enum SecIngestionStatus {
+  RUNNING
+  COMPLETED
+  PARTIALLY_COMPLETED
+  FAILED
+}
+
+enum SecFactPeriodType {
+  INSTANT
+  DURATION
+}
+
+enum SecFactPeriodKind {
+  INSTANT
+  QUARTERLY
+  YEAR_TO_DATE
+  ANNUAL
+}
+
+enum SecFactSelection {
+  SELECTED
+  SUPERSEDED
+  AMBIGUOUS
+}
+
 model User {
-  id             String          @id @default(cuid())
-  name           String
-  email          String          @unique
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  portfolios     Portfolio[]
-  watchlistItems WatchlistItem[]
-  alerts         Alert[]
-  researchJobs   ResearchJob[]
+  id                         String                      @id @default(cuid())
+  name                       String?
+  email                      String?                     @unique
+  emailVerified              DateTime?
+  image                      String?
+  role                       UserRole                    @default(USER)
+  /// A partial unique index created by the M13 migration permits one true marker.
+  isDemo                     Boolean                     @default(false)
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+  accounts                   Account[]
+  sessions                   Session[]
+  portfolios                 Portfolio[]
+  watchlistItems             WatchlistItem[]
+  alerts                     Alert[]
+  researchJobs               ResearchJob[]
+  secIngestionRuns           SecIngestionRun[]
+  backgroundJobs             BackgroundJob[]
+  backgroundJobControlEvents BackgroundJobControlEvent[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expires])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
 }
 
 model Portfolio {
-  id           String              @id @default(cuid())
-  userId       String
-  name         String
-  baseCurrency String              @default("USD")
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  holdings     Holding[]
-  snapshots    PortfolioSnapshot[]
-  alerts       Alert[]
+  id             String              @id @default(cuid())
+  userId         String
+  name           String
+  baseCurrency   String              @default("USD")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holdings       Holding[]
+  snapshots      PortfolioSnapshot[]
+  alerts         Alert[]
+  backgroundJobs BackgroundJob[]
 
   @@index([userId])
 }
@@ -113,7 +234,7 @@ model WatchlistItem {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stock       Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  stock       Stock    @relation(fields: [stockId], references: [id], onDelete: Restrict)
 
   @@unique([userId, stockId])
   @@index([stockId])
@@ -121,6 +242,7 @@ model WatchlistItem {
 
 model Stock {
   id             String           @id @default(cuid())
+  companyId      String?
   ticker         String           @unique
   companyName    String
   sector         String
@@ -129,12 +251,159 @@ model Stock {
   currency       String           @default("USD")
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+  company        Company?         @relation(fields: [companyId], references: [id], onDelete: SetNull)
   holdings       Holding[]
   watchlistItems WatchlistItem[]
   prices         StockPrice[]
   alerts         Alert[]
   researchJobs   ResearchJob[]
   reports        ResearchReport[]
+
+  @@index([companyId])
+}
+
+model Company {
+  id             String          @id @default(cuid())
+  slug           String          @unique
+  name           String
+  currency       String          @default("USD")
+  isActive       Boolean         @default(true)
+  isSupported    Boolean         @default(false)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  securities     Stock[]
+  secEntity      SecEntity?
+  backgroundJobs BackgroundJob[]
+}
+
+model SecEntity {
+  id                   String             @id @default(cuid())
+  companyId            String             @unique
+  cik                  String             @unique @db.VarChar(10)
+  legalName            String
+  sic                  String?
+  sicDescription       String?
+  fiscalYearEnd        String?
+  stateOfIncorporation String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  company              Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  filings              SecFiling[]
+  financialFacts       SecFinancialFact[]
+  rawSources           SecRawSource[]
+  ingestionRuns        SecIngestionRun[]
+}
+
+model SecFiling {
+  id                         String             @id @default(cuid())
+  secEntityId                String
+  accessionNumber            String             @unique
+  formType                   String
+  filingDate                 DateTime           @db.Date
+  reportDate                 DateTime?          @db.Date
+  acceptanceDateTime         DateTime?
+  primaryDocument            String?
+  primaryDocumentDescription String?
+  sourceUrl                  String
+  isAmendment                Boolean            @default(false)
+  amendsAccessionNumber      String?
+  createdAt                  DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
+  secEntity                  SecEntity          @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  financialFacts             SecFinancialFact[]
+
+  @@index([secEntityId, filingDate])
+  @@index([secEntityId, reportDate, formType])
+}
+
+model SecRawSource {
+  id               String             @id @default(cuid())
+  secEntityId      String
+  kind             SecRawSourceKind
+  sourceUrl        String
+  objectKey        String             @unique
+  sha256           String
+  contentType      String
+  byteLength       BigInt
+  firstRetrievedAt DateTime
+  lastRetrievedAt  DateTime
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  secEntity        SecEntity          @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  financialFacts   SecFinancialFact[]
+
+  @@unique([secEntityId, kind, sha256])
+  @@index([secEntityId, kind, lastRetrievedAt])
+}
+
+model SecFinancialFact {
+  id                   String            @id @default(cuid())
+  secEntityId          String
+  filingId             String?
+  rawSourceId          String
+  externalKey          String            @unique
+  canonicalMetric      String
+  taxonomy             String
+  concept              String
+  label                String
+  description          String?
+  originalValue        Decimal           @db.Decimal(38, 10)
+  originalUnit         String
+  normalizedValue      Decimal           @db.Decimal(38, 10)
+  normalizedUnit       String
+  periodStart          DateTime?         @db.Date
+  periodEnd            DateTime          @db.Date
+  periodType           SecFactPeriodType
+  periodKind           SecFactPeriodKind
+  fiscalYear           Int?
+  fiscalPeriod         String?
+  formType             String
+  filedAt              DateTime          @db.Date
+  accessionNumber      String
+  frame                String?
+  sourceUrl            String
+  observedAt           DateTime
+  normalizationVersion String
+  isDerived            Boolean           @default(false)
+  selection            SecFactSelection
+  ambiguityReason      String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  secEntity            SecEntity         @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  filing               SecFiling?        @relation(fields: [filingId], references: [id], onDelete: Restrict)
+  rawSource            SecRawSource      @relation(fields: [rawSourceId], references: [id], onDelete: Restrict)
+
+  @@index([secEntityId, canonicalMetric, selection, periodEnd])
+  @@index([secEntityId, periodKind, periodEnd])
+  @@index([accessionNumber])
+  @@index([filingId])
+  @@index([rawSourceId])
+}
+
+model SecIngestionRun {
+  id                String             @id @default(cuid())
+  secEntityId       String
+  requestedByUserId String?
+  status            SecIngestionStatus @default(RUNNING)
+  trigger           String
+  correlationId     String             @unique
+  filingsProcessed  Int                @default(0)
+  factsProcessed    Int                @default(0)
+  factsSelected     Int                @default(0)
+  ambiguousFacts    Int                @default(0)
+  errorCode         String?
+  errorMessage      String?
+  startedAt         DateTime           @default(now())
+  completedAt       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  secEntity         SecEntity          @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  requestedBy       User?              @relation(fields: [requestedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([secEntityId, startedAt])
+  @@index([requestedByUserId, startedAt])
+  @@index([status, startedAt])
 }
 
 model StockPrice {
@@ -210,13 +479,90 @@ model ResearchJob {
   requestedAgents AgentName[]
   createdAt       DateTime        @default(now())
   completedAt     DateTime?
+  correlationId   String?         @unique
+  startedAt       DateTime?
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stock           Stock           @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  stock           Stock           @relation(fields: [stockId], references: [id], onDelete: Restrict)
   agentRuns       AgentRun[]
   report          ResearchReport?
+  backgroundJobs  BackgroundJob[]
 
   @@index([userId, stockId])
+  @@index([userId, createdAt])
   @@index([status])
+}
+
+model BackgroundJob {
+  id                String                      @id @default(cuid())
+  type              BackgroundJobType
+  status            BackgroundJobStatus         @default(QUEUED)
+  userId            String?
+  companyId         String?
+  portfolioId       String?
+  researchJobId     String?
+  agentName         AgentName?
+  idempotencyKey    String                      @unique
+  correlationId     String
+  payloadJson       Json
+  resultJson        Json?
+  errorCode         String?
+  errorMessage      String?
+  attemptCount      Int                         @default(0)
+  maxAttempts       Int                         @default(3)
+  timeoutMs         Int
+  queuedAt          DateTime                    @default(now())
+  startedAt         DateTime?
+  heartbeatAt       DateTime?
+  completedAt       DateTime?
+  nextRetryAt       DateTime?
+  qstashMessageId   String?
+  cancelRequestedAt DateTime?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  user              User?                       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  company           Company?                    @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  portfolio         Portfolio?                  @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
+  researchJob       ResearchJob?                @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
+  attempts          BackgroundJobAttempt[]
+  controlEvents     BackgroundJobControlEvent[]
+
+  @@index([status, queuedAt])
+  @@index([type, status, queuedAt])
+  @@index([companyId, status])
+  @@index([portfolioId, status])
+  @@index([researchJobId, status])
+  @@index([userId, createdAt])
+  @@index([correlationId])
+}
+
+model BackgroundJobControlEvent {
+  id              String                     @id @default(cuid())
+  backgroundJobId String
+  actorUserId     String?
+  action          BackgroundJobControlAction
+  createdAt       DateTime                   @default(now())
+  backgroundJob   BackgroundJob              @relation(fields: [backgroundJobId], references: [id], onDelete: Cascade)
+  actor           User?                      @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([backgroundJobId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model BackgroundJobAttempt {
+  id              String                     @id @default(cuid())
+  backgroundJobId String
+  attemptNumber   Int
+  status          BackgroundJobAttemptStatus @default(RUNNING)
+  errorCode       String?
+  errorMessage    String?
+  startedAt       DateTime                   @default(now())
+  heartbeatAt     DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime                   @default(now())
+  backgroundJob   BackgroundJob              @relation(fields: [backgroundJobId], references: [id], onDelete: Cascade)
+
+  @@unique([backgroundJobId, attemptNumber])
+  @@index([status, startedAt])
 }
 
 model AgentRun {
@@ -251,7 +597,7 @@ model ResearchReport {
   generatedAt     DateTime    @default(now())
   expiresAt       DateTime
   researchJob     ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  stock           Stock       @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  stock           Stock       @relation(fields: [stockId], references: [id], onDelete: Restrict)
 
   @@index([stockId])
 }

@@ -1,131 +1,272 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { POST as createHolding } from "./holdings/route";
+const mocks = vi.hoisted(() => ({
+  alertFindFirst: vi.fn(),
+  alertUpdate: vi.fn(),
+  holdingDelete: vi.fn(),
+  holdingFindFirst: vi.fn(),
+  holdingUpdate: vi.fn(),
+  portfolioCreate: vi.fn(),
+  portfolioDelete: vi.fn(),
+  portfolioFindFirst: vi.fn(),
+  portfolioUpdate: vi.fn(),
+  researchJobCreate: vi.fn(),
+  requireApiUser: vi.fn(),
+  stockFindUnique: vi.fn(),
+  transaction: vi.fn(),
+  userFindUnique: vi.fn(),
+  watchlistItemCreate: vi.fn(),
+  watchlistItemDelete: vi.fn(),
+  watchlistItemFindFirst: vi.fn(),
+  watchlistItemUpdate: vi.fn(),
+}));
+
+const tx = {
+  alert: {
+    findFirst: mocks.alertFindFirst,
+    update: mocks.alertUpdate,
+  },
+  holding: {
+    delete: mocks.holdingDelete,
+    findFirst: mocks.holdingFindFirst,
+    update: mocks.holdingUpdate,
+  },
+  portfolio: {
+    create: mocks.portfolioCreate,
+    delete: mocks.portfolioDelete,
+    findFirst: mocks.portfolioFindFirst,
+    update: mocks.portfolioUpdate,
+  },
+  user: { findUnique: mocks.userFindUnique },
+  watchlistItem: {
+    create: mocks.watchlistItemCreate,
+    delete: mocks.watchlistItemDelete,
+    findFirst: mocks.watchlistItemFindFirst,
+    update: mocks.watchlistItemUpdate,
+  },
+};
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    $transaction: mocks.transaction,
+    researchJob: { create: mocks.researchJobCreate },
+    stock: { findUnique: mocks.stockFindUnique },
+    user: { findUnique: mocks.userFindUnique },
+  },
+}));
+
+vi.mock("@/lib/auth/authorization", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/lib/auth/authorization")>();
+  return { ...original, requireApiUser: mocks.requireApiUser };
+});
+
+import { PATCH as updateAlert } from "./alerts/[id]/route";
 import {
   DELETE as deleteHolding,
   PATCH as updateHolding,
 } from "./holdings/[id]/route";
+import { POST as createHolding } from "./holdings/route";
+import {
+  DELETE as deletePortfolio,
+  PATCH as updatePortfolio,
+} from "./portfolios/[id]/route";
+import { POST as createPortfolio } from "./portfolios/route";
 import { POST as runResearch } from "./research/[ticker]/route";
+import {
+  DELETE as deleteWatchlistItem,
+  PATCH as updateWatchlistItem,
+} from "./watchlist/[id]/route";
 import { POST as createWatchlistItem } from "./watchlist/route";
-import { DELETE as deleteWatchlistItem } from "./watchlist/[id]/route";
 
-import * as management from "@/lib/portfolio/management";
-import * as research from "@/lib/research/orchestrator";
+const demoActor = {
+  email: "demo@portfolioscope.local",
+  id: "demo-user",
+  image: null,
+  name: "Recruiter demo",
+  role: "USER" as const,
+};
 
-vi.mock("@/lib/portfolio/management", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("@/lib/portfolio/management")>();
+function jsonRequest(method: string, path: string, body: unknown) {
+  return new Request(`http://localhost${path}`, {
+    body: JSON.stringify(body),
+    method,
+  });
+}
 
-  return {
-    ...original,
-    createHolding: vi.fn(),
-    updateHolding: vi.fn(),
-    deleteHolding: vi.fn(),
-    createWatchlistItem: vi.fn(),
-    deleteWatchlistItem: vi.fn(),
-  };
-});
+function idContext(id: string) {
+  return { params: Promise.resolve({ id }) };
+}
 
-vi.mock("@/lib/research/orchestrator", () => ({
-  getLatestResearch: vi.fn(),
-  runResearch: vi.fn(),
-}));
-
-const holdingContext = { params: Promise.resolve({ id: "holding-1" }) };
-const watchlistContext = { params: Promise.resolve({ id: "watch-1" }) };
-const researchContext = { params: Promise.resolve({ ticker: "AAPL" }) };
-
-const dependencies = [
-  management.createHolding,
-  management.updateHolding,
-  management.deleteHolding,
-  management.createWatchlistItem,
-  management.deleteWatchlistItem,
-  research.runResearch,
+const demoMutations = [
+  {
+    invoke: () =>
+      updateWatchlistItem(
+        jsonRequest("PATCH", "/api/watchlist/watch-a", {
+          notes: "Blocked demo update",
+        }),
+        idContext("watch-a"),
+      ),
+    label: "update watchlist item",
+  },
+  {
+    invoke: () =>
+      createPortfolio(
+        jsonRequest("POST", "/api/portfolios", {
+          baseCurrency: "USD",
+          name: "Blocked portfolio",
+        }),
+      ),
+    label: "create portfolio",
+  },
+  {
+    invoke: () =>
+      updatePortfolio(
+        jsonRequest("PATCH", "/api/portfolios/portfolio-a", {
+          name: "Blocked rename",
+        }),
+        idContext("portfolio-a"),
+      ),
+    label: "update portfolio",
+  },
+  {
+    invoke: () =>
+      deletePortfolio(
+        new Request("http://localhost/api/portfolios/portfolio-a", {
+          method: "DELETE",
+        }),
+        idContext("portfolio-a"),
+      ),
+    label: "delete portfolio",
+  },
+  {
+    invoke: () =>
+      createHolding(
+        jsonRequest("POST", "/api/holdings", {
+          averageCost: 100,
+          portfolioId: "portfolio-a",
+          shares: 1,
+          ticker: "AAPL",
+        }),
+      ),
+    label: "create holding",
+  },
+  {
+    invoke: () =>
+      updateHolding(
+        jsonRequest("PATCH", "/api/holdings/holding-a", {
+          averageCost: 100,
+          shares: 1,
+        }),
+        idContext("holding-a"),
+      ),
+    label: "update holding",
+  },
+  {
+    invoke: () =>
+      deleteHolding(
+        new Request("http://localhost/api/holdings/holding-a", {
+          method: "DELETE",
+        }),
+        idContext("holding-a"),
+      ),
+    label: "delete holding",
+  },
+  {
+    invoke: () =>
+      createWatchlistItem(
+        jsonRequest("POST", "/api/watchlist", { ticker: "COST" }),
+      ),
+    label: "create watchlist item",
+  },
+  {
+    invoke: () =>
+      deleteWatchlistItem(
+        new Request("http://localhost/api/watchlist/watch-a", {
+          method: "DELETE",
+        }),
+        idContext("watch-a"),
+      ),
+    label: "delete watchlist item",
+  },
+  {
+    invoke: () =>
+      updateAlert(
+        jsonRequest("PATCH", "/api/alerts/alert-a", {
+          status: "RESOLVED",
+        }),
+        idContext("alert-a"),
+      ),
+    label: "update alert",
+  },
+  {
+    invoke: () =>
+      runResearch(
+        new Request("http://localhost/api/research/AAPL", {
+          method: "POST",
+        }),
+        { params: Promise.resolve({ ticker: "AAPL" }) },
+      ),
+    label: "run research",
+  },
 ];
 
-describe("public demo mutation protection", () => {
+const persistedWriteMocks = [
+  mocks.alertUpdate,
+  mocks.holdingDelete,
+  mocks.holdingUpdate,
+  mocks.portfolioCreate,
+  mocks.portfolioDelete,
+  mocks.portfolioUpdate,
+  mocks.researchJobCreate,
+  mocks.watchlistItemCreate,
+  mocks.watchlistItemDelete,
+  mocks.watchlistItemUpdate,
+];
+
+describe("persisted public demo mutation protection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("NODE_ENV", "production");
+    mocks.requireApiUser.mockResolvedValue(demoActor);
+    mocks.transaction.mockImplementation(async (callback) => callback(tx));
+    mocks.userFindUnique.mockResolvedValue({
+      id: demoActor.id,
+      isDemo: true,
+    });
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it.each([
-    [
-      "create holding",
-      () =>
-        createHolding(
-          new Request("http://localhost/api/holdings", {
-            method: "POST",
-            body: JSON.stringify({ ticker: "AAPL", shares: 1, averageCost: 1 }),
-          }),
-        ),
-    ],
-    [
-      "update holding",
-      () =>
-        updateHolding(
-          new Request("http://localhost/api/holdings/holding-1", {
-            method: "PATCH",
-            body: JSON.stringify({ shares: 1, averageCost: 1 }),
-          }),
-          holdingContext,
-        ),
-    ],
-    [
-      "delete holding",
-      () =>
-        deleteHolding(
-          new Request("http://localhost/api/holdings/holding-1", {
-            method: "DELETE",
-          }),
-          holdingContext,
-        ),
-    ],
-    [
-      "create watchlist item",
-      () =>
-        createWatchlistItem(
-          new Request("http://localhost/api/watchlist", {
-            method: "POST",
-            body: JSON.stringify({ ticker: "COST" }),
-          }),
-        ),
-    ],
-    [
-      "delete watchlist item",
-      () =>
-        deleteWatchlistItem(
-          new Request("http://localhost/api/watchlist/watch-1", {
-            method: "DELETE",
-          }),
-          watchlistContext,
-        ),
-    ],
-    [
-      "run research",
-      () =>
-        runResearch(
-          new Request("http://localhost/api/research/AAPL", {
-            method: "POST",
-          }),
-          researchContext,
-        ),
-    ],
-  ])("rejects %s in production", async (_label, request) => {
-    const response = await request();
+  it.each(
+    ["development", "test", "production"].flatMap((nodeEnv) =>
+      demoMutations.map((mutation) => ({ ...mutation, nodeEnv })),
+    ),
+  )(
+    "rejects $label for a marked demo actor in NODE_ENV=$nodeEnv",
+    async ({ invoke, nodeEnv }) => {
+      vi.stubEnv("NODE_ENV", nodeEnv);
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error: "The public demo is read-only.",
-    });
+      const response = await invoke();
 
-    for (const dependency of dependencies) {
-      expect(dependency).not.toHaveBeenCalled();
-    }
-  });
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: "The public demo is read-only.",
+      });
+      expect(mocks.requireApiUser).toHaveBeenCalledOnce();
+      expect(mocks.userFindUnique).toHaveBeenCalledWith({
+        where: { id: demoActor.id },
+        select: { id: true, isDemo: true },
+      });
+      expect(mocks.portfolioFindFirst).not.toHaveBeenCalled();
+      expect(mocks.holdingFindFirst).not.toHaveBeenCalled();
+      expect(mocks.watchlistItemFindFirst).not.toHaveBeenCalled();
+      expect(mocks.alertFindFirst).not.toHaveBeenCalled();
+      expect(mocks.stockFindUnique).not.toHaveBeenCalled();
+      for (const write of persistedWriteMocks) {
+        expect(write).not.toHaveBeenCalled();
+      }
+    },
+  );
 });
