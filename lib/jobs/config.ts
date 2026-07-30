@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  isFeatureEnabled,
+  type FeatureFlagName,
+} from "@/lib/operations/feature-flags";
+
 export const backgroundFeatureNames = [
   "BACKGROUND_JOBS_ENABLED",
   "SEC_INGESTION_ENABLED",
@@ -16,14 +21,7 @@ export function isBackgroundFeatureEnabled(
   name: BackgroundFeatureName,
   environment: NodeJS.ProcessEnv = process.env,
 ) {
-  const configured = booleanFlagSchema.safeParse(
-    environment[name]?.trim().toLowerCase(),
-  );
-  if (configured.success) return configured.data === "true";
-
-  // Preserve deterministic local/test workflows. Production requires an
-  // explicit opt-in so a missing deployment variable disables expensive work.
-  return environment.NODE_ENV !== "production";
+  return isFeatureEnabled(name as FeatureFlagName, environment);
 }
 
 export function getApplicationOrigin(

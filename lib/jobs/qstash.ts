@@ -23,6 +23,7 @@ export interface JobPublisher {
     timeout: number;
     deduplicationId: string;
     label: string[];
+    headers: { "x-correlation-id": string };
     redact: { body: true };
   }): Promise<{ messageId: string }>;
 }
@@ -79,6 +80,7 @@ export async function publishJobMessage(input: {
   type: string;
   maxAttempts: number;
   timeoutMs: number;
+  correlationId: string;
   deduplicationId?: string;
   publisher?: JobPublisher;
   environment?: NodeJS.ProcessEnv;
@@ -102,6 +104,7 @@ export async function publishJobMessage(input: {
     timeout: Math.max(1, Math.ceil(input.timeoutMs / 1000)),
     deduplicationId: input.deduplicationId ?? input.jobId,
     label: ["portfolioscope", input.type.toLowerCase()],
+    headers: { "x-correlation-id": input.correlationId },
     redact: { body: true },
   });
   if (!("messageId" in response) || typeof response.messageId !== "string") {

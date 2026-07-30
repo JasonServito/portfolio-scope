@@ -1,8 +1,8 @@
 # PortfolioScope Production Runbook
 
-This runbook covers the M11 deployment foundation through the M15 resilience layer: Vercel hosting, Neon PostgreSQL, environment separation, the deterministic demo, CI, health checks, initial monitoring, domain setup, Auth.js, GitHub and Google OAuth, database sessions, owner-scoped private resources, SEC/R2 activation, Redis, signed QStash jobs, recurring maintenance, account lifecycle, release verification, and rollback.
+This runbook covers the M11 deployment foundation through M16 production readiness: Vercel hosting, Neon PostgreSQL, environment separation, the deterministic demo, CI, health checks, monitoring, domain setup, Auth.js, GitHub and Google OAuth, database sessions, owner-scoped private resources, SEC/R2 activation, Redis, signed QStash jobs, recurring maintenance, structured diagnostics, privacy-safe analytics, security controls, logical backups, non-production recovery drills, release verification, and rollback.
 
-External AI, automated backups, restore drills, and later production controls remain outside this runbook.
+External AI and later product milestones remain outside this runbook. Account-side monitors, a real backup upload, a restore drill, and rollback must still be activated and evidenced by an operator; repository automation alone does not prove those external outcomes.
 
 ## Service inventory and cost
 
@@ -20,8 +20,10 @@ External AI, automated backups, restore drills, and later production controls re
 | TradingView | Attributed public market chart widget | Free public widget | $0 |
 | Upstash Redis | Ephemeral caches, locks, and rate limits | Free | $0 expected |
 | Upstash QStash | Signed background delivery and two bounded schedules | Free | $0 expected |
+| PostHog | Explicit privacy-safe product events | Free | $0 expected |
+| Playwright | Critical browser journeys in GitHub Actions | Open source | $0 |
 
-Expected M11–M15 monthly infrastructure total: approximately `$1–2 USD`, entirely from the annualized domain cost while R2 and Upstash remain inside their free allowances. Do not enable a paid tier or uncapped usage without updating this table and the project cost review.
+Expected M11–M16 monthly infrastructure total: approximately `$1–2 USD`, entirely from the annualized domain cost while R2, Upstash, Sentry, Better Stack, PostHog, and CI remain inside their reviewed free allowances. The backup retention policy is 7 daily, 4 weekly, and 3 monthly objects. Do not enable a paid tier or uncapped usage without updating this table and the project cost review.
 
 ## Environment matrix
 
@@ -38,6 +40,7 @@ Configure each environment independently. Never copy production database credent
 | `AUTH_GITHUB_SECRET` | Local GitHub secret | Staging GitHub secret | Production GitHub secret | Yes |
 | `AUTH_GOOGLE_ID` | Local Google OAuth client | Staging Google OAuth client | Production Google OAuth client | Treat as configuration |
 | `AUTH_GOOGLE_SECRET` | Local Google secret | Staging Google secret | Production Google secret | Yes |
+| `AUTH_GOOGLE_ENABLED` | Explicit local choice | `false` until callback proof | Explicit Production choice | No |
 | `DEMO_USER_EMAIL` | Dedicated demo identity | Dedicated non-production demo identity | Dedicated production demo identity | No |
 | `SEC_USER_AGENT` | `PortfolioScope/1.0` | Environment-identifying app name | Production-identifying app name | No |
 | `SEC_CONTACT_EMAIL` | Monitored developer contact | Monitored operator contact | Monitored production contact | Treat as contact configuration |
@@ -54,14 +57,29 @@ Configure each environment independently. Never copy production database credent
 | `QSTASH_NEXT_SIGNING_KEY` | Blank unless testing jobs | Non-production next key | Production next key | Yes |
 | `BACKGROUND_JOBS_ENABLED` | `false` until configured | `false` until callback proof | `false` until callback proof | No |
 | `SEC_INGESTION_ENABLED` | `false` until configured | Independent opt-in | Independent opt-in | No |
+| `PUBLIC_STOCK_PAGES_ENABLED` | Explicit local choice | Independent opt-in | Independent opt-in | No |
 | `RESEARCH_GENERATION_ENABLED` | `false` until configured | Independent opt-in | Independent opt-in | No |
+| `AI_RESEARCH_ENABLED` | `false` | `false` | `false` until M18 | No |
+| `PORTFOLIO_EXPORT_ENABLED` | `false` | `false` | `false` until implemented | No |
+| `MAINTENANCE_MODE` | `false` | `false` | Emergency kill switch | No |
 | `SENTRY_DSN` | Blank or development project | Preview project/DSN | Production project/DSN | Treat as server configuration |
 | `NEXT_PUBLIC_SENTRY_DSN` | Blank or development project | Preview project/DSN | Production project/DSN | No; DSNs are client-visible |
 | `SENTRY_ENVIRONMENT` | `local` | `preview` | `production` | No |
 | `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `local` | `preview` | `production` | No |
+| `SENTRY_RELEASE` / `NEXT_PUBLIC_SENTRY_RELEASE` | Blank or local revision | Same Preview commit SHA | Same Production commit SHA | No |
+| `SENTRY_TRACES_SAMPLE_RATE` / `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | `0` | Reviewed value from `0` to `1` | Reviewed value from `0` to `1` | No |
 | `SENTRY_ORG` | Blank unless uploading source maps | Sentry organization slug | Sentry organization slug | No |
 | `SENTRY_PROJECT` | Blank unless uploading source maps | Preview project slug | Production project slug | No |
 | `SENTRY_AUTH_TOKEN` | Blank | Build-only token | Build-only token | Yes |
+| `NEXT_PUBLIC_POSTHOG_KEY` | Blank or development project key | Preview project key | Production project key | No; client-visible |
+| `NEXT_PUBLIC_POSTHOG_HOST` | Blank or assigned regional host | Assigned regional host | Assigned regional host | No |
+| `BETTER_STACK_WORKER_HEARTBEAT_URL` | Blank | Preview heartbeat URL | Production heartbeat URL | Yes |
+| `BETTER_STACK_BACKUP_HEARTBEAT_URL` | Blank | Preview heartbeat URL | Production heartbeat URL | Yes |
+| `BETTER_STACK_BACKUP_FAILURE_HEARTBEAT_URL` | Blank | Preview failure URL | Production failure URL | Yes |
+| `LAST_RESTORE_DRILL_AT` | Blank | ISO-8601 completion time | Last approved non-production drill time | No |
+| `LAST_RESTORE_DRILL_REFERENCE` | Blank | Non-secret evidence reference | Non-secret evidence reference | No |
+| `LAST_COST_REVIEW_AT` | Blank | ISO-8601 review time | Latest monthly review time | No |
+| `LAST_COST_REVIEW_REFERENCE` | Blank | Non-secret evidence reference | Non-secret evidence reference | No |
 
 Rules:
 
@@ -84,6 +102,18 @@ Rules:
   financial facts, research reports, final job state, or audit events.
 - Keep all M15 flags `false` until the stable HTTPS origin and signed worker
   callback have been verified in that environment.
+- Every listed feature flag must be set explicitly in Production. An absent or
+  invalid Production flag fails closed. `MAINTENANCE_MODE` preserves health,
+  readiness, authentication, internal worker, and administrator access while
+  returning a controlled maintenance response for public/application traffic.
+- Better Stack heartbeat URLs are secrets because possessing one can falsify
+  monitor state. Server and backup tooling accept only HTTPS heartbeat URLs in
+  Production and never log them.
+- PostHog is disabled unless both public values are present. Autocapture,
+  session replay, automatic page views, and person profiles remain disabled;
+  only the runtime-validated event taxonomy may be sent.
+- Cost and restore evidence variables are administrator-facing operational
+  metadata. They must contain only timestamps and non-secret references.
 
 References: [Neon connection pooling](https://neon.com/docs/connect/connection-pooling), [Prisma configuration](https://docs.prisma.io/docs/orm/reference/prisma-config-reference), and [Vercel environment variables](https://vercel.com/docs/environment-variables/managing-environment-variables).
 
@@ -584,21 +614,30 @@ Expected response:
 - Missing configuration or unavailable database: HTTP `503`, status `not_ready`.
 - Production responses omit dependency-level details and never include connection strings, hosts, environment-variable names, stack traces, or provider credentials.
 - Both endpoints send `Cache-Control: no-store, max-age=0`.
+- Both endpoints return `x-request-id` and `x-correlation-id`; use either value
+  to connect an alert with structured runtime logs.
 
 Do not add SEC, TradingView, or other expensive external requests to readiness.
+Administrators can inspect coarse database, Redis, R2, QStash, Sentry, PostHog,
+heartbeat, backup, restore, feature-flag, job, and freshness status at `/admin`
+or `GET /api/admin/diagnostics`. These probes do not return connection strings,
+credentials, database hosts, user financial data, or raw provider responses.
 
 ## Sentry activation
 
 1. Create separate Preview and Production Sentry projects or distinguish them with the configured environment tags.
 2. Set the DSN and environment values from the matrix.
-3. Set `SENTRY_ORG`, `SENTRY_PROJECT`, and a build-only `SENTRY_AUTH_TOKEN` when source-map upload is enabled.
-4. Redeploy; environment changes do not affect already-built deployments.
-5. In a temporary Preview-only change, trigger one controlled client error using Sentry's documented verification pattern.
-6. Confirm the issue has the `preview` environment and a readable application stack.
-7. Remove the temporary trigger before merging.
-8. Repeat with a controlled server error in Preview if server capture also needs verification.
+3. Set `SENTRY_ORG`, `SENTRY_PROJECT`, and a build-only `SENTRY_AUTH_TOKEN` when source-map upload is enabled. Set the same commit SHA in `SENTRY_RELEASE` and `NEXT_PUBLIC_SENTRY_RELEASE`.
+4. Leave both trace sample rates at `0` initially. Increase them only after reviewing event volume and the free-tier budget.
+5. Redeploy; environment changes do not affect already-built deployments.
+6. In a temporary Preview-only change, trigger one controlled client error using Sentry's documented verification pattern.
+7. Confirm the issue has the `preview` environment, release, request/correlation tags where applicable, and a readable application stack.
+8. Remove the temporary trigger before merging.
+9. Repeat with a controlled server error and failed disposable job in Preview.
 
-The checked-in SDK configuration sends no default PII and enables neither tracing nor session replay. Follow the official [Sentry Next.js manual setup and verification guide](https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/) for the temporary test.
+The checked-in SDK configuration sends no default PII, strips cookies, request
+bodies, and sensitive headers, hashes application user IDs, and defaults tracing
+to zero. Follow the official [Sentry Next.js manual setup and verification guide](https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/) for the temporary test.
 
 ## Better Stack activation
 
@@ -608,8 +647,144 @@ Create HTTP monitors for:
 | --- | --- | --- |
 | Homepage | Canonical production origin | HTTP 200 |
 | Liveness | `/api/health` | HTTP 200 and `"status":"ok"` |
+| Readiness | `/api/ready` | HTTP 200 and `"status":"ready"` |
+| Authentication entry | `/auth/signin` | HTTP 200 and sign-in heading |
 
-Use a free-tier interval, enable SSL verification, configure an owned notification destination, and send a test notification. Add `/api/ready` as a separate dependency monitor only if database wake-up behavior does not create noisy alerts. Better Stack supports expected-status and keyword monitors; see its [monitor API reference](https://betterstack.com/docs/uptime/api/create-a-new-monitor/).
+Create separate worker, successful-backup, and failed-backup heartbeat monitors.
+Store their push URLs only in the secret stores described by the environment
+matrix and database-backup workflow. The bounded maintenance worker signals the
+worker heartbeat after successful cleanup; the backup script signals the
+success heartbeat only after upload and retention, and signals the failure
+heartbeat when the command exits unsuccessfully.
+
+Use a free-tier interval, enable SSL verification, configure an owned
+notification destination, and send a test notification. Treat readiness
+database wake-up alerts separately when they would be noisy. In Preview, pause
+one controlled monitor and omit one disposable heartbeat to prove outage,
+missed-heartbeat, recovery, and notification delivery before activating the
+Production monitors. Better Stack supports expected-status and keyword monitors;
+see its [monitor API reference](https://betterstack.com/docs/uptime/api/create-a-new-monitor/).
+
+## PostHog activation
+
+1. Create environment-separated PostHog projects or a reviewed environment
+   property policy, then configure the assigned regional ingestion host.
+2. Set both `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST`; leaving
+   either blank disables analytics.
+3. Verify only these events arrive: `demo_opened`, `sign_in_started`,
+   `sign_in_completed`, `portfolio_created`, `stock_page_viewed`,
+   `research_report_viewed`, and `architecture_page_viewed` when that page
+   exists.
+4. Inspect event payloads and browser storage in Preview. Confirm there are no
+   portfolio values, position quantities, transaction amounts, OAuth/session
+   data, research contents, email addresses, or arbitrary user properties.
+5. Keep autocapture, automatic page views, page leaves, replay, and person
+   profiles disabled. Update the runtime schemas and privacy notice before
+   adding any new event or property.
+
+## Logical database backup
+
+The scheduled `.github/workflows/database-backup.yml` workflow runs at 06:17
+UTC daily with a non-overlapping concurrency group. Protect its `production`
+GitHub environment and configure these environment secrets:
+
+```txt
+DIRECT_URL
+R2_ACCOUNT_ID
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_BUCKET_NAME
+R2_ENDPOINT, only when required
+BETTER_STACK_BACKUP_HEARTBEAT_URL
+BETTER_STACK_BACKUP_FAILURE_HEARTBEAT_URL
+```
+
+The token must be restricted to the private PortfolioScope R2 bucket. The script
+runs `pg_dump` against `DIRECT_URL`, creates a gzip-compressed plain SQL export,
+records a SHA-256 checksum in object metadata, and writes these prefixes:
+
+```txt
+backups/postgres/{environment}/daily/
+backups/postgres/{environment}/weekly/
+backups/postgres/{environment}/monthly/
+```
+
+It retains the newest 7 daily, 4 weekly, and 3 monthly objects. Sunday creates a
+weekly generation and the first UTC day of a month creates a monthly generation.
+Run a manual backup from a trusted operator host with PostgreSQL client tools
+installed:
+
+```bash
+npm ci
+npm run backup:postgres
+```
+
+Load the same variables as the workflow and set `BACKUP_ENVIRONMENT` explicitly.
+Never paste command output containing connection strings into tickets.
+
+## Non-production restore drill
+
+Create a clean, isolated database that does not share a host with either
+application database. The restore script intentionally refuses Production,
+non-empty databases, unapproved hosts, application-database hosts, and
+unrecognized R2 keys. It downloads into a guarded temporary directory and
+verifies the archive against its SHA-256 object metadata before sending SQL to
+PostgreSQL.
+
+```bash
+RESTORE_CONFIRMATION=RESTORE_NON_PRODUCTION \
+RESTORE_TARGET_ENVIRONMENT=restore-drill \
+RESTORE_ALLOWED_HOSTS=exact-restore-host.example \
+RESTORE_DATABASE_URL=postgresql://... \
+BACKUP_OBJECT_KEY=backups/postgres/production/daily/...sql.gz \
+npm run restore:postgres
+```
+
+Also load the server-only `R2_*` values. Then:
+
+1. Run `npx prisma validate` and `npm run db:deploy` against the restored target.
+2. Start the application with the restored target as both local runtime and
+   migration URLs.
+3. Run the Playwright smoke tests.
+4. Verify one disposable OAuth/database session, the read-only demo, latest job
+   states, SEC facts, and persisted research reports.
+5. Remove the isolated drill database through its provider controls.
+6. Record the timestamp and non-secret evidence reference as
+   `LAST_RESTORE_DRILL_AT` and `LAST_RESTORE_DRILL_REFERENCE`, then redeploy so
+   administrators can see the latest evidence.
+
+Do not set these evidence variables until every validation step succeeds. A
+repository test proves the command guards and retention policy; it does not
+replace the real restore drill.
+
+## Security and pull-request automation
+
+GitHub Actions runs database-backed checks and Playwright critical journeys.
+Dependabot proposes bounded dependency and Actions updates. CodeQL scans
+JavaScript/TypeScript, and Gitleaks scans repository history for committed
+secrets. In repository settings:
+
+1. Protect `main`.
+2. Require pull requests and the CI, CodeQL, and Gitleaks status checks.
+3. Require branches to be current before merge.
+4. Prevent force pushes and deletion.
+5. Enable GitHub secret scanning and push protection where the repository plan
+   supports them.
+6. Review high/critical dependency findings before release; do not use a forced
+   semver-major audit fix without a compatibility review.
+
+## Release record
+
+For every Production release record the commit SHA, operator, migrations,
+feature-flag changes, backup evidence, Preview checks, deployment URL, smoke
+test time, Sentry release, monitor state, and rollback target. Incident notes
+must include the first observed time, user impact, request/correlation IDs,
+mitigation, data-integrity assessment, recovery evidence, and follow-up owner.
+
+At least monthly, open every provider link in the administrator cost panel,
+compare current usage with the service free allowance and the `<$30 USD` hard
+budget, and record the review timestamp/reference. Do not add billing API
+credentials merely to automate this low-frequency review.
 
 ## Verification checklists
 
@@ -637,6 +812,14 @@ Use a free-tier interval, enable SSL verification, configure an owned notificati
 - [ ] Redis limits return controlled `429` responses, recover after their window, and do not leak identifiers in keys.
 - [ ] Admin job details, retry/cancel authorization, correlation IDs, and ticker freshness render correctly.
 - [ ] Both named schedules exist once with the reviewed HTTPS destination and UTC cadence.
+- [ ] Playwright public and authenticated journeys pass against the isolated Preview database.
+- [ ] CSP, HSTS, frame, referrer, permissions, and content-type headers match policy; TradingView remains usable.
+- [ ] Preview Sentry client/server/job errors carry the reviewed release and correlation context without private payloads.
+- [ ] PostHog receives only schema-approved events and no private financial or identity values.
+- [ ] Better Stack controlled outage, missed heartbeat, and recovery notifications were received.
+- [ ] A logical backup exists under each generation that is due, with checksum metadata.
+- [ ] A clean non-production restore drill completed and its evidence was recorded.
+- [ ] An administrator can view dependency status, flags, backup/restore evidence, job failures, and freshness without secrets.
 
 ### Production
 
@@ -662,6 +845,14 @@ Use a free-tier interval, enable SSL verification, configure an owned notificati
 - [ ] A duplicate active SEC/research request reuses existing work and a completed QStash replay is a no-op.
 - [ ] Upstash usage remains inside the reviewed free allowances.
 - [ ] The previous Vercel production deployment is identifiable for rollback.
+- [ ] Production CSP/security headers are active and the TradingView widget still renders.
+- [ ] Sentry release/source-map mapping and privacy scrubbing are verified.
+- [ ] PostHog event volume and properties match the approved taxonomy.
+- [ ] Worker, backup-success, and backup-failure heartbeats are visible.
+- [ ] The latest scheduled R2 backup is visible in admin diagnostics and retention remains within policy.
+- [ ] The last successful non-production restore drill is visible in admin diagnostics.
+- [ ] Dependabot, CI, CodeQL, Gitleaks, branch protection, and required checks are active.
+- [ ] Neon, R2, Redis, QStash, Vercel, Sentry, PostHog, and CI usage remains inside the monthly budget.
 
 ## Rollback and forward fix
 
@@ -728,4 +919,11 @@ Complete this table during the real deployment. Do not mark an item complete wit
 | Custom domain and HTTPS active | Not verified | Canonical URL and certificate check |
 | Sentry controlled error received | Not verified | Sentry event ID |
 | Better Stack monitor active | Not verified | Monitor ID and test notification |
+| Better Stack worker heartbeat active | Not verified | Heartbeat ID, success, missed signal, and recovery timestamps |
+| Better Stack backup heartbeats active | Not verified | Success/failure heartbeat IDs and notification evidence |
+| PostHog privacy review complete | Not verified | Event/property export reviewed in Preview |
+| First automated R2 backup complete | Not verified | Object key prefix, timestamp, size, and checksum metadata |
+| Non-production restore drill complete | Not verified | Timestamp and non-secret evidence reference |
+| Security headers and TradingView CSP verified | Not verified | Header capture and widget smoke-test timestamp |
+| Security automation and branch protection active | Not verified | Required-check names and repository settings review |
 | Previous Vercel deployment restored/tested | Not verified | Rollback drill date and deployment ID |

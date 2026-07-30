@@ -29,7 +29,10 @@ export default async function ProtectedAppLayout({
             <Link className="hover:text-foreground" href="/app/research">
               Research
             </Link>
-            <Link className="text-sm text-muted-foreground hover:text-foreground" href="/demo">
+            <Link
+              className="text-sm text-muted-foreground hover:text-foreground"
+              href="/dashboard?demo=true"
+            >
               Read-only demo
             </Link>
           </nav>

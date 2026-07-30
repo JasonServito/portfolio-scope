@@ -28,7 +28,9 @@ describe("operational API routes", () => {
   });
 
   it("reports liveness without checking dependencies", async () => {
-    const response = getHealth();
+    const response = await getHealth(
+      new Request("http://localhost/api/health"),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -44,7 +46,9 @@ describe("operational API routes", () => {
   it("reports readiness after the database probe succeeds", async () => {
     mockedQueryRaw.mockResolvedValueOnce([{ "?column?": 1 }]);
 
-    const response = await getReadiness();
+    const response = await getReadiness(
+      new Request("http://localhost/api/ready"),
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -61,7 +65,9 @@ describe("operational API routes", () => {
   it("fails safely when required runtime configuration is missing", async () => {
     vi.stubEnv("DATABASE_URL", "");
 
-    const response = await getReadiness();
+    const response = await getReadiness(
+      new Request("http://localhost/api/ready"),
+    );
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
@@ -83,7 +89,9 @@ describe("operational API routes", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
 
-    const response = await getReadiness();
+    const response = await getReadiness(
+      new Request("http://localhost/api/ready"),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(503);
@@ -93,9 +101,12 @@ describe("operational API routes", () => {
     });
     expect(body).not.toHaveProperty("checks");
     expect(JSON.stringify(body)).not.toContain("database.internal");
-    expect(consoleError).toHaveBeenCalledWith(
-      "Readiness database dependency is unavailable.",
-    );
+    expect(consoleError).toHaveBeenCalled();
+    const logOutput = consoleError.mock.calls
+      .map((call) => String(call[0]))
+      .join("\n");
+    expect(logOutput).toContain("readiness.database.unavailable");
+    expect(logOutput).not.toContain("database.internal");
 
     consoleError.mockRestore();
   });

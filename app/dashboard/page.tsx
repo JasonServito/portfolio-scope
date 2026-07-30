@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 
+import { AnalyticsEvent } from "@/components/analytics/analytics-event";
 import { AlertsPreview } from "@/components/dashboard/alerts-preview";
 import { AllocationChart } from "@/components/dashboard/allocation-chart";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
@@ -42,6 +43,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   return (
     <AppLayout>
+      <AnalyticsEvent
+        name="demo_opened"
+        oncePerSession
+        properties={{ entryPoint: "direct" }}
+      />
       <PageShell
         actions={
           <Link className={buttonVariants({ variant: "outline" })} href="/holdings">

@@ -20,6 +20,7 @@ describe("QStash transport", () => {
         type: "RESEARCH_AGENT_RUN",
         maxAttempts: 3,
         timeoutMs: 30_000,
+        correlationId: "correlation-a",
         publisher,
         environment: {
           NODE_ENV: "test",
@@ -34,6 +35,7 @@ describe("QStash transport", () => {
         retries: 2,
         timeout: 30,
         deduplicationId: "job-a",
+        headers: { "x-correlation-id": "correlation-a" },
         redact: { body: true },
       }),
     );

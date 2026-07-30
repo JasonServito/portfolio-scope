@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import { BackgroundJobType } from "@prisma/client";
 import { z } from "zod";
 
@@ -7,6 +5,7 @@ import { apiErrorResponse } from "@/lib/api/errors";
 import { JobRequestError } from "@/lib/jobs/errors";
 import { verifyQstashSignature } from "@/lib/jobs/qstash";
 import { enqueueBackgroundJob } from "@/lib/jobs/service";
+import { observeApiRequest } from "@/lib/observability/request";
 import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +27,18 @@ function scheduleBucket(operation: z.infer<typeof scheduleSchema>["operation"]) 
 }
 
 export async function POST(request: Request) {
+  return observeApiRequest(
+    request,
+    "/api/internal/schedules/maintenance",
+    async (context) =>
+      handleScheduleRequest(request, context.correlationId),
+  );
+}
+
+async function handleScheduleRequest(
+  request: Request,
+  correlationId: string,
+) {
   try {
     const rawBody = await verifyQstashSignature(request);
     await enforceRateLimit({
@@ -38,7 +49,7 @@ export async function POST(request: Request) {
     const result = await enqueueBackgroundJob({
       type: BackgroundJobType.MAINTENANCE_CLEANUP,
       idempotencyKey: `maintenance:${input.operation}:${scheduleBucket(input.operation)}`,
-      correlationId: randomUUID(),
+      correlationId,
       payload: input,
     });
     return Response.json(result, { status: result.reused ? 200 : 202 });

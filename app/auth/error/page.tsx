@@ -32,7 +32,10 @@ export default async function AuthErrorPage({ searchParams }: AuthErrorPageProps
             <Link className={buttonVariants()} href="/auth/signin">
               Try sign-in again
             </Link>
-            <Link className={buttonVariants({ variant: "outline" })} href="/demo">
+            <Link
+              className={buttonVariants({ variant: "outline" })}
+              href="/dashboard?demo=true"
+            >
               Open read-only demo
             </Link>
           </div>

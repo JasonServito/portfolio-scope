@@ -1,0 +1,47 @@
+name: Production database backup
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portfolioscope-production-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+
+      - name: Create compressed logical backup
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          BACKUP_ENVIRONMENT: production
+          BETTER_STACK_BACKUP_HEARTBEAT_URL: ${{ secrets.BETTER_STACK_BACKUP_HEARTBEAT_URL }}
+          BETTER_STACK_BACKUP_FAILURE_HEARTBEAT_URL: ${{ secrets.BETTER_STACK_BACKUP_FAILURE_HEARTBEAT_URL }}
+        run: npm run backup:postgres

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiErrorResponse } from "@/lib/api/errors";
 import { requireApiAdmin, requireMutableUser } from "@/lib/auth/authorization";
 import { isLocalManualSecIngestionEnabled } from "@/lib/jobs/config";
+import { observeApiRequest } from "@/lib/observability/request";
 import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 import {
   SecIngestionError,
@@ -49,6 +50,18 @@ function isCrossSiteRequest(request: Request) {
 }
 
 export async function POST(request: Request) {
+  return observeApiRequest(
+    request,
+    "/api/admin/sec/ingest",
+    async (context) =>
+      handleIngestionRequest(request, context.correlationId),
+  );
+}
+
+async function handleIngestionRequest(
+  request: Request,
+  correlationId: string,
+) {
   try {
     const admin = await requireApiAdmin();
     await requireMutableUser(admin.id);
@@ -76,12 +89,14 @@ export async function POST(request: Request) {
       const result = await ingestSupportedCompany(input.ticker, {
         trigger: "LOCAL",
         requestedByUserId: admin.id,
+        correlationId,
       });
       return Response.json(result, { status: 200 });
     }
 
     const result = await queueSecIngestion(input.ticker, {
       requestedByUserId: admin.id,
+      correlationId,
     });
 
     return Response.json(result, { status: result.reused ? 200 : 202 });

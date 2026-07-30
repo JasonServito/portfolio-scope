@@ -13,6 +13,7 @@ vi.mock("@aws-sdk/client-s3", () => {
     },
     PutObjectCommand: Command,
     GetObjectCommand: Command,
+    ListObjectsV2Command: Command,
   };
 });
 
@@ -106,6 +107,49 @@ describe("SEC object storage", () => {
         Bucket: "private-sec-raw",
         Key: "sec/0000320193/submissions/abc123.json",
         ContentType: "application/json",
+      },
+    });
+  });
+
+  it("lists only a validated private prefix in newest-first order", async () => {
+    const storage = new R2ObjectStorage({
+      R2_ACCOUNT_ID: "account",
+      R2_ACCESS_KEY_ID: "key",
+      R2_SECRET_ACCESS_KEY: "secret",
+      R2_BUCKET_NAME: "private-sec-raw",
+    });
+    sdkMocks.send.mockResolvedValueOnce({
+      Contents: [
+        {
+          Key: "backups/postgres/test/daily/older.sql.gz",
+          LastModified: new Date("2026-07-01T00:00:00Z"),
+          Size: 10,
+        },
+        {
+          Key: "backups/postgres/test/daily/newer.sql.gz",
+          LastModified: new Date("2026-07-02T00:00:00Z"),
+          Size: 20,
+        },
+      ],
+    });
+
+    await expect(storage.list("backups/postgres/test", 5)).resolves.toEqual([
+      {
+        key: "backups/postgres/test/daily/newer.sql.gz",
+        lastModified: new Date("2026-07-02T00:00:00Z"),
+        byteLength: 20,
+      },
+      {
+        key: "backups/postgres/test/daily/older.sql.gz",
+        lastModified: new Date("2026-07-01T00:00:00Z"),
+        byteLength: 10,
+      },
+    ]);
+    expect(sdkMocks.send.mock.calls[0][0]).toMatchObject({
+      input: {
+        Bucket: "private-sec-raw",
+        Prefix: "backups/postgres/test/",
+        MaxKeys: 5,
       },
     });
   });

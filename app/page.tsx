@@ -7,6 +7,7 @@ import {
   WalletCards,
 } from "lucide-react";
 
+import { AnalyticsLink } from "@/components/analytics/analytics-link";
 import { SessionControls } from "@/components/auth/session-controls";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,9 +22,14 @@ export default function Home() {
             PortfolioScope
           </Link>
           <nav className="ml-auto flex items-center gap-2">
-            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/demo">
+            <AnalyticsLink
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+              eventName="demo_opened"
+              eventProperties={{ entryPoint: "navigation" }}
+              href="/dashboard?demo=true"
+            >
               Demo
-            </Link>
+            </AnalyticsLink>
             <SessionControls />
           </nav>
         </div>
@@ -47,10 +53,15 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Link className={buttonVariants({ size: "lg" })} href="/demo">
+            <AnalyticsLink
+              className={buttonVariants({ size: "lg" })}
+              eventName="demo_opened"
+              eventProperties={{ entryPoint: "landing" }}
+              href="/dashboard?demo=true"
+            >
               Continue as demo investor
               <ArrowRight className="size-4" />
-            </Link>
+            </AnalyticsLink>
             <Link
               className={buttonVariants({ variant: "outline", size: "lg" })}
               href="/auth/signin"
@@ -145,6 +156,14 @@ export default function Home() {
           </Card>
         ))}
       </section>
+      <footer className="border-t">
+        <p className="mx-auto w-full max-w-7xl px-6 py-6 text-xs leading-5 text-muted-foreground lg:px-8">
+          PortfolioScope uses optional, privacy-limited product analytics to
+          measure a small set of navigation events. Portfolio values, holding
+          quantities, transactions, research contents, credentials, and session
+          data are never included.
+        </p>
+      </footer>
     </main>
   );
 }

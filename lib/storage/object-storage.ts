@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -49,6 +50,22 @@ export function validateObjectKey(key: string) {
   }
 
   return key;
+}
+
+export function validateObjectPrefix(prefix: string) {
+  const normalized = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
+  if (
+    normalized.length === 0 ||
+    normalized.length > 1023 ||
+    normalized.startsWith("/") ||
+    normalized.includes("\\") ||
+    normalized
+      .split("/")
+      .some((segment) => segment === "" || segment === "..")
+  ) {
+    throw new Error("Object prefix is not valid.");
+  }
+  return `${normalized}/`;
 }
 
 export class R2ObjectStorage implements ObjectStorage {
@@ -123,6 +140,35 @@ export class R2ObjectStorage implements ObjectStorage {
 
       throw error;
     }
+  }
+
+  async list(prefix: string, take = 20) {
+    const response = await this.client.send(
+      new ListObjectsV2Command({
+        Bucket: this.bucket,
+        Prefix: validateObjectPrefix(prefix),
+        MaxKeys: Math.min(Math.max(Math.floor(take), 1), 100),
+      }),
+    );
+
+    return (response.Contents ?? [])
+      .filter(
+        (
+          object,
+        ): object is typeof object & {
+          Key: string;
+        } => Boolean(object.Key),
+      )
+      .map((object) => ({
+        key: object.Key,
+        byteLength: object.Size ?? 0,
+        lastModified: object.LastModified ?? null,
+      }))
+      .sort((left, right) => {
+        const leftTime = left.lastModified?.getTime() ?? 0;
+        const rightTime = right.lastModified?.getTime() ?? 0;
+        return rightTime - leftTime;
+      });
   }
 }
 

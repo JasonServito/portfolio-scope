@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
+import { AnalyticsEvent } from "@/components/analytics/analytics-event";
 import { SecFundamentals } from "@/components/stocks/sec-fundamentals";
 import { TradingViewWidget } from "@/components/stocks/tradingview-widget";
 import { ResearchTabs } from "@/components/research/research-tabs";
@@ -19,6 +20,7 @@ import { getDemoStockDetail } from "@/lib/portfolio/stock-detail";
 import { PERFORMANCE_PERIODS } from "@/lib/portfolio/types";
 import { getLatestResearch } from "@/lib/research/orchestrator";
 import { secEdgarFundamentalsProvider } from "@/lib/sec/fundamentals-provider";
+import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,10 @@ type StockPageProps = {
 };
 
 export default async function StockPage({ params }: StockPageProps) {
+  if (!isFeatureEnabled("PUBLIC_STOCK_PAGES_ENABLED")) {
+    notFound();
+  }
+
   const { ticker } = await params;
   const [data, research, fundamentals] = await Promise.all([
     getDemoStockDetail(ticker),
@@ -45,6 +51,16 @@ export default async function StockPage({ params }: StockPageProps) {
 
   return (
     <AppLayout>
+      <AnalyticsEvent
+        name="stock_page_viewed"
+        properties={{ ticker: stock.ticker }}
+      />
+      {research ? (
+        <AnalyticsEvent
+          name="research_report_viewed"
+          properties={{ reportMode: "demo", ticker: stock.ticker }}
+        />
+      ) : null}
       <PageShell
         actions={
           <Link

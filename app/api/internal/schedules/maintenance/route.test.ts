@@ -41,6 +41,7 @@ describe("QStash maintenance schedule route", () => {
       expect.objectContaining({
         type: "MAINTENANCE_CLEANUP",
         payload: { operation: "RECOVER_STALE_JOBS" },
+        correlationId: response.headers.get("x-correlation-id"),
       }),
     );
   });

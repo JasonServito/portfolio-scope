@@ -1,3 +1,5 @@
+import { isFeatureEnabled } from "@/lib/operations/feature-flags";
+
 export const authProviderIds = ["github", "google"] as const;
 
 export type AuthProviderId = (typeof authProviderIds)[number];
@@ -18,5 +20,9 @@ export function isAuthProviderConfigured(provider: AuthProviderId) {
     );
   }
 
-  return Boolean(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
+  return Boolean(
+    isFeatureEnabled("AUTH_GOOGLE_ENABLED") &&
+      process.env.AUTH_GOOGLE_ID &&
+      process.env.AUTH_GOOGLE_SECRET,
+  );
 }

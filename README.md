@@ -150,6 +150,11 @@ The repository includes:
 - Explicit missing, ambiguous, stale, failed, and unsupported fundamentals states
 - Durable SEC, deterministic research, snapshot, and maintenance jobs with signed callbacks and admin diagnostics
 - Redis cache/lock/rate-limit policies plus two bounded QStash maintenance schedules
+- Privacy-safe structured logs, request correlation, Sentry release/error context, and an admin-only dependency dashboard
+- Explicit PostHog event contracts with autocapture, replay, and person profiles disabled
+- CSP and production security headers with deliberate TradingView allowances
+- Scheduled compressed PostgreSQL backups in private R2 storage, guarded non-production restore tooling, and retention tests
+- Playwright critical-journey coverage plus Dependabot, CodeQL, Gitleaks, and dependency-audit automation
 - A multi-stage production `Dockerfile` and local PostgreSQL in `docker-compose.yml`
 
 Follow [`RUNBOOK.md`](RUNBOOK.md) for the environment matrix, first deployment, monitoring, smoke tests, and rollback procedure.
@@ -167,7 +172,7 @@ No public demo URL is claimed here until a deployment is verified.
 ## Roadmap
 
 - Activate and verify the implemented Redis/QStash M15 layer in Preview and Production
-- Monitoring, backups, restore drills, and production safeguards (M16)
+- Activate and externally verify M16 monitors, analytics, backup delivery, restore evidence, and rollback controls
 - Replaceable licensed market-data providers when justified
 - Benchmarking, dividends, and portfolio import
 

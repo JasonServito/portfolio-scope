@@ -4,13 +4,17 @@ import Google from "next-auth/providers/google";
 
 import { createAuthAdapter } from "@/lib/auth/adapter";
 import { isOAuthSignInAllowed } from "@/lib/auth/policy";
+import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 
 const THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60;
 const ONE_DAY_IN_SECONDS = 24 * 60 * 60;
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   adapter: createAuthAdapter(),
-  providers: [GitHub, Google],
+  providers: [
+    GitHub,
+    ...(isFeatureEnabled("AUTH_GOOGLE_ENABLED") ? [Google] : []),
+  ],
   session: {
     strategy: "database",
     maxAge: THIRTY_DAYS_IN_SECONDS,

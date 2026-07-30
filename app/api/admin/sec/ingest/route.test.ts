@@ -93,6 +93,7 @@ describe("admin SEC ingestion route", () => {
     expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(2);
     expect(mocks.queueSecIngestion).toHaveBeenCalledWith("aapl", {
       requestedByUserId: "admin-a",
+      correlationId: expect.any(String),
     });
   });
 
@@ -165,6 +166,7 @@ describe("admin SEC ingestion route", () => {
     expect(mocks.ingestSupportedCompany).toHaveBeenCalledWith("aapl", {
       trigger: "LOCAL",
       requestedByUserId: "admin-a",
+      correlationId: expect.any(String),
     });
     expect(mocks.enforceRateLimit).not.toHaveBeenCalled();
     expect(mocks.queueSecIngestion).not.toHaveBeenCalled();

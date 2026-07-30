@@ -3,6 +3,7 @@ import { JobRequestError } from "@/lib/jobs/errors";
 import { verifyQstashRequest } from "@/lib/jobs/qstash";
 import { executeBackgroundJob } from "@/lib/jobs/service";
 import { calculateRetryDelaySeconds } from "@/lib/jobs/types";
+import { observeApiRequest } from "@/lib/observability/request";
 import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,14 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  return observeApiRequest(
+    request,
+    "/api/internal/jobs/worker",
+    async () => handleWorkerRequest(request),
+  );
+}
+
+async function handleWorkerRequest(request: Request) {
   try {
     const { jobId } = await verifyQstashRequest(request);
     await enforceRateLimit({

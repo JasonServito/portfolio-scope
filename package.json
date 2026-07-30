@@ -8,14 +8,19 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "lint": "eslint",
-    "test": "vitest run --pool=threads",
+    "test": "vitest run --pool=forks --maxWorkers=4 && npm run test:operations",
+    "test:operations": "node --test scripts/backup-postgres.test.mjs scripts/restore-postgres.test.mjs",
     "test:integration": "node scripts/verify-demo-seed.mjs && node scripts/verify-auth-persistence.mjs && vitest run --config vitest.integration.config.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
-    "jobs:schedules": "node scripts/configure-qstash-schedules.mjs"
+    "jobs:schedules": "node scripts/configure-qstash-schedules.mjs",
+    "backup:postgres": "node scripts/backup-postgres.mjs",
+    "restore:postgres": "node scripts/restore-postgres.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
@@ -30,6 +35,7 @@
     "lucide-react": "^1.21.0",
     "next": "^15.5.19",
     "next-auth": "^5.0.0-beta.31",
+    "posthog-js": "^1.407.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
@@ -39,6 +45,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

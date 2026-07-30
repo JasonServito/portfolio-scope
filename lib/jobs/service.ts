@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { BackgroundJobStatus, type BackgroundJobType, type Prisma } from "@prisma/client";
+import {
+  BackgroundJobStatus,
+  BackgroundJobType,
+  type Prisma,
+} from "@prisma/client";
 
 import { isBackgroundFeatureEnabled } from "@/lib/jobs/config";
 import {
@@ -22,6 +26,9 @@ import {
   calculateRetryDelaySeconds,
   type CreateBackgroundJobInput,
 } from "@/lib/jobs/types";
+import { logger } from "@/lib/observability/logger";
+import { reportOperationalError } from "@/lib/observability/sentry";
+import { sendOperationalHeartbeat } from "@/lib/operations/heartbeat";
 
 export type JobHandler = (
   job: ClaimedBackgroundJob,
@@ -85,6 +92,12 @@ export async function enqueueBackgroundJob<T extends BackgroundJobType>(
 
   const repository = dependencies.repository ?? backgroundJobRepository;
   const { job, reused } = await repository.createOrReuse(input);
+  logger.info(reused ? "job.enqueue.reused" : "job.enqueue.created", {
+    correlationId: job.correlationId,
+    jobId: job.id,
+    userId: job.userId ?? undefined,
+    details: { type: job.type, status: job.status },
+  });
   if (!reused) {
     let messageId: string;
     try {
@@ -93,11 +106,21 @@ export async function enqueueBackgroundJob<T extends BackgroundJobType>(
         type: job.type,
         maxAttempts: job.maxAttempts,
         timeoutMs: job.timeoutMs,
+        correlationId: job.correlationId,
         publisher: dependencies.publisher,
         environment,
       });
       messageId = published.messageId;
     } catch (error) {
+      const context = {
+        correlationId: job.correlationId,
+        jobId: job.id,
+        userId: job.userId ?? undefined,
+        errorCode: JobErrorCode.PUBLISH_FAILED,
+        details: { type: job.type },
+      };
+      logger.error("job.publish.failed", context, error);
+      reportOperationalError(error, context);
       try {
         await repository.recordPublishFailure(
           job.id,
@@ -139,6 +162,7 @@ export async function executeBackgroundJob(
   jobId: string,
   dependencies: ServiceDependencies = {},
 ) {
+  const environment = dependencies.environment ?? process.env;
   const repository = dependencies.repository ?? backgroundJobRepository;
   const now = dependencies.now ?? (() => new Date());
   const job = await repository.claim(jobId, now());
@@ -160,6 +184,17 @@ export async function executeBackgroundJob(
     };
   }
 
+  logger.info("job.execution.started", {
+    correlationId: job.correlationId,
+    jobId: job.id,
+    userId: job.userId ?? undefined,
+    details: {
+      type: job.type,
+      attempt: job.attemptCount,
+      maxAttempts: job.maxAttempts,
+    },
+  });
+
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   try {
     const handler = dependencies.handler ?? defaultHandler;
@@ -175,6 +210,19 @@ export async function executeBackgroundJob(
       handler(job, signal),
     );
     await repository.complete(job, result, now());
+    if (job.type === BackgroundJobType.MAINTENANCE_CLEANUP) {
+      await sendOperationalHeartbeat("worker", {
+        correlationId: job.correlationId,
+        jobId: job.id,
+        environment,
+      });
+    }
+    logger.info("job.execution.completed", {
+      correlationId: job.correlationId,
+      jobId: job.id,
+      userId: job.userId ?? undefined,
+      details: { type: job.type, attempt: job.attemptCount },
+    });
     return {
       jobId: job.id,
       status: BackgroundJobStatus.COMPLETED,
@@ -197,6 +245,23 @@ export async function executeBackgroundJob(
       },
       now(),
     );
+    const context = {
+      correlationId: job.correlationId,
+      jobId: job.id,
+      userId: job.userId ?? undefined,
+      errorCode: classified.code,
+      details: {
+        type: job.type,
+        attempt: job.attemptCount,
+        retrying: failed.retrying,
+      },
+    };
+    if (failed.retrying) {
+      logger.warn("job.execution.retrying", context, error);
+    } else {
+      logger.error("job.execution.failed", context, error);
+      reportOperationalError(error, context);
+    }
     return {
       jobId: job.id,
       status: failed.status,
@@ -245,6 +310,7 @@ export async function retryBackgroundJob(
       type: job.type,
       maxAttempts: Math.max(1, job.maxAttempts - job.attemptCount),
       timeoutMs: job.timeoutMs,
+      correlationId: job.correlationId,
       deduplicationId: `${job.id}:manual:${randomUUID()}`,
       publisher: dependencies.publisher,
       environment,
@@ -255,6 +321,15 @@ export async function retryBackgroundJob(
       // Accepted delivery remains safe to execute from the durable queued row.
     }
   } catch (error) {
+    const context = {
+      correlationId: job.correlationId,
+      jobId: job.id,
+      userId: job.userId ?? undefined,
+      errorCode: JobErrorCode.PUBLISH_FAILED,
+      details: { type: job.type, action: "manual-retry" },
+    };
+    logger.error("job.retry.publish_failed", context, error);
+    reportOperationalError(error, context);
     try {
       await repository.recordPublishFailure(
         job.id,

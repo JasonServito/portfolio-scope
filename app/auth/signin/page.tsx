@@ -7,6 +7,7 @@ import {
   signInWithLocalDisposable,
   signInWithProvider,
 } from "@/app/auth/actions";
+import { AnalyticsSubmitButton } from "@/components/analytics/analytics-submit-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -14,7 +15,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { isAuthProviderConfigured } from "@/lib/auth/providers";
 import { isLocalDisposableAuthAvailable } from "@/lib/auth/local-disposable";
@@ -78,7 +78,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Sign in to PortfolioScope</CardTitle>
+            <h1 className="text-xl font-medium">Sign in to PortfolioScope</h1>
             <CardDescription>
               {localDisposableAuthAvailable
                 ? "Use a trusted OAuth provider or the guarded local validation identity."
@@ -121,7 +121,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             <div className="pt-2">
               <Link
                 className={buttonVariants({ variant: "secondary", className: "w-full" })}
-                href="/demo"
+                href="/dashboard?demo=true"
               >
                 Continue with the read-only demo
               </Link>
@@ -162,10 +162,10 @@ function ProviderForm({
   return (
     <form action={action}>
       <input name="callbackUrl" type="hidden" value={callbackUrl} />
-      <Button className="w-full" disabled={!configured} size="lg" type="submit" variant="outline">
+      <AnalyticsSubmitButton disabled={!configured} provider={provider}>
         {icon}
         {label}
-      </Button>
+      </AnalyticsSubmitButton>
     </form>
   );
 }

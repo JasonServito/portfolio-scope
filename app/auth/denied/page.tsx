@@ -3,7 +3,7 @@ import Link from "next/link";
 import { LockKeyhole } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 export const metadata: Metadata = { title: "Access denied" };
 
@@ -13,7 +13,7 @@ export default function AccessDeniedPage() {
       <Card className="w-full max-w-lg">
         <CardHeader>
           <LockKeyhole className="mb-2 size-6 text-muted-foreground" />
-          <CardTitle className="text-xl">Administrator access required</CardTitle>
+          <h1 className="text-xl font-medium">Administrator access required</h1>
         </CardHeader>
         <CardContent className="space-y-5">
           <p className="leading-6 text-muted-foreground">

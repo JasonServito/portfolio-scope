@@ -32,6 +32,9 @@ jobs:
       DATABASE_URL: postgresql://portfolio_scope:portfolio_scope@localhost:5432/portfolio_scope?schema=public
       DIRECT_URL: postgresql://portfolio_scope:portfolio_scope@localhost:5432/portfolio_scope?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      AUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: m16-ci-only-secret-with-more-than-thirty-two-characters
       DEMO_USER_EMAIL: demo@portfolioscope.dev
 
     steps:
@@ -67,6 +70,15 @@ jobs:
 
       - name: Test
         run: npm run test
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps --only-shell chromium
+
+      - name: Browser smoke tests
+        run: npm run test:e2e
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
 
       - name: Build
         run: npm run build

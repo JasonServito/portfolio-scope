@@ -7,6 +7,7 @@ import { ArrowRight, Plus, Trash2 } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { captureAnalyticsEvent } from "@/lib/analytics/client";
 
 export type PrivatePortfolioSummary = {
   id: string;
@@ -50,6 +51,7 @@ export function PortfolioManager({
         setError(await responseError(response, "Unable to create portfolio."));
         return;
       }
+      captureAnalyticsEvent("portfolio_created", {});
       setForm({ name: "", baseCurrency: "USD" });
       router.refresh();
     } catch {
