@@ -1,7 +1,14 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
+const requestedDistDir = process.env.NEXT_DIST_DIR?.trim();
+const distDir =
+  requestedDistDir && /^[A-Za-z0-9._-]+$/.test(requestedDistDir)
+    ? requestedDistDir
+    : ".next";
+
 const nextConfig: NextConfig = {
+  distDir,
   output: "standalone",
 };
 

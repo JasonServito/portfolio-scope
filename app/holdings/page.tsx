@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 
+import { DemoJourney } from "@/components/demo/demo-journey";
 import { HoldingsTable } from "@/components/holdings/holdings-table";
 import { AddHoldingForm } from "@/components/holdings/holding-actions";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -26,6 +27,7 @@ export default async function HoldingsPage() {
         eyebrow="Portfolio"
         title="Holdings"
       >
+        <DemoJourney currentStep={2} />
         {!data ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
@@ -93,6 +95,9 @@ export default async function HoldingsPage() {
                     <AddHoldingForm readOnly={readOnly} />
                   </div>
                 </div>
+                <p className="mt-2 text-xs text-muted-foreground md:hidden">
+                  Scroll horizontally to compare every return period.
+                </p>
               </CardHeader>
               <CardContent>
                 <HoldingsTable

@@ -1,14 +1,17 @@
 import Link from "next/link";
 import {
-  Activity,
+  BookOpen,
   BarChart3,
   Bell,
   Binoculars,
+  Boxes,
+  Database,
   LayoutDashboard,
   LineChart,
   WalletCards,
 } from "lucide-react";
 
+import { BrandMark } from "@/components/layout/brand-mark";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +51,24 @@ const researchNavItems = [
   },
 ];
 
+const projectNavItems = [
+  {
+    href: "/architecture",
+    label: "Architecture",
+    icon: Boxes,
+  },
+  {
+    href: "/methodology",
+    label: "Methodology",
+    icon: BookOpen,
+  },
+  {
+    href: "/data-sources",
+    label: "Data sources",
+    icon: Database,
+  },
+];
+
 type AppSidebarProps = {
   activePath: string;
 };
@@ -56,24 +77,23 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
   return (
     <aside className="hidden min-h-screen w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground lg:flex lg:flex-col">
       <div className="border-b px-5 py-5">
-        <Link className="flex items-center gap-3" href="/dashboard">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Activity className="size-4" />
-          </span>
+        <Link className="flex items-center gap-3" href="/">
+          <BrandMark />
           <span>
             <span className="block text-sm font-semibold leading-5">
               PortfolioScope
             </span>
             <span className="block text-xs text-muted-foreground">
-              Demo investing workspace
+              Analytics with an audit trail
             </span>
           </span>
         </Link>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-6 px-3 py-5">
-        <NavGroup activePath={activePath} items={primaryNavItems} label="Workspace" />
+      <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-5">
+        <NavGroup activePath={activePath} items={primaryNavItems} label="Demo workspace" />
         <NavGroup activePath={activePath} items={researchNavItems} label="Stock research" />
+        <NavGroup activePath={activePath} items={projectNavItems} label="Project" />
       </nav>
 
       <div className="m-3 rounded-lg border bg-background p-4">
@@ -82,8 +102,15 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
           <Badge variant="outline">Read-only</Badge>
         </div>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Seeded data stays available without OAuth and cannot be changed in the public deployment.
+          Seeded portfolio data stays available without OAuth. Mutations are
+          blocked on the server.
         </p>
+        <Link
+          className="mt-3 inline-flex text-xs font-semibold text-primary hover:underline"
+          href="/architecture"
+        >
+          Finish at architecture →
+        </Link>
       </div>
     </aside>
   );

@@ -37,10 +37,26 @@ export function PortfolioPerformanceChart({
     );
   }
 
+  const first = data[0];
+  const last = data.at(-1) ?? first;
+  const values = data.map((point) => point.value);
+  const summary = `Portfolio value moved from ${formatCurrency(
+    first.value,
+    currency,
+  )} on ${formatDate(first.date)} to ${formatCurrency(
+    last.value,
+    currency,
+  )} on ${formatDate(last.date)}. The period low was ${formatCurrency(
+    Math.min(...values),
+    currency,
+  )} and the high was ${formatCurrency(Math.max(...values), currency)}.`;
+
   return (
-    <div className="h-72 w-full">
-      <ResponsiveContainer height="100%" width="100%">
-        <AreaChart data={data} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
+    <figure>
+      <figcaption className="sr-only">{summary}</figcaption>
+      <div aria-hidden="true" className="h-72 w-full">
+        <ResponsiveContainer height="100%" width="100%">
+          <AreaChart data={data} margin={{ bottom: 0, left: 0, right: 0, top: 8 }}>
           <defs>
             <linearGradient id="portfolioValue" x1="0" x2="0" y1="0" y2="1">
               <stop offset="5%" stopColor="#059669" stopOpacity={0.28} />
@@ -75,8 +91,9 @@ export function PortfolioPerformanceChart({
             strokeWidth={2}
             type="monotone"
           />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </figure>
   );
 }

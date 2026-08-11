@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type FormEvent, type ReactNode, useState } from "react";
-import { Bell, Search } from "lucide-react";
+import { Bell, Home, Search } from "lucide-react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { BrandMark } from "@/components/layout/brand-mark";
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const mobileNavItems = [
@@ -13,6 +14,7 @@ const mobileNavItems = [
   { href: "/holdings", label: "Holdings" },
   { href: "/watchlist", label: "Watchlist" },
   { href: "/alerts", label: "Alerts" },
+  { href: "/architecture", label: "Architecture" },
 ];
 
 const searchDestinations: Record<string, string> = {
@@ -65,7 +67,7 @@ export function AppHeader({
     <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
       <div className="flex min-h-16 items-center gap-3 px-4 sm:px-6">
         <Link className="flex items-center gap-2 lg:hidden" href="/dashboard">
-          <span className="size-3 rounded-full bg-emerald-500" />
+          <BrandMark className="size-8 rounded-lg" />
           <span className="text-sm font-semibold">PortfolioScope</span>
         </Link>
 
@@ -110,26 +112,40 @@ export function AppHeader({
 
         <div className="ml-auto flex items-center gap-1">
           <nav className="hidden items-center gap-1 lg:flex">
+            <Link
+              aria-label="PortfolioScope home"
+              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+              href="/"
+            >
+              <Home className="size-4" />
+            </Link>
             <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/aapl">
               AAPL
             </Link>
             <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/msft">
               MSFT
             </Link>
-            <Button aria-label="Open notifications" size="icon-sm" variant="outline">
+            <Link
+              aria-label="Open alerts"
+              className={buttonVariants({ variant: "outline", size: "icon-sm" })}
+              href="/alerts"
+            >
               <Bell className="size-4" />
-            </Button>
+            </Link>
           </nav>
           {sessionControls}
         </div>
       </div>
 
-      <nav className="flex gap-1 overflow-x-auto border-t px-3 py-2 lg:hidden">
+      <nav
+        aria-label="Demo workspace navigation on small screens"
+        className="flex gap-1 overflow-x-auto border-t px-3 py-2 lg:hidden"
+      >
         {mobileNavItems.map((item) => (
           <Link
             className={cn(
               buttonVariants({ variant: "ghost", size: "sm" }),
-              pathname === item.href && "bg-muted text-foreground"
+              pathname === item.href && "bg-muted text-foreground",
             )}
             href={item.href}
             key={item.href}

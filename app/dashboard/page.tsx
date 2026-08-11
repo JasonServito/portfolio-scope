@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { ArrowRight, Clock3, Database } from "lucide-react";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
+import { DemoJourney } from "@/components/demo/demo-journey";
 import { AlertsPreview } from "@/components/dashboard/alerts-preview";
 import { AllocationChart } from "@/components/dashboard/allocation-chart";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
@@ -13,6 +14,7 @@ import { PageShell } from "@/components/layout/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataState } from "@/components/ui/data-state";
 import { formatCurrency, formatSignedCurrency, formatSignedPercent } from "@/lib/formatters";
 import { getDemoDashboardData } from "@/lib/portfolio/dashboard-data";
 import { isPerformancePeriod } from "@/lib/portfolio/performance";
@@ -50,33 +52,50 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       />
       <PageShell
         actions={
-          <Link className={buttonVariants({ variant: "outline" })} href="/holdings">
-            View holdings
-          </Link>
+          <>
+            <Link className={buttonVariants({ variant: "ghost" })} href="/architecture">
+              Architecture
+            </Link>
+            <Link className={buttonVariants()} href="/holdings">
+              Inspect holdings
+              <ArrowRight className="size-4" />
+            </Link>
+          </>
         }
-        description="A screenshot-ready overview for portfolio value, performance periods, allocation, and risk signals."
-        eyebrow="Demo portfolio"
+        description="A deterministic overview of portfolio value, performance, allocation, holding contribution, and active risk signals."
+        eyebrow="North Star Portfolio · Read-only demo"
         title="Dashboard"
       >
+        <DemoJourney currentStep={1} />
         {!analytics ? (
           <Card>
-            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-              <span className="flex size-11 items-center justify-center rounded-md bg-muted">
-                <AlertTriangle className="size-5" />
-              </span>
-              <div>
-                <p className="font-medium">Demo portfolio data is unavailable.</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Seed the database to load portfolio analytics.
-                </p>
-              </div>
+            <CardContent>
+              <DataState
+                description="The deterministic database seed is missing or unavailable. No portfolio values have been fabricated."
+                kind="missing"
+                title="Demo portfolio data is unavailable"
+              />
             </CardContent>
           </Card>
         ) : (
           <>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border bg-card px-4 py-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Clock3 className="size-3.5 text-primary" />
+                As of{" "}
+                <time dateTime={analytics.asOf}>
+                  {new Date(analytics.asOf).toLocaleString("en-US")}
+                </time>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Database className="size-3.5 text-primary" />
+                Seeded portfolio and market fixtures
+              </span>
+              <span>Selected period: {analytics.period}</span>
+            </div>
             <SummaryCards analytics={analytics} alertCount={activeAlertCount} />
 
-            <section className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
+            <section className="grid gap-4 xl:grid-cols-[1.55fr_1fr]">
               <Card>
                 <CardHeader>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -119,18 +138,16 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               </Card>
             </section>
 
-            <section className="grid gap-4 lg:grid-cols-3">
+            <section className="grid gap-4 xl:grid-cols-3">
               <WinnersLosers
                 currency={analytics.portfolio.baseCurrency}
                 items={analytics.topWinners}
                 title="Top winners"
-                tone="positive"
               />
               <WinnersLosers
                 currency={analytics.portfolio.baseCurrency}
                 items={analytics.topLosers}
                 title="Top losers"
-                tone="negative"
               />
               <AlertsPreview alerts={alerts} />
             </section>

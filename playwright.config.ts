@@ -10,6 +10,8 @@ if (!externalBaseUrl) {
   process.env.AUTH_URL = baseURL;
   process.env.NEXT_PUBLIC_APP_URL = baseURL;
   process.env.AUTH_TRUST_HOST = "true";
+  // Keep browser verification independent from an active developer session.
+  process.env.NEXT_DIST_DIR = ".next-e2e";
 }
 
 export default defineConfig({

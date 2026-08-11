@@ -22,8 +22,14 @@ export function AllocationChart({ currency, data }: AllocationChartProps) {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-[170px_1fr] md:items-center">
-      <div className="h-44">
+    <figure className="grid gap-4 md:grid-cols-[170px_1fr] md:items-center">
+      <figcaption className="sr-only">
+        Portfolio allocation by sector.{" "}
+        {data
+          .map((item) => `${item.label}: ${formatPercent(item.percentage)}`)
+          .join("; ")}
+      </figcaption>
+      <div aria-hidden="true" className="h-44">
         <ResponsiveContainer height="100%" width="100%">
           <PieChart>
             <Pie
@@ -70,6 +76,6 @@ export function AllocationChart({ currency, data }: AllocationChartProps) {
           </div>
         ))}
       </div>
-    </div>
+    </figure>
   );
 }

@@ -25,7 +25,9 @@ PortfolioScope is a full-stack portfolio analytics and explainable stock-researc
 
 ## Product tour
 
-Screenshot assets are kept in [`public/screenshots`](public/screenshots). The recommended capture set is documented in [`DEMO.md`](DEMO.md); images can be added without changing README copy.
+The public landing page leads directly into a four-step, read-only recruiter journey: portfolio overview, holding detail, source-backed evidence, and architecture. The checked-in assets are generated from the real seeded application with `npm run demo:capture`; the narration and fallback path are in [`DEMO.md`](DEMO.md).
+
+![PortfolioScope landing page](public/screenshots/landing.png)
 
 | View         | What it demonstrates                                            |
 | ------------ | --------------------------------------------------------------- |
@@ -34,6 +36,15 @@ Screenshot assets are kept in [`public/screenshots`](public/screenshots). The re
 | Holdings     | Comparable return windows and position-level performance        |
 | Alerts       | Transparent risk rules with links to affected securities        |
 | Stock detail | Price, position, risks, and explainable specialist research     |
+| Architecture | System boundaries, source flow, security, and reliability       |
+
+The short walkthrough recording is available at [`public/demo/recruiter-tour.webm`](public/demo/recruiter-tour.webm).
+
+### Resume-ready project summary
+
+- Built a production-oriented Next.js 15 portfolio analytics platform with typed period-return and contribution services, Prisma/PostgreSQL persistence, responsive visualizations, and deterministic fixtures.
+- Designed owner-scoped Auth.js workflows, a server-enforced read-only public demo, explicit admin authorization, signed/idempotent background jobs, and privacy-safe observability.
+- Integrated SEC EDGAR provenance and private raw-source retention while preserving ambiguity, freshness, and missing-data states alongside attributed TradingView market context.
 
 ## Architecture
 
@@ -122,13 +133,12 @@ CI runs the same checks against PostgreSQL after applying migrations and loading
 
 ## Demo guide
 
-The focused recruiter walkthrough takes about three minutes:
+The focused recruiter walkthrough takes about two minutes:
 
-1. Enter demo mode and establish the product’s analytics-first positioning.
-2. Change the dashboard period to show server-side performance recalculation.
-3. Compare holding returns and contribution across time windows.
-4. Open an alert and explain the deterministic trigger.
-5. Open a stock’s research tabs and trace a synthesis insight back to specialist findings and sources.
+1. Start on the landing page and enter the read-only demo without OAuth.
+2. Use the guided dashboard prompt to inspect period analytics and a holding.
+3. Distinguish attributed TradingView market context from persisted SEC facts and provenance.
+4. Open the deterministic sample research and finish on the public architecture page or repository.
 
 Detailed talking points, fallback steps, and screenshot framing are in [`DEMO.md`](DEMO.md).
 
@@ -171,8 +181,10 @@ No public demo URL is claimed here until a deployment is verified.
 
 ## Roadmap
 
+- M17 frontend and recruiter-demo experience implemented in the repository
 - Activate and verify the implemented Redis/QStash M15 layer in Preview and Production
 - Activate and externally verify M16 monitors, analytics, backup delivery, restore evidence, and rollback controls
+- Complete external production UX, accessibility, and Core Web Vitals verification before beginning M18
 - Replaceable licensed market-data providers when justified
 - Benchmarking, dividends, and portfolio import
 

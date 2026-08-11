@@ -13,6 +13,8 @@
     "test:integration": "node scripts/verify-demo-seed.mjs && node scripts/verify-auth-persistence.mjs && vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --grep @smoke",
+    "demo:capture": "node scripts/capture-recruiter-assets.mjs",
+    "demo:vitals": "node scripts/measure-m17-web-vitals.mjs",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

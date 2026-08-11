@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Database, LineChart } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
+import { DemoJourney } from "@/components/demo/demo-journey";
 import { SecFundamentals } from "@/components/stocks/sec-fundamentals";
 import { TradingViewWidget } from "@/components/stocks/tradingview-widget";
 import { ResearchTabs } from "@/components/research/research-tabs";
@@ -63,30 +64,68 @@ export default async function StockPage({ params }: StockPageProps) {
       ) : null}
       <PageShell
         actions={
-          <Link
-            className={buttonVariants({ variant: "outline" })}
-            href="/watchlist"
-          >
-            <ArrowLeft className="size-4" />
-            Watchlist
-          </Link>
+          <>
+            <Link
+              className={buttonVariants({ variant: "ghost" })}
+              href="/holdings"
+            >
+              <ArrowLeft className="size-4" />
+              Holdings
+            </Link>
+            <Link className={buttonVariants()} href="/architecture">
+              Architecture
+              <ArrowRight className="size-4" />
+            </Link>
+          </>
         }
         description={`${stock.companyName} market context, SEC-derived fundamentals, demo position exposure, and deterministic risk signals.`}
         eyebrow="Stock detail"
         title={stock.ticker}
       >
-        <section className="flex flex-col gap-3 rounded-lg border bg-card p-5 md:flex-row md:items-center md:justify-between">
+        <DemoJourney currentStep={3} />
+
+        <nav
+          aria-label="Stock detail sections"
+          className="scrollbar-none flex gap-2 overflow-x-auto rounded-xl border bg-card p-2"
+        >
+          {[
+            ["#market-context", "Market context"],
+            ["#fundamentals", "SEC fundamentals"],
+            ["#risk", "Risk flags"],
+            ["#research", "Research"],
+          ].map(([href, label]) => (
+            <Link
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+              href={href}
+              key={href}
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
+
+        <section className="flex flex-col gap-5 rounded-2xl border bg-foreground p-6 text-background md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl font-semibold tracking-normal">
+              <h2 className="text-2xl font-semibold tracking-[-0.025em]">
                 {stock.companyName}
               </h2>
-              <Badge variant="outline">{stock.exchange}</Badge>
-              <Badge variant="outline">{stock.currency}</Badge>
+              <Badge className="border-background/20 text-background" variant="outline">{stock.exchange}</Badge>
+              <Badge className="border-background/20 text-background" variant="outline">{stock.currency}</Badge>
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-background/55">
               {stock.sector} / {stock.industry}
             </p>
+            <div className="mt-5 flex flex-wrap gap-2 text-[11px] text-background/60">
+              <span className="flex items-center gap-1.5 rounded-full border border-background/15 px-2.5 py-1">
+                <LineChart className="size-3 text-[#6ee7b7]" />
+                Market context: TradingView
+              </span>
+              <span className="flex items-center gap-1.5 rounded-full border border-background/15 px-2.5 py-1">
+                <Database className="size-3 text-[#6ee7b7]" />
+                Fundamentals: SEC EDGAR
+              </span>
+            </div>
           </div>
           <div className="md:text-right">
             <p className="text-3xl font-semibold tracking-normal">
@@ -94,7 +133,7 @@ export default async function StockPage({ params }: StockPageProps) {
                 ? formatCurrency(data.latestPrice, stock.currency)
                 : "Market widget below"}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 text-sm text-background/55">
               {data.asOf
                 ? `Seeded portfolio fixture as of ${new Date(data.asOf).toLocaleDateString("en-US")}`
                 : "No PortfolioScope-owned price fixture for this ticker"}
@@ -148,7 +187,7 @@ export default async function StockPage({ params }: StockPageProps) {
           ))}
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <section className="grid scroll-mt-28 gap-4 lg:grid-cols-[1.4fr_1fr]" id="market-context">
           <Card>
             <CardHeader>
               <CardTitle>Public market chart</CardTitle>
@@ -253,14 +292,14 @@ export default async function StockPage({ params }: StockPageProps) {
           ))}
         </section>
 
-        <section aria-labelledby="sec-fundamentals-heading">
+        <section aria-labelledby="sec-fundamentals-heading" className="scroll-mt-28" id="fundamentals">
           <h2 className="sr-only" id="sec-fundamentals-heading">
             SEC fundamentals and provenance
           </h2>
           <SecFundamentals data={fundamentals} />
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+        <section className="grid scroll-mt-28 gap-4 lg:grid-cols-[1fr_1fr]" id="risk">
           <Card>
             <CardHeader>
               <CardTitle>Risk flags</CardTitle>
@@ -324,10 +363,10 @@ export default async function StockPage({ params }: StockPageProps) {
           </Card>
         </section>
 
-        <section className="space-y-4">
+        <section className="scroll-mt-28 space-y-4" id="research">
           <div>
             <p className="text-sm font-medium text-muted-foreground">
-              AI research layer
+              Deterministic research layer
             </p>
             <h2 className="mt-1 text-2xl font-semibold tracking-tight">
               Explainable stock research
