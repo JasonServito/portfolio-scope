@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-import { middleware } from "@/middleware";
+import { proxy } from "@/proxy";
 
-describe("request correlation and security middleware", () => {
+describe("request correlation and security proxy", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
   it("adds safe request IDs and hardened response headers", () => {
-    const response = middleware(
+    const response = proxy(
       new NextRequest("http://localhost:3000/api/health", {
         headers: { "x-request-id": "request-1234" },
       }),
@@ -28,10 +28,10 @@ describe("request correlation and security middleware", () => {
 
   it("fails API requests closed during maintenance but keeps health available", async () => {
     vi.stubEnv("MAINTENANCE_MODE", "true");
-    const blocked = middleware(
+    const blocked = proxy(
       new NextRequest("http://localhost:3000/api/portfolios"),
     );
-    const health = middleware(
+    const health = proxy(
       new NextRequest("http://localhost:3000/api/health"),
     );
 
@@ -42,8 +42,8 @@ describe("request correlation and security middleware", () => {
     expect(health.status).toBe(200);
   });
 
-  it("preserves one-click demo access through an edge redirect", () => {
-    const response = middleware(
+  it("preserves one-click demo access through the proxy redirect", () => {
+    const response = proxy(
       new NextRequest("http://localhost:3000/demo"),
     );
 

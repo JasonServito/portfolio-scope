@@ -895,7 +895,13 @@ replace the real restore drill.
 GitHub Actions runs database-backed checks and Playwright critical journeys.
 Dependabot proposes bounded dependency and Actions updates. CodeQL scans
 JavaScript/TypeScript, and Gitleaks scans repository history for committed
-secrets. In repository settings:
+secrets. The CodeQL workflow uses the current v4 action family with only
+`actions: read`, `contents: read`, and `security-events: write`; keep the
+`pull_request` trigger for safe fork and Dependabot analysis rather than using
+`pull_request_target` to execute untrusted code. Merge Dependabot updates with
+repository auto-merge using a merge commit rather than a Dependabot-authored
+squash commit, which can leave the subsequent `push` run with a read-only token.
+In repository settings:
 
 1. Protect `main`.
 2. Require pull requests and the CI, CodeQL, and Gitleaks status checks.
