@@ -409,10 +409,16 @@ describe("private alerts and research services", () => {
       status: "COMPLETED",
       ticker: "AAPL",
     });
-    expect(mocks.researchJobFindFirst).toHaveBeenCalledWith({
-      where: { id: "job-a", userId: actorId },
-      include: { stock: true, agentRuns: true, report: true },
-    });
+    expect(mocks.researchJobFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "job-a", userId: actorId },
+        include: expect.objectContaining({
+          stock: true,
+          agentRuns: true,
+          report: expect.any(Object),
+        }),
+      }),
+    );
   });
 
   it("keeps private research history scoped to the authenticated owner", async () => {

@@ -135,6 +135,9 @@ export async function executeBackgroundJobHandler(
         agentName: payload.agentName,
         userId: job.userId,
         correlationId: job.correlationId,
+        attemptNumber: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+        signal,
       });
     }
 
@@ -154,6 +157,9 @@ export async function executeBackgroundJobHandler(
       return executeResearchSynthesis({
         researchJobId: payload.researchJobId,
         userId: job.userId,
+        attemptNumber: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+        signal,
       });
     }
 

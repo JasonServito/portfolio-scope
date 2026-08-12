@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  AgentName,
+  AgentStatus,
+  ResearchGenerationMode,
+  ResearchStatus,
+} from "@prisma/client";
 import { expect, test, type BrowserContext } from "@playwright/test";
 
 import { db } from "@/lib/db";
@@ -12,6 +18,117 @@ const tokenB = `e2e-m16-b-${runId}`;
 let userAId = "";
 let userBId = "";
 let portfolioAId = "";
+let currentResearchJobId = "";
+
+async function createResearchFixture(input: {
+  userId: string;
+  stockId: string;
+  createdAt: Date;
+  statement: string;
+  snapshotHash: string;
+}) {
+  const job = await db.researchJob.create({
+    data: {
+      userId: input.userId,
+      stockId: input.stockId,
+      status: ResearchStatus.COMPLETED,
+      generationMode: ResearchGenerationMode.EXTERNAL,
+      requestedAgents: [AgentName.SYNTHESIS],
+      generationFingerprint: `${runId}-${input.snapshotHash}`,
+      sourceDataVersion: `${input.snapshotHash}-source`,
+      inputDataVersion: `${input.snapshotHash}-input`,
+      retrievalVersion: "m18-lexical-e2e",
+      calculationVersion: "portfolio-e2e",
+      sourceSnapshotSha256: input.snapshotHash.padEnd(64, "a").slice(0, 64),
+      createdAt: input.createdAt,
+      startedAt: input.createdAt,
+      completedAt: new Date(input.createdAt.getTime() + 60_000),
+      correlationId: `${runId}-${input.snapshotHash}`,
+    },
+  });
+  const synthesis = await db.agentRun.create({
+    data: {
+      researchJobId: job.id,
+      agentName: AgentName.SYNTHESIS,
+      status: AgentStatus.COMPLETED,
+      rating: "MIXED",
+      confidence: 0.72,
+      summary: input.statement,
+      findingsJson: [],
+      sourcesJson: [],
+      warningsJson: [],
+      claimsJson: [],
+      missingDataJson: ["Licensed current news"],
+      provider: "openai",
+      model: "gpt-5-mini-2025-08-07",
+      promptVersion: "m18-research-e2e",
+      outputSchemaVersion: "m18-claims-e2e",
+      agentVersion: "m18-synthesis-e2e",
+      completedAt: new Date(input.createdAt.getTime() + 60_000),
+    },
+  });
+  const report = await db.researchReport.create({
+    data: {
+      researchJobId: job.id,
+      stockId: input.stockId,
+      overview: input.statement,
+      rating: "MIXED",
+      bullCaseJson: [input.statement],
+      bearCaseJson: ["Liability evidence remains a counterpoint."],
+      risksJson: ["Evidence coverage is bounded."],
+      missingDataJson: ["Licensed current news"],
+      disagreementsJson: ["Revenue and liability context diverge."],
+      confidence: 0.72,
+      provider: "openai",
+      model: "gpt-5-mini-2025-08-07",
+      modelConfigJson: { maxOutputTokens: 1_500 },
+      promptVersion: "m18-research-e2e",
+      retrievalVersion: "m18-lexical-e2e",
+      calculationVersion: "portfolio-e2e",
+      inputDataVersion: `${input.snapshotHash}-input`,
+      outputSchemaVersion: "m18-claims-e2e",
+      sourceSnapshotSha256: input.snapshotHash.padEnd(64, "a").slice(0, 64),
+      inputTokens: 120,
+      outputTokens: 45,
+      estimatedCostUsd: 0.00012,
+      reportVersion: "m18-report-e2e",
+      generatedAt: new Date(input.createdAt.getTime() + 60_000),
+      expiresAt: new Date(input.createdAt.getTime() + 31 * 24 * 60 * 60_000),
+    },
+  });
+  await db.researchClaim.create({
+    data: {
+      reportId: report.id,
+      agentRunId: synthesis.id,
+      claimKey: `${input.snapshotHash}-revenue-claim`,
+      category: "SUPPORTIVE",
+      statement: input.statement,
+      confidence: 0.78,
+      assumptionsJson: ["Reported periods are comparable."],
+      sourceDate: new Date("2026-06-30T00:00:00.000Z"),
+      asOfDate: new Date("2026-08-11T00:00:00.000Z"),
+      ordinal: 0,
+      evidence: {
+        create: {
+          role: "SUPPORTING",
+          referenceKey: `ev_${input.snapshotHash}_revenue`,
+          ordinal: 0,
+          sourceKind: "SEC_FACT",
+          title: "AAPL revenue filing evidence",
+          sourceReference: `sec://e2e/${input.snapshotHash}/revenue`,
+          accessionNumber: "0000320193-26-000001",
+          section: "Revenue",
+          sourceUrl: "https://www.sec.gov/Archives/e2e-revenue",
+          sourceDate: new Date("2026-06-30T00:00:00.000Z"),
+          excerpt:
+            "The filing reports bounded revenue evidence for the period.",
+          metadataJson: { fixture: "authenticated-e2e" },
+        },
+      },
+    },
+  });
+  return job;
+}
 
 function safeLocalDatabase() {
   if (process.env.E2E_BASE_URL?.trim()) return false;
@@ -82,6 +199,26 @@ test.describe("authenticated production boundaries", () => {
       },
     });
     portfolioAId = portfolio.id;
+    const stock = await db.stock.findUniqueOrThrow({
+      where: { ticker: "AAPL" },
+      select: { id: true },
+    });
+    const currentCreatedAt = new Date();
+    await createResearchFixture({
+      userId: userA.id,
+      stockId: stock.id,
+      createdAt: new Date(currentCreatedAt.getTime() - 24 * 60 * 60_000),
+      statement: "Prior-period revenue evidence was bounded.",
+      snapshotHash: "previous",
+    });
+    const current = await createResearchFixture({
+      userId: userA.id,
+      stockId: stock.id,
+      createdAt: currentCreatedAt,
+      statement: "Current revenue evidence supports a bounded claim.",
+      snapshotHash: "current",
+    });
+    currentResearchJobId = current.id;
   });
 
   test.afterAll(async () => {
@@ -136,6 +273,57 @@ test.describe("authenticated production boundaries", () => {
         name: /administrator access required/i,
       }),
     ).toBeVisible();
+  });
+
+  test("an owner opens research history, report diff, and a claim citation", async ({
+    context,
+    page,
+  }) => {
+    await authenticate(context, tokenA);
+    await page.goto("/app/research");
+    await expect(
+      page.getByRole("heading", { name: "Your research" }),
+    ).toBeVisible();
+    await page
+      .locator(`a[href="/app/research/${currentResearchJobId}"]`, {
+        hasText: "Open private report",
+      })
+      .click();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/app/research/${currentResearchJobId}$`),
+    );
+    await expect(
+      page.getByText("AI-generated", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("Changes from previous report")).toBeVisible();
+    await expect(
+      page
+        .getByText("Current revenue evidence supports a bounded claim.")
+        .first(),
+    ).toBeVisible();
+    await expect(page.getByText("Report: m18-report-e2e")).toBeVisible();
+
+    await page
+      .getByRole("button", { name: "AAPL revenue filing evidence" })
+      .click();
+    await expect(
+      page.getByText("Source registry", { exact: true }),
+    ).toBeVisible();
+    const evidence = page.locator("[id^='evidence-ev_current_revenue']");
+    await expect(evidence).toBeVisible();
+    await expect(evidence).toBeFocused();
+  });
+
+  test("a second user cannot open another user's research report", async ({
+    context,
+    page,
+  }) => {
+    await authenticate(context, tokenB);
+    const response = await page.goto(`/app/research/${currentResearchJobId}`);
+
+    expect(response?.status()).toBe(404);
+    await expect(page.getByText(/page could not be found/i)).toBeVisible();
   });
 
   test("sign-out revokes the browser session", async ({ context, page }) => {

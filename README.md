@@ -2,7 +2,7 @@
 
 PortfolioScope is a full-stack portfolio analytics and explainable stock-research demo built for long-term investors. It combines period-based performance, holding contribution analysis, deterministic risk alerts, and specialist research agents in a polished recruiter-ready experience.
 
-> This is an educational analytics demo, not a brokerage or financial-advice product. PortfolioScope fundamentals come from SEC EDGAR when ingested, market charts are attributed TradingView widgets, and portfolio/research fixtures remain deterministic and seeded. The app does not place trades, predict prices, or issue buy/sell/hold recommendations.
+> This is an educational analytics demo, not a brokerage or financial-advice product. PortfolioScope fundamentals come from SEC EDGAR when ingested, market charts are attributed TradingView widgets, and portfolio/research fixtures remain deterministic and seeded. Optional AI research interprets only supplied public evidence; it is disabled by default and is not itself a financial-data source. The app does not place trades, predict prices, or issue buy/sell/hold recommendations.
 
 ## Product highlights
 
@@ -13,7 +13,8 @@ PortfolioScope is a full-stack portfolio analytics and explainable stock-researc
 - Stock detail views with attributed TradingView charts and SEC-derived fundamentals
 - Filing-level source, period, retrieval, freshness, and normalization provenance
 - Private R2 retention for raw SEC submissions and Company Facts payloads
-- Structured research agents for news, financials, competitors, political activity, and risk
+- Evidence-grounded research agents with claim citations, counter-evidence, missing-data states, history, and report diffs
+- Deterministic and recorded model providers plus a default-off, budget-capped OpenAI provider
 - Deterministic seeded data for a stable, repeatable demo
 - GitHub and Google OAuth through Auth.js with revocable database sessions
 - Server-controlled USER and ADMIN roles, protected routes, and account deletion
@@ -63,6 +64,8 @@ flowchart LR
   Providers --> SEC[SEC EDGAR]
   Providers --> R2[(Private Cloudflare R2)]
   Providers --> Agents[Specialist research agents]
+  Evidence[Versioned public evidence snapshot] --> Agents
+  Agents -. default-off .-> Model[OpenAI Responses API]
   Agents --> Synthesis[Research synthesis]
   Prisma --> Postgres[(PostgreSQL)]
 ```
@@ -119,6 +122,19 @@ the normal seeded demo. To exercise jobs, configure environment-isolated Redis
 and QStash credentials, apply both M15 migrations, verify the signed callback,
 then enable workloads in the order documented in [`RUNBOOK.md`](RUNBOOK.md).
 
+M18 external research is separately opt-in and is not needed for the local
+demo. Keep `AI_RESEARCH_ENABLED=false` unless the additive M18 migration,
+public-evidence boundary, OpenAI credential, provider-side billing alerts, and
+the application quotas have been verified in that environment. See
+[`docs/ai-research.md`](docs/ai-research.md) for the activation and rollback
+sequence.
+
+Local verification has successfully applied migrations
+`20260811120000_m18_ai_research_foundation` and
+`20260811130000_m18_bind_ai_generation_config`; all eight dedicated M18
+database integration cases pass. Preview and Production must still apply and
+verify both migrations independently with external AI disabled.
+
 ## Quality checks
 
 ```bash
@@ -159,6 +175,8 @@ The repository includes:
 - Private content-addressed R2 raw-source storage and normalized PostgreSQL facts
 - Explicit missing, ambiguous, stale, failed, and unsupported fundamentals states
 - Durable SEC, deterministic research, snapshot, and maintenance jobs with signed callbacks and admin diagnostics
+- A versioned evidence-retrieval and structured-generation layer with normalized claims/citations, bounded repair, report reuse/diff utilities, and offline evaluation
+- PostgreSQL-authoritative global, per-user, and per-job AI reservations with a checked-in `$5 USD` monthly application maximum and a default-off external-call kill switch
 - Redis cache/lock/rate-limit policies plus two bounded QStash maintenance schedules
 - Privacy-safe structured logs, request correlation, Sentry release/error context, and an admin-only dependency dashboard
 - Explicit PostHog event contracts with autocapture, replay, and person profiles disabled
@@ -179,12 +197,16 @@ No public demo URL is claimed here until a deployment is verified.
 - [`RUNBOOK.md`](RUNBOOK.md) — production deployment, monitoring, and rollback
 - [`docs/sec-data.md`](docs/sec-data.md) — SEC contracts, normalization, provenance, freshness, and operations
 
+- [`docs/ai-research.md`](docs/ai-research.md) — M18 grounding, privacy, providers, budgets, activation, and rollback
+- [`docs/ai-evaluation.md`](docs/ai-evaluation.md) — offline metrics, curated cases, and manual review rubric
+
 ## Roadmap
 
 - M17 frontend and recruiter-demo experience implemented in the repository
+- M18 repository completion gates and local migrations verified; external OpenAI activation and deployed evidence remain pending
 - Activate and verify the implemented Redis/QStash M15 layer in Preview and Production
 - Activate and externally verify M16 monitors, analytics, backup delivery, restore evidence, and rollback controls
-- Complete external production UX, accessibility, and Core Web Vitals verification before beginning M18
+- Complete deployed UX/accessibility checks and the M18 controlled Preview evaluation before any Production AI activation
 - Replaceable licensed market-data providers when justified
 - Benchmarking, dividends, and portfolio import
 

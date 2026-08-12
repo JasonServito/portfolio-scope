@@ -244,7 +244,7 @@ const mutationCases = [
     service: mocks.updateAlertStatus,
   },
   {
-    expectedArgs: [actor.id, "AAPL"],
+    expectedArgs: [actor.id, "AAPL", { regenerate: false }],
     expectedStatus: 202,
     invoke: () =>
       runResearchRoute(

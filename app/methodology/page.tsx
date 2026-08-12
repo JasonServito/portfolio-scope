@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { Calculator, CircleOff, Scale, TimerReset } from "lucide-react";
+import {
+  Calculator,
+  CircleOff,
+  FileCheck2,
+  Scale,
+  TimerReset,
+} from "lucide-react";
 
 import { PublicContent } from "@/components/layout/public-content";
 import { PublicSiteShell } from "@/components/layout/public-site-shell";
@@ -40,6 +46,13 @@ const methods = [
     detail:
       "PortfolioScope preserves unavailable, ambiguous, unsupported, delayed, stale, partial, and failed states instead of fabricating a numeric value.",
   },
+  {
+    icon: FileCheck2,
+    title: "Evidence-grounded AI research",
+    formula: "validated claim → supporting and counter evidence",
+    detail:
+      "The optional model path retrieves a bounded, versioned public-source snapshot. Runtime schemas reject malformed or uncited claims, numerical statements must appear in cited evidence, and missing information remains explicit. External AI is disabled by default.",
+  },
 ] as const;
 
 export default function MethodologyPage() {
@@ -50,7 +63,10 @@ export default function MethodologyPage() {
         eyebrow="Calculation policy"
         title="Transparent inputs. Reproducible outputs."
       >
-        <section aria-label="Portfolio calculation methods" className="grid gap-4 md:grid-cols-2">
+        <section
+          aria-label="Portfolio calculation methods"
+          className="grid gap-4 md:grid-cols-2"
+        >
           {methods.map(({ detail, formula, icon: Icon, title }) => (
             <article className="rounded-2xl border bg-card p-6" key={title}>
               <Icon className="size-5 text-primary" />
@@ -76,10 +92,19 @@ export default function MethodologyPage() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             {[
-              ["Concentration", "Flags outsized position exposure against a documented threshold."],
+              [
+                "Concentration",
+                "Flags outsized position exposure against a documented threshold.",
+              ],
               ["Drawdown", "Compares an observed price with its period high."],
-              ["Price move", "Surfaces deterministic movement over the configured period."],
-              ["Watchlist", "Compares seeded context with an optional user target."],
+              [
+                "Price move",
+                "Surfaces deterministic movement over the configured period.",
+              ],
+              [
+                "Watchlist",
+                "Compares seeded context with an optional user target.",
+              ],
             ].map(([title, detail]) => (
               <div className="rounded-xl border bg-card p-5" key={title}>
                 <h3 className="font-semibold">{title}</h3>

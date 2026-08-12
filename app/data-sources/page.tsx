@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { BarChart3, Database, FlaskConical, HardDrive } from "lucide-react";
+import {
+  BarChart3,
+  BrainCircuit,
+  Database,
+  FlaskConical,
+  HardDrive,
+} from "lucide-react";
 
 import { PublicContent } from "@/components/layout/public-content";
 import { PublicSiteShell } from "@/components/layout/public-site-shell";
@@ -45,6 +51,14 @@ const sources = [
     detail:
       "Raw SEC responses and logical backups are stored privately outside PostgreSQL. Public source links point to the SEC rather than exposing object-storage credentials.",
   },
+  {
+    icon: BrainCircuit,
+    name: "Optional OpenAI interpretation",
+    role: "Bounded interpretation, never a financial-data source",
+    status: "Default-off and budget capped",
+    detail:
+      "When an administrator explicitly enables it, the model receives only selected public company evidence and must return schema-validated claims tied to supplied evidence IDs. It cannot browse, and private holdings, watchlists, alerts, and portfolio values are excluded.",
+  },
 ] as const;
 
 export default function DataSourcesPage() {
@@ -82,10 +96,22 @@ export default function DataSourcesPage() {
           </div>
           <dl className="grid sm:grid-cols-2 lg:grid-cols-4">
             {[
-              ["Current / recent", "A valid source retrieval is within its configured freshness window."],
-              ["Delayed / stale", "Existing data remains visible with its original timestamp and a warning."],
-              ["Missing / unsupported", "No eligible fact exists, or the issuer is outside curated coverage."],
-              ["Failed / partial", "Useful prior data can remain visible while the failed refresh is disclosed."],
+              [
+                "Current / recent",
+                "A valid source retrieval is within its configured freshness window.",
+              ],
+              [
+                "Delayed / stale",
+                "Existing data remains visible with its original timestamp and a warning.",
+              ],
+              [
+                "Missing / unsupported",
+                "No eligible fact exists, or the issuer is outside curated coverage.",
+              ],
+              [
+                "Failed / partial",
+                "Useful prior data can remain visible while the failed refresh is disclosed.",
+              ],
             ].map(([term, detail]) => (
               <div className="border-b p-5 sm:border-r" key={term}>
                 <dt className="font-semibold">{term}</dt>

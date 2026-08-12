@@ -1,20 +1,60 @@
 import {
   AgentName,
   AgentStatus,
+  AiUsageStatus,
   BackgroundJobStatus,
   BackgroundJobType,
   Prisma,
+  ResearchGenerationMode,
   ResearchStatus,
 } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { JobExecutionError } from "@/lib/jobs/errors";
+import type { JobPublisher } from "@/lib/jobs/qstash";
 import { enqueueBackgroundJob } from "@/lib/jobs/service";
+import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 import { runCompetitorsAgent } from "@/lib/research/agents/competitors-agent";
 import { runFinancialsAgent } from "@/lib/research/agents/financials-agent";
 import { runNewsAgent } from "@/lib/research/agents/news-agent";
 import { runPoliticalActivityAgent } from "@/lib/research/agents/political-activity-agent";
 import { runRiskAgent } from "@/lib/research/agents/risk-agent";
+import {
+  AiBudgetError,
+  settleAiUsageInTransaction,
+} from "@/lib/research/ai/budget";
+import {
+  AI_OUTPUT_SCHEMA_VERSION,
+  AI_PROMPT_VERSION,
+  AI_REPORT_VERSION,
+  AiConfigurationError,
+  getQueuedAiResearchConfig,
+  type AiResearchConfig,
+} from "@/lib/research/ai/config";
+import {
+  GroundedModelCallError,
+  runGroundedModelCall,
+} from "@/lib/research/ai/model-runner";
+import { specialistPrompt, synthesisPrompt } from "@/lib/research/ai/prompts";
+import {
+  OpenAIResponsesResearchModelProvider,
+  type ResearchModelProvider,
+} from "@/lib/research/ai/providers";
+import {
+  buildResearchEvidenceSnapshot,
+  ResearchEvidenceSnapshotError,
+  selectEvidence,
+} from "@/lib/research/ai/retrieval";
+import {
+  claimKey,
+  specialistModelOutputSchema,
+  synthesisModelOutputSchema,
+  validateGroundedOutput,
+  type ModelClaim,
+  type ResearchEvidence,
+  type SpecialistModelOutput,
+  type SynthesisModelOutput,
+} from "@/lib/research/ai/schemas";
 import { seededResearchProvider } from "@/lib/research/providers/seeded-provider";
 import { synthesizeResearch } from "@/lib/research/synthesis-agent";
 import {
@@ -27,6 +67,17 @@ import {
 } from "@/lib/research/types";
 
 const REPORT_TTL_DAYS = 30;
+const AI_SPECIALIST_AGENT_VERSION = "m18-specialist-v1";
+const AI_SYNTHESIS_AGENT_VERSION = "m18-synthesis-v1";
+
+type BackgroundDependencies = {
+  environment?: NodeJS.ProcessEnv;
+  provider?: ResearchModelProvider;
+  config?: AiResearchConfig;
+  buildSnapshot?: typeof buildResearchEvidenceSnapshot;
+  publisher?: JobPublisher;
+  now?: () => Date;
+};
 
 function expiresAtFrom(date: Date) {
   const expiresAt = new Date(date);
@@ -34,7 +85,17 @@ function expiresAtFrom(date: Date) {
   return expiresAt;
 }
 
-function jsonArray<T>(value: Prisma.JsonValue): T[] {
+function startOfUtcDay(date: Date) {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+}
+
+function utcDateString(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function jsonArray<T>(value: Prisma.JsonValue | null): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
@@ -47,6 +108,13 @@ function storedAgentResult(run: {
   findingsJson: Prisma.JsonValue;
   sourcesJson: Prisma.JsonValue;
   warningsJson: Prisma.JsonValue;
+  claimsJson?: Prisma.JsonValue | null;
+  missingDataJson?: Prisma.JsonValue | null;
+  provider?: string | null;
+  model?: string | null;
+  promptVersion?: string | null;
+  outputSchemaVersion?: string | null;
+  agentVersion?: string | null;
 }): AgentResult {
   return {
     agentName: run.agentName,
@@ -57,10 +125,22 @@ function storedAgentResult(run: {
     findings: jsonArray<ResearchFinding>(run.findingsJson),
     sources: jsonArray<ResearchSource>(run.sourcesJson),
     warnings: jsonArray<string>(run.warningsJson),
+    claims: jsonArray<NonNullable<AgentResult["claims"]>[number]>(
+      run.claimsJson ?? null,
+    ),
+    missingData: jsonArray<string>(run.missingDataJson ?? null),
+    provider: run.provider,
+    model: run.model,
+    promptVersion: run.promptVersion,
+    outputSchemaVersion: run.outputSchemaVersion,
+    agentVersion: run.agentVersion,
   };
 }
 
-function runSpecialist(agentName: SpecialistAgentName, data: Parameters<typeof runNewsAgent>[0]) {
+function runSpecialist(
+  agentName: SpecialistAgentName,
+  data: Parameters<typeof runNewsAgent>[0],
+) {
   switch (agentName) {
     case "NEWS":
       return runNewsAgent(data);
@@ -75,15 +155,272 @@ function runSpecialist(agentName: SpecialistAgentName, data: Parameters<typeof r
   }
 }
 
-export async function executeResearchAgent(input: {
-  researchJobId: string;
-  agentName: SpecialistAgentName;
-  userId: string;
-  correlationId: string;
-}) {
+function agentQuery(agentName: SpecialistAgentName) {
+  switch (agentName) {
+    case "FINANCIALS":
+      return "revenue income cash assets liabilities equity financial period annual quarterly";
+    case "COMPETITORS":
+      return "company sector industry exchange peer competitors comparison";
+    case "RISK":
+      return "liabilities cash debt revenue concentration ambiguity missing risk filing";
+    case "NEWS":
+      return "licensed current company news";
+    case "POLITICAL_ACTIVITY":
+      return "verified political activity lobbying contribution";
+  }
+}
+
+function citedEvidence(claims: ModelClaim[], evidence: ResearchEvidence[]) {
+  const ids = new Set(
+    claims.flatMap((claim) => [
+      ...claim.evidenceIds,
+      ...claim.counterEvidenceIds,
+    ]),
+  );
+  return evidence.filter((item) => ids.has(item.id));
+}
+
+function sourcesFromEvidence(evidence: ResearchEvidence[]): ResearchSource[] {
+  return evidence.map((item) => ({
+    title: item.title,
+    reference: item.sourceReference,
+    detail: item.excerpt,
+  }));
+}
+
+function externalAgentResult(
+  agentName: SpecialistAgentName,
+  output: SpecialistModelOutput,
+  evidence: ResearchEvidence[],
+): AgentResult {
+  return {
+    agentName,
+    status: "COMPLETED",
+    rating: output.rating,
+    confidence: output.confidence,
+    summary: output.summary,
+    findings: output.claims.map((claim) => ({
+      label: claim.category.toLowerCase().replaceAll("_", " "),
+      detail: claim.statement,
+    })),
+    sources: sourcesFromEvidence(citedEvidence(output.claims, evidence)),
+    warnings: output.warnings,
+    claims: output.claims,
+    missingData: output.missingData,
+  };
+}
+
+function missingExternalSpecialist(
+  agentName: SpecialistAgentName,
+  reason: string,
+): SpecialistModelOutput {
+  return {
+    rating: "NEUTRAL",
+    confidence: 0,
+    summary: reason,
+    claims: [],
+    warnings: [],
+    missingData: [reason],
+  };
+}
+
+function publicDataGap(agentName: SpecialistAgentName) {
+  if (agentName === "NEWS") {
+    return "Licensed current-news evidence is not configured; filings are not treated as current news.";
+  }
+  return "Verified political-activity evidence is not configured for this company.";
+}
+
+function modelProvider(
+  config: AiResearchConfig,
+  dependencies: BackgroundDependencies,
+) {
+  return (
+    dependencies.provider ??
+    OpenAIResponsesResearchModelProvider.fromConfig(config)
+  );
+}
+
+async function assertUsageReconciled(researchJobId: string) {
+  const unconfirmed = await db.aiUsage.count({
+    where: {
+      researchJobId,
+      status: AiUsageStatus.UNCONFIRMED,
+    },
+  });
+  if (unconfirmed > 0) {
+    throw new AiBudgetError(
+      "AI_USAGE_RECONCILIATION_REQUIRED",
+      "A prior provider attempt requires cost reconciliation.",
+    );
+  }
+}
+
+function boundAiConfig(
+  generationConfigJson: Prisma.JsonValue | null,
+  environment: NodeJS.ProcessEnv,
+  dependencies: BackgroundDependencies,
+) {
+  const bound = getQueuedAiResearchConfig(generationConfigJson, environment);
+  if (!dependencies.config) return bound;
+  return {
+    ...dependencies.config,
+    provider: bound.provider,
+    model: bound.model,
+    pricing: bound.pricing,
+    pricingVersion: bound.pricingVersion,
+    maxOutputTokensPerCall: bound.maxOutputTokensPerCall,
+    providerTimeoutMs: bound.providerTimeoutMs,
+  };
+}
+
+async function snapshotForJob(
+  researchJobId: string,
+  dependencies: BackgroundDependencies,
+) {
+  return (dependencies.buildSnapshot ?? buildResearchEvidenceSnapshot)(
+    researchJobId,
+  );
+}
+
+async function updateAgentRun(
+  researchJobId: string,
+  agentName: SpecialistAgentName,
+  result: AgentResult,
+  metadata: {
+    provider?: string | null;
+    model?: string | null;
+    modelConfigJson?: Prisma.InputJsonValue;
+    promptVersion?: string | null;
+    outputSchemaVersion?: string | null;
+    agentVersion: string;
+  },
+  usage?: {
+    usageId: string;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    providerRequestId: string | null;
+  } | null,
+) {
+  const completedAt = new Date();
+  await db.$transaction(async (transaction) => {
+    await transaction.agentRun.update({
+      where: { researchJobId_agentName: { researchJobId, agentName } },
+      data: {
+        status: AgentStatus.COMPLETED,
+        rating: result.rating,
+        confidence: result.confidence,
+        summary: result.summary,
+        findingsJson: result.findings,
+        sourcesJson: result.sources,
+        warningsJson: result.warnings,
+        claimsJson: result.claims ?? [],
+        missingDataJson: result.missingData ?? [],
+        provider: metadata.provider,
+        model: metadata.model,
+        modelConfigJson: metadata.modelConfigJson,
+        promptVersion: metadata.promptVersion,
+        outputSchemaVersion: metadata.outputSchemaVersion,
+        agentVersion: metadata.agentVersion,
+        completedAt,
+      },
+    });
+    if (usage) {
+      await settleAiUsageInTransaction(transaction, usage.usageId, usage);
+    }
+  });
+}
+
+async function enqueueSynthesisIfReady(
+  input: {
+    researchJobId: string;
+    userId: string;
+    correlationId: string;
+  },
+  dependencies: BackgroundDependencies = {},
+) {
+  const specialistStates = await db.agentRun.findMany({
+    where: {
+      researchJobId: input.researchJobId,
+      agentName: { in: [...SPECIALIST_AGENT_NAMES] },
+    },
+    select: { status: true },
+  });
+  const completedSpecialists = specialistStates.filter(
+    ({ status }) => status === AgentStatus.COMPLETED,
+  ).length;
+  const failedSpecialists = specialistStates.filter(
+    ({ status }) => status === AgentStatus.FAILED,
+  ).length;
+  const parent = await db.researchJob.findUnique({
+    where: { id: input.researchJobId },
+    select: { status: true },
+  });
+  if (parent?.status === ResearchStatus.CANCELLED) {
+    return { completedSpecialists, cancelled: true };
+  }
+
+  if (completedSpecialists !== SPECIALIST_AGENT_NAMES.length) {
+    await db.researchJob.updateMany({
+      where: {
+        id: input.researchJobId,
+        status: { not: ResearchStatus.CANCELLED },
+      },
+      data: {
+        status:
+          failedSpecialists > 0
+            ? ResearchStatus.PARTIALLY_COMPLETED
+            : ResearchStatus.RUNNING,
+      },
+    });
+    return { completedSpecialists, cancelled: false };
+  }
+
+  const synthesis = await enqueueBackgroundJob(
+    {
+      type: BackgroundJobType.RESEARCH_SYNTHESIS,
+      idempotencyKey: `research:${input.researchJobId}:synthesis`,
+      correlationId: input.correlationId,
+      payload: { researchJobId: input.researchJobId },
+      userId: input.userId,
+      researchJobId: input.researchJobId,
+    },
+    {
+      publisher: dependencies.publisher,
+      environment: dependencies.environment,
+    },
+  );
+  if (
+    synthesis.status === BackgroundJobStatus.FAILED ||
+    synthesis.status === BackgroundJobStatus.PARTIALLY_COMPLETED ||
+    synthesis.status === BackgroundJobStatus.CANCELLED
+  ) {
+    throw new JobExecutionError(
+      "RESEARCH_SYNTHESIS_DISPATCH_FAILED",
+      true,
+      "Research synthesis requires an administrator retry.",
+      true,
+    );
+  }
+  return { completedSpecialists, cancelled: false };
+}
+
+export async function executeResearchAgent(
+  input: {
+    researchJobId: string;
+    agentName: SpecialistAgentName;
+    userId: string;
+    correlationId: string;
+    attemptNumber?: number;
+    maxAttempts?: number;
+    signal?: AbortSignal;
+  },
+  dependencies: BackgroundDependencies = {},
+) {
   const researchJob = await db.researchJob.findFirst({
     where: { id: input.researchJobId, userId: input.userId },
-    include: { stock: true },
+    include: { stock: true, agentRuns: true },
   });
   if (!researchJob || researchJob.status === ResearchStatus.CANCELLED) {
     throw new JobExecutionError(
@@ -91,6 +428,17 @@ export async function executeResearchAgent(input: {
       false,
       "The owned research job no longer exists.",
     );
+  }
+  const existing = researchJob.agentRuns.find(
+    (run) => run.agentName === input.agentName,
+  );
+  if (existing?.status === AgentStatus.COMPLETED) {
+    const state = await enqueueSynthesisIfReady(input, dependencies);
+    return {
+      researchJobId: researchJob.id,
+      agentName: input.agentName,
+      ...state,
+    };
   }
 
   await db.$transaction([
@@ -121,108 +469,139 @@ export async function executeResearchAgent(input: {
     }),
   ]);
 
-  let completedSpecialists: number;
   try {
-    const providerData = await seededResearchProvider.getResearchData(
-      researchJob.stock.ticker,
-      { userId: input.userId },
-    );
-    if (!providerData) {
-      throw new JobExecutionError(
-        "RESEARCH_INPUT_UNAVAILABLE",
-        false,
-        "Deterministic research inputs are unavailable.",
+    if (researchJob.generationMode === ResearchGenerationMode.DETERMINISTIC) {
+      const providerData = await seededResearchProvider.getResearchData(
+        researchJob.stock.ticker,
+        { userId: input.userId },
       );
-    }
-    const result = runSpecialist(input.agentName, providerData);
-    const completedAt = new Date();
-    await db.agentRun.update({
-      where: {
-        researchJobId_agentName: {
-          researchJobId: researchJob.id,
-          agentName: input.agentName,
-        },
-      },
-      data: {
-        status: AgentStatus.COMPLETED,
-        rating: result.rating,
-        confidence: result.confidence,
-        summary: result.summary,
-        findingsJson: result.findings,
-        sourcesJson: result.sources,
-        warningsJson: result.warnings,
-        completedAt,
-      },
-    });
-
-    const specialistStates = await db.agentRun.findMany({
-      where: {
-        researchJobId: researchJob.id,
-        agentName: { in: [...SPECIALIST_AGENT_NAMES] },
-      },
-      select: { status: true },
-    });
-    completedSpecialists = specialistStates.filter(
-      ({ status }) => status === AgentStatus.COMPLETED,
-    ).length;
-    const failedSpecialists = specialistStates.filter(
-      ({ status }) => status === AgentStatus.FAILED,
-    ).length;
-    const parent = await db.researchJob.findUnique({
-      where: { id: researchJob.id },
-      select: { status: true },
-    });
-    if (parent?.status === ResearchStatus.CANCELLED) {
-      return {
-        researchJobId: researchJob.id,
-        agentName: input.agentName,
-        completedSpecialists,
-        cancelled: true,
-      };
-    }
-
-    if (completedSpecialists !== SPECIALIST_AGENT_NAMES.length) {
-      await db.researchJob.updateMany({
-        where: {
-          id: researchJob.id,
-          status: { not: ResearchStatus.CANCELLED },
-        },
-        data: {
-          status:
-            failedSpecialists > 0
-              ? ResearchStatus.PARTIALLY_COMPLETED
-              : ResearchStatus.RUNNING,
-        },
-      });
-    }
-
-    if (completedSpecialists === SPECIALIST_AGENT_NAMES.length) {
-      const synthesis = await enqueueBackgroundJob({
-        type: BackgroundJobType.RESEARCH_SYNTHESIS,
-        idempotencyKey: `research:${researchJob.id}:synthesis`,
-        correlationId: input.correlationId,
-        payload: { researchJobId: researchJob.id },
-        userId: input.userId,
-        researchJobId: researchJob.id,
-      });
-      if (
-        synthesis.status === BackgroundJobStatus.FAILED ||
-        synthesis.status === BackgroundJobStatus.PARTIALLY_COMPLETED ||
-        synthesis.status === BackgroundJobStatus.CANCELLED
-      ) {
+      if (!providerData) {
         throw new JobExecutionError(
-          "RESEARCH_SYNTHESIS_DISPATCH_FAILED",
+          "RESEARCH_INPUT_UNAVAILABLE",
+          false,
+          "Deterministic research inputs are unavailable.",
+        );
+      }
+      const result = runSpecialist(input.agentName, providerData);
+      await updateAgentRun(researchJob.id, input.agentName, result, {
+        provider: "seeded",
+        agentVersion: "deterministic-v1",
+      });
+    } else {
+      const snapshot = await snapshotForJob(researchJob.id, dependencies);
+      if (!snapshot) {
+        throw new GroundedModelCallError(
+          "AI_SOURCE_SNAPSHOT_UNAVAILABLE",
+          false,
           true,
-          "Research synthesis requires an administrator retry.",
-          true,
+        );
+      }
+
+      if (
+        input.agentName === "NEWS" ||
+        input.agentName === "POLITICAL_ACTIVITY"
+      ) {
+        const output = missingExternalSpecialist(
+          input.agentName,
+          publicDataGap(input.agentName),
+        );
+        await updateAgentRun(
+          researchJob.id,
+          input.agentName,
+          externalAgentResult(input.agentName, output, []),
+          {
+            provider: "bounded-missing-data",
+            agentVersion: AI_SPECIALIST_AGENT_VERSION,
+            promptVersion: AI_PROMPT_VERSION,
+            outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
+          },
+        );
+      } else {
+        const environment = dependencies.environment ?? process.env;
+        if (
+          !dependencies.provider &&
+          !isFeatureEnabled("AI_RESEARCH_ENABLED", environment)
+        ) {
+          throw new GroundedModelCallError("AI_RESEARCH_DISABLED", false, true);
+        }
+        await assertUsageReconciled(researchJob.id);
+        const config = boundAiConfig(
+          researchJob.generationConfigJson,
+          environment,
+          dependencies,
+        );
+        const evidenceSelection = selectEvidence(snapshot, {
+          query: agentQuery(input.agentName),
+          agent: input.agentName,
+          maxResults: 8,
+          contextCharBudget: 6_000,
+        });
+        const evidence = [...evidenceSelection.evidence];
+        const generated = await runGroundedModelCall(
+          {
+            provider: modelProvider(config, dependencies),
+            config,
+            schema: specialistModelOutputSchema,
+            schemaName: `research_${input.agentName.toLowerCase()}_v1`,
+            evidence,
+            prompt: (repairFeedback) =>
+              specialistPrompt({
+                agentName: input.agentName,
+                ticker: researchJob.stock.ticker,
+                companyName: researchJob.stock.companyName,
+                asOfDate: utcDateString(researchJob.createdAt),
+                evidence,
+                evidenceContext: evidenceSelection.context,
+                repairFeedback,
+              }),
+            userId: input.userId,
+            researchJobId: researchJob.id,
+            agentRunId: existing?.id,
+            operation: `SPECIALIST_${input.agentName}`,
+            idempotencyKey: `research:${researchJob.id}:agent:${input.agentName}:delivery:${input.attemptNumber ?? 1}`,
+            now: dependencies.now?.(),
+            signal: input.signal,
+          },
+          { environment },
+        );
+        const result = externalAgentResult(
+          input.agentName,
+          generated.output,
+          evidence,
+        );
+        await updateAgentRun(
+          researchJob.id,
+          input.agentName,
+          result,
+          {
+            provider: generated.providerResult.provider,
+            model: generated.providerResult.model,
+            modelConfigJson: {
+              maxOutputTokens: config.maxOutputTokensPerCall,
+            },
+            promptVersion: AI_PROMPT_VERSION,
+            outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
+            agentVersion: AI_SPECIALIST_AGENT_VERSION,
+          },
+          generated.reservation
+            ? {
+                usageId: generated.reservation.usageId,
+                inputTokens: generated.providerResult.usage.inputTokens,
+                cachedInputTokens:
+                  generated.providerResult.usage.cachedInputTokens,
+                outputTokens: generated.providerResult.usage.outputTokens,
+                providerRequestId: generated.providerResult.providerRequestId,
+              }
+            : null,
         );
       }
     }
 
+    const state = await enqueueSynthesisIfReady(input, dependencies);
     return {
       researchJobId: researchJob.id,
       agentName: input.agentName,
-      completedSpecialists,
+      ...state,
     };
   } catch (error) {
     const completedRun = await db.agentRun.findUnique({
@@ -252,6 +631,43 @@ export async function executeResearchAgent(input: {
       );
     }
 
+    const attemptNumber = input.attemptNumber ?? 1;
+    const maxAttempts = input.maxAttempts ?? 3;
+    const isModelFailure =
+      error instanceof GroundedModelCallError ||
+      error instanceof AiBudgetError ||
+      error instanceof AiConfigurationError ||
+      error instanceof ResearchEvidenceSnapshotError;
+    const retryable =
+      error instanceof GroundedModelCallError && error.retryable;
+    if (
+      researchJob.generationMode !== ResearchGenerationMode.DETERMINISTIC &&
+      isModelFailure &&
+      (!retryable || attemptNumber >= maxAttempts)
+    ) {
+      const reason =
+        "This specialist could not complete safely; its evidence gap is preserved in the partial report.";
+      const output = missingExternalSpecialist(input.agentName, reason);
+      await updateAgentRun(
+        researchJob.id,
+        input.agentName,
+        externalAgentResult(input.agentName, output, []),
+        {
+          provider: "partial-fallback",
+          agentVersion: AI_SPECIALIST_AGENT_VERSION,
+          promptVersion: AI_PROMPT_VERSION,
+          outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
+        },
+      );
+      const state = await enqueueSynthesisIfReady(input, dependencies);
+      return {
+        researchJobId: researchJob.id,
+        agentName: input.agentName,
+        partial: true,
+        ...state,
+      };
+    }
+
     await db.$transaction([
       db.agentRun.update({
         where: {
@@ -260,10 +676,7 @@ export async function executeResearchAgent(input: {
             agentName: input.agentName,
           },
         },
-        data: {
-          status: AgentStatus.FAILED,
-          completedAt: new Date(),
-        },
+        data: { status: AgentStatus.FAILED, completedAt: new Date() },
       }),
       db.researchJob.updateMany({
         where: {
@@ -274,23 +687,364 @@ export async function executeResearchAgent(input: {
       }),
     ]);
     if (error instanceof JobExecutionError) throw error;
+    if (error instanceof GroundedModelCallError) {
+      throw new JobExecutionError(
+        error.code,
+        error.retryable,
+        error.message,
+        true,
+        { cause: error },
+      );
+    }
     throw new JobExecutionError(
       "RESEARCH_AGENT_FAILED",
       true,
-      "A deterministic research agent failed.",
+      researchJob.generationMode === ResearchGenerationMode.DETERMINISTIC
+        ? "A deterministic research agent failed."
+        : "An evidence-grounded research specialist failed.",
       true,
       { cause: error },
     );
   }
 }
 
-export async function executeResearchSynthesis(input: {
-  researchJobId: string;
-  userId: string;
+function specialistOutput(run: {
+  rating: string | null;
+  confidence: { toNumber(): number } | null;
+  summary: string;
+  claimsJson: Prisma.JsonValue | null;
+  warningsJson: Prisma.JsonValue;
+  missingDataJson: Prisma.JsonValue | null;
 }) {
+  return specialistModelOutputSchema.parse({
+    rating: run.rating ?? "NEUTRAL",
+    confidence: run.confidence?.toNumber() ?? 0,
+    summary: run.summary,
+    claims: jsonArray<ModelClaim>(run.claimsJson),
+    warnings: jsonArray<string>(run.warningsJson),
+    missingData: jsonArray<string>(run.missingDataJson),
+  });
+}
+
+function partialSynthesis(
+  companyName: string,
+  specialists: Array<{
+    agentName: SpecialistAgentName;
+    output: SpecialistModelOutput;
+  }>,
+  evidence: ResearchEvidence[],
+): SynthesisModelOutput {
+  const allowedEvidenceIds = new Set(evidence.map((item) => item.id));
+  const uniqueClaims = new Map<string, ModelClaim>();
+  let omittedClaims = 0;
+  for (const specialist of specialists) {
+    for (const claim of specialist.output.claims) {
+      const references = [...claim.evidenceIds, ...claim.counterEvidenceIds];
+      if (references.some((reference) => !allowedEvidenceIds.has(reference))) {
+        omittedClaims += 1;
+        continue;
+      }
+      uniqueClaims.set(claimKey(claim), claim);
+    }
+  }
+  const completed = specialists.filter(
+    (specialist) => specialist.output.confidence > 0,
+  );
+  const confidence = completed.length
+    ? completed.reduce((sum, item) => sum + item.output.confidence, 0) /
+      completed.length
+    : 0;
+  const retainedClaims = [...uniqueClaims.values()].slice(0, 12);
+  omittedClaims += Math.max(0, uniqueClaims.size - retainedClaims.length);
+  const output = synthesisModelOutputSchema.parse({
+    rating: "MIXED",
+    confidence: Number(confidence.toFixed(3)),
+    summary: `${companyName} has a bounded partial synthesis from validated public evidence. Provider failure or missing source coverage is preserved explicitly; this is research context, not financial advice.`,
+    claims: retainedClaims,
+    warnings: [
+      "The model synthesis was unavailable, so this report preserves validated specialist claims without adding new interpretation.",
+    ],
+    missingData: [
+      ...new Set(specialists.flatMap((item) => item.output.missingData)),
+      ...(omittedClaims > 0
+        ? [
+            `${omittedClaims} specialist claim${omittedClaims === 1 ? " was" : "s were"} omitted because its immutable source reference was unavailable.`,
+          ]
+        : []),
+    ].slice(0, 10),
+    disagreements: [],
+  });
+  return validateGroundedOutput(output, evidence);
+}
+
+function latestEvidenceDate(claim: ModelClaim, evidence: ResearchEvidence[]) {
+  const cited = new Set([...claim.evidenceIds, ...claim.counterEvidenceIds]);
+  return evidence
+    .filter((item) => cited.has(item.id) && item.sourceDate)
+    .map((item) => item.sourceDate!)
+    .sort()
+    .at(-1);
+}
+
+async function persistExternalReport(input: {
+  researchJob: {
+    id: string;
+    stockId: string;
+    createdAt: Date;
+    sourceSnapshotSha256: string | null;
+    retrievalVersion: string | null;
+    calculationVersion: string | null;
+    inputDataVersion: string | null;
+  };
+  output: SynthesisModelOutput;
+  evidence: ResearchEvidence[];
+  provider: string;
+  model: string | null;
+  config: AiResearchConfig | null;
+  reservation: {
+    usageId: string;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    providerRequestId: string | null;
+  } | null;
+}) {
+  const completedAt = new Date();
+  const asOfDate = startOfUtcDay(input.researchJob.createdAt);
+  const evidenceById = new Map(input.evidence.map((item) => [item.id, item]));
+
+  await db.$transaction(async (transaction) => {
+    const synthesis = await transaction.agentRun.upsert({
+      where: {
+        researchJobId_agentName: {
+          researchJobId: input.researchJob.id,
+          agentName: AgentName.SYNTHESIS,
+        },
+      },
+      update: {
+        status: AgentStatus.COMPLETED,
+        rating: input.output.rating,
+        confidence: input.output.confidence,
+        summary: input.output.summary,
+        findingsJson: input.output.claims.map((claim) => ({
+          label: claim.category.toLowerCase(),
+          detail: claim.statement,
+        })),
+        sourcesJson: sourcesFromEvidence(
+          citedEvidence(input.output.claims, input.evidence),
+        ),
+        warningsJson: input.output.warnings,
+        claimsJson: input.output.claims,
+        missingDataJson: input.output.missingData,
+        provider: input.provider,
+        model: input.model,
+        modelConfigJson: input.config
+          ? { maxOutputTokens: input.config.maxOutputTokensPerCall }
+          : Prisma.JsonNull,
+        promptVersion: AI_PROMPT_VERSION,
+        outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
+        agentVersion: AI_SYNTHESIS_AGENT_VERSION,
+        completedAt,
+      },
+      create: {
+        researchJobId: input.researchJob.id,
+        agentName: AgentName.SYNTHESIS,
+        status: AgentStatus.COMPLETED,
+        rating: input.output.rating,
+        confidence: input.output.confidence,
+        summary: input.output.summary,
+        findingsJson: input.output.claims.map((claim) => ({
+          label: claim.category.toLowerCase(),
+          detail: claim.statement,
+        })),
+        sourcesJson: sourcesFromEvidence(
+          citedEvidence(input.output.claims, input.evidence),
+        ),
+        warningsJson: input.output.warnings,
+        claimsJson: input.output.claims,
+        missingDataJson: input.output.missingData,
+        provider: input.provider,
+        model: input.model,
+        modelConfigJson: input.config
+          ? { maxOutputTokens: input.config.maxOutputTokensPerCall }
+          : Prisma.JsonNull,
+        promptVersion: AI_PROMPT_VERSION,
+        outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
+        agentVersion: AI_SYNTHESIS_AGENT_VERSION,
+        completedAt,
+      },
+    });
+
+    if (input.reservation) {
+      await settleAiUsageInTransaction(
+        transaction,
+        input.reservation.usageId,
+        input.reservation,
+      );
+    }
+    const usage = await transaction.aiUsage.aggregate({
+      where: { researchJobId: input.researchJob.id, status: "SETTLED" },
+      _sum: {
+        inputTokens: true,
+        outputTokens: true,
+        estimatedCostUsd: true,
+      },
+    });
+    const report = await transaction.researchReport.upsert({
+      where: { researchJobId: input.researchJob.id },
+      update: {
+        overview: input.output.summary,
+        rating: input.output.rating,
+        bullCaseJson: input.output.claims
+          .filter((claim) => claim.category === "SUPPORTIVE")
+          .map((claim) => claim.statement),
+        bearCaseJson: input.output.claims
+          .filter((claim) => claim.category === "COUNTERPOINT")
+          .map((claim) => claim.statement),
+        risksJson: [
+          ...input.output.claims
+            .filter((claim) => claim.category === "RISK")
+            .map((claim) => claim.statement),
+          ...input.output.warnings,
+        ],
+        missingDataJson: input.output.missingData,
+        disagreementsJson: input.output.disagreements,
+        confidence: input.output.confidence,
+        provider: input.provider,
+        model: input.model,
+        modelConfigJson: input.config
+          ? { maxOutputTokens: input.config.maxOutputTokensPerCall }
+          : Prisma.JsonNull,
+        promptVersion: AI_PROMPT_VERSION,
+        retrievalVersion: input.researchJob.retrievalVersion,
+        calculationVersion: input.researchJob.calculationVersion,
+        inputDataVersion: input.researchJob.inputDataVersion,
+        outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
+        sourceSnapshotSha256: input.researchJob.sourceSnapshotSha256,
+        inputTokens: usage._sum.inputTokens ?? 0,
+        outputTokens: usage._sum.outputTokens ?? 0,
+        estimatedCostUsd: usage._sum.estimatedCostUsd ?? 0,
+        reportVersion: AI_REPORT_VERSION,
+        generatedAt: completedAt,
+        expiresAt: expiresAtFrom(completedAt),
+      },
+      create: {
+        researchJobId: input.researchJob.id,
+        stockId: input.researchJob.stockId,
+        overview: input.output.summary,
+        rating: input.output.rating,
+        bullCaseJson: input.output.claims
+          .filter((claim) => claim.category === "SUPPORTIVE")
+          .map((claim) => claim.statement),
+        bearCaseJson: input.output.claims
+          .filter((claim) => claim.category === "COUNTERPOINT")
+          .map((claim) => claim.statement),
+        risksJson: [
+          ...input.output.claims
+            .filter((claim) => claim.category === "RISK")
+            .map((claim) => claim.statement),
+          ...input.output.warnings,
+        ],
+        missingDataJson: input.output.missingData,
+        disagreementsJson: input.output.disagreements,
+        confidence: input.output.confidence,
+        provider: input.provider,
+        model: input.model,
+        modelConfigJson: input.config
+          ? { maxOutputTokens: input.config.maxOutputTokensPerCall }
+          : Prisma.JsonNull,
+        promptVersion: AI_PROMPT_VERSION,
+        retrievalVersion: input.researchJob.retrievalVersion,
+        calculationVersion: input.researchJob.calculationVersion,
+        inputDataVersion: input.researchJob.inputDataVersion,
+        outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
+        sourceSnapshotSha256: input.researchJob.sourceSnapshotSha256,
+        inputTokens: usage._sum.inputTokens ?? 0,
+        outputTokens: usage._sum.outputTokens ?? 0,
+        estimatedCostUsd: usage._sum.estimatedCostUsd ?? 0,
+        reportVersion: AI_REPORT_VERSION,
+        generatedAt: completedAt,
+        expiresAt: expiresAtFrom(completedAt),
+      },
+    });
+    await transaction.researchClaim.deleteMany({
+      where: { reportId: report.id },
+    });
+
+    for (const [ordinal, claim] of input.output.claims.entries()) {
+      const cited = [...claim.evidenceIds, ...claim.counterEvidenceIds]
+        .map((id) => evidenceById.get(id))
+        .filter((item): item is ResearchEvidence => Boolean(item));
+      await transaction.researchClaim.create({
+        data: {
+          reportId: report.id,
+          agentRunId: synthesis.id,
+          claimKey: claimKey(claim),
+          category: claim.category,
+          statement: claim.statement,
+          confidence: claim.confidence,
+          assumptionsJson: claim.assumptions,
+          sourceDate: latestEvidenceDate(claim, input.evidence)
+            ? new Date(
+                `${latestEvidenceDate(claim, input.evidence)}T00:00:00.000Z`,
+              )
+            : null,
+          asOfDate,
+          ordinal,
+          evidence: {
+            create: cited.map((evidence, evidenceOrdinal) => ({
+              role: claim.evidenceIds.includes(evidence.id)
+                ? ("SUPPORTING" as const)
+                : ("COUNTER" as const),
+              referenceKey: evidence.id,
+              ordinal: evidenceOrdinal,
+              sourceKind: evidence.sourceKind,
+              title: evidence.title,
+              sourceReference: evidence.sourceReference,
+              secFilingId: evidence.secFilingId,
+              secRawSourceId: evidence.secRawSourceId,
+              secFinancialFactId: evidence.secFinancialFactId,
+              accessionNumber: evidence.accessionNumber,
+              section: evidence.section,
+              sourceUrl: evidence.sourceUrl,
+              objectKey: evidence.objectKey,
+              sha256: evidence.sha256,
+              retrievedAt: evidence.retrievedAt
+                ? new Date(evidence.retrievedAt)
+                : null,
+              sourceDate: evidence.sourceDate
+                ? new Date(`${evidence.sourceDate}T00:00:00.000Z`)
+                : null,
+              passageStart: evidence.passageStart,
+              passageEnd: evidence.passageEnd,
+              excerpt: evidence.excerpt,
+              metadataJson: evidence.metadata as Prisma.InputJsonValue,
+            })),
+          },
+        },
+      });
+    }
+    await transaction.researchJob.update({
+      where: { id: input.researchJob.id },
+      data: { status: ResearchStatus.COMPLETED, completedAt },
+    });
+  });
+  return completedAt;
+}
+
+export async function executeResearchSynthesis(
+  input: {
+    researchJobId: string;
+    userId: string;
+    attemptNumber?: number;
+    maxAttempts?: number;
+    signal?: AbortSignal;
+  },
+  dependencies: BackgroundDependencies = {},
+) {
   const researchJob = await db.researchJob.findFirst({
     where: { id: input.researchJobId, userId: input.userId },
-    include: { stock: true, agentRuns: true },
+    include: { stock: true, agentRuns: true, report: true },
   });
   if (!researchJob || researchJob.status === ResearchStatus.CANCELLED) {
     throw new JobExecutionError(
@@ -298,6 +1052,13 @@ export async function executeResearchSynthesis(input: {
       false,
       "The owned research job no longer exists.",
     );
+  }
+  if (researchJob.report && researchJob.status === ResearchStatus.COMPLETED) {
+    return {
+      researchJobId: researchJob.id,
+      completedAt: researchJob.completedAt?.toISOString() ?? null,
+      reused: true,
+    };
   }
 
   const specialists = researchJob.agentRuns.filter(
@@ -314,84 +1075,241 @@ export async function executeResearchSynthesis(input: {
     );
   }
 
-  const agentResults = specialists.map(storedAgentResult);
-  const report = synthesizeResearch(researchJob.stock.companyName, agentResults);
-  const synthesis: AgentResult = {
-    agentName: "SYNTHESIS",
-    status: "COMPLETED",
-    rating: "MIXED",
-    confidence: report.confidence,
-    summary: report.overview,
-    findings: [
-      ...report.bullCase.map((detail) => ({ label: "Supportive context", detail })),
-      ...report.bearCase.map((detail) => ({ label: "Counterpoint", detail })),
-    ],
-    sources: agentResults.flatMap((agent) => agent.sources),
-    warnings: report.risks,
-  };
-  const completedAt = new Date();
-
-  await db.$transaction([
-    db.agentRun.upsert({
-      where: {
-        researchJobId_agentName: {
+  if (researchJob.generationMode === ResearchGenerationMode.DETERMINISTIC) {
+    const agentResults = specialists.map(storedAgentResult);
+    const report = synthesizeResearch(
+      researchJob.stock.companyName,
+      agentResults,
+    );
+    const synthesis: AgentResult = {
+      agentName: "SYNTHESIS",
+      status: "COMPLETED",
+      rating: "MIXED",
+      confidence: report.confidence,
+      summary: report.overview,
+      findings: [
+        ...report.bullCase.map((detail) => ({
+          label: "Supportive context",
+          detail,
+        })),
+        ...report.bearCase.map((detail) => ({ label: "Counterpoint", detail })),
+      ],
+      sources: agentResults.flatMap((agent) => agent.sources),
+      warnings: report.risks,
+    };
+    const completedAt = new Date();
+    await db.$transaction([
+      db.agentRun.upsert({
+        where: {
+          researchJobId_agentName: {
+            researchJobId: researchJob.id,
+            agentName: AgentName.SYNTHESIS,
+          },
+        },
+        update: {
+          status: AgentStatus.COMPLETED,
+          rating: synthesis.rating,
+          confidence: synthesis.confidence,
+          summary: synthesis.summary,
+          findingsJson: synthesis.findings,
+          sourcesJson: synthesis.sources,
+          warningsJson: synthesis.warnings,
+          provider: "deterministic",
+          agentVersion: "deterministic-v1",
+          completedAt,
+        },
+        create: {
           researchJobId: researchJob.id,
           agentName: AgentName.SYNTHESIS,
+          status: AgentStatus.COMPLETED,
+          rating: synthesis.rating,
+          confidence: synthesis.confidence,
+          summary: synthesis.summary,
+          findingsJson: synthesis.findings,
+          sourcesJson: synthesis.sources,
+          warningsJson: synthesis.warnings,
+          provider: "deterministic",
+          agentVersion: "deterministic-v1",
+          completedAt,
         },
-      },
-      update: {
-        status: AgentStatus.COMPLETED,
-        rating: synthesis.rating,
-        confidence: synthesis.confidence,
-        summary: synthesis.summary,
-        findingsJson: synthesis.findings,
-        sourcesJson: synthesis.sources,
-        warningsJson: synthesis.warnings,
-        completedAt,
-      },
-      create: {
-        researchJobId: researchJob.id,
-        agentName: AgentName.SYNTHESIS,
-        status: AgentStatus.COMPLETED,
-        rating: synthesis.rating,
-        confidence: synthesis.confidence,
-        summary: synthesis.summary,
-        findingsJson: synthesis.findings,
-        sourcesJson: synthesis.sources,
-        warningsJson: synthesis.warnings,
-        completedAt,
-      },
-    }),
-    db.researchReport.upsert({
-      where: { researchJobId: researchJob.id },
-      update: {
-        overview: report.overview,
-        bullCaseJson: report.bullCase,
-        bearCaseJson: report.bearCase,
-        risksJson: report.risks,
-        missingDataJson: report.missingData,
-        confidence: report.confidence,
-        generatedAt: completedAt,
-        expiresAt: expiresAtFrom(completedAt),
-      },
-      create: {
-        researchJobId: researchJob.id,
-        stockId: researchJob.stockId,
-        overview: report.overview,
-        bullCaseJson: report.bullCase,
-        bearCaseJson: report.bearCase,
-        risksJson: report.risks,
-        missingDataJson: report.missingData,
-        confidence: report.confidence,
-        generatedAt: completedAt,
-        expiresAt: expiresAtFrom(completedAt),
-      },
-    }),
-    db.researchJob.update({
-      where: { id: researchJob.id },
-      data: { status: ResearchStatus.COMPLETED, completedAt },
-    }),
-  ]);
+      }),
+      db.researchReport.upsert({
+        where: { researchJobId: researchJob.id },
+        update: {
+          overview: report.overview,
+          bullCaseJson: report.bullCase,
+          bearCaseJson: report.bearCase,
+          risksJson: report.risks,
+          missingDataJson: report.missingData,
+          confidence: report.confidence,
+          generatedAt: completedAt,
+          expiresAt: expiresAtFrom(completedAt),
+        },
+        create: {
+          researchJobId: researchJob.id,
+          stockId: researchJob.stockId,
+          overview: report.overview,
+          bullCaseJson: report.bullCase,
+          bearCaseJson: report.bearCase,
+          risksJson: report.risks,
+          missingDataJson: report.missingData,
+          confidence: report.confidence,
+          generatedAt: completedAt,
+          expiresAt: expiresAtFrom(completedAt),
+        },
+      }),
+      db.researchJob.update({
+        where: { id: researchJob.id },
+        data: { status: ResearchStatus.COMPLETED, completedAt },
+      }),
+    ]);
+    return {
+      researchJobId: researchJob.id,
+      completedAt: completedAt.toISOString(),
+    };
+  }
 
-  return { researchJobId: researchJob.id, completedAt: completedAt.toISOString() };
+  const typedSpecialists = specialists.map((run) => ({
+    agentName: run.agentName as SpecialistAgentName,
+    output: specialistOutput(run),
+  }));
+  const snapshot = await snapshotForJob(researchJob.id, dependencies).catch(
+    () => null,
+  );
+  if (!snapshot) {
+    const output = partialSynthesis(
+      researchJob.stock.companyName,
+      typedSpecialists,
+      [],
+    );
+    output.claims = [];
+    output.missingData = [
+      "The immutable source snapshot was unavailable, so no claim-level evidence could be persisted.",
+      ...output.missingData,
+    ].slice(0, 10);
+    const completedAt = await persistExternalReport({
+      researchJob,
+      output,
+      evidence: [],
+      provider: "partial-fallback",
+      model: null,
+      config: null,
+      reservation: null,
+    });
+    return {
+      researchJobId: researchJob.id,
+      completedAt: completedAt.toISOString(),
+      partial: true,
+    };
+  }
+  const evidenceSelection = selectEvidence(snapshot, {
+    query:
+      "company financial performance competitors risk evidence counterpoint",
+    agent: "SYNTHESIS",
+    maxResults: 12,
+    contextCharBudget: 8_000,
+  });
+  const evidence = [...evidenceSelection.evidence];
+
+  let output: SynthesisModelOutput;
+  let providerName = "partial-fallback";
+  let providerModel: string | null = null;
+  let config: AiResearchConfig | null = null;
+  let reservation: Parameters<typeof persistExternalReport>[0]["reservation"] =
+    null;
+  let reportEvidence = evidence;
+  try {
+    const environment = dependencies.environment ?? process.env;
+    if (
+      !dependencies.provider &&
+      !isFeatureEnabled("AI_RESEARCH_ENABLED", environment)
+    ) {
+      throw new GroundedModelCallError("AI_RESEARCH_DISABLED", false, true);
+    }
+    await assertUsageReconciled(researchJob.id);
+    config = boundAiConfig(
+      researchJob.generationConfigJson,
+      environment,
+      dependencies,
+    );
+    const generated = await runGroundedModelCall(
+      {
+        provider: modelProvider(config, dependencies),
+        config,
+        schema: synthesisModelOutputSchema,
+        schemaName: "research_synthesis_v1",
+        evidence,
+        prompt: (repairFeedback) =>
+          synthesisPrompt({
+            ticker: researchJob.stock.ticker,
+            companyName: researchJob.stock.companyName,
+            asOfDate: utcDateString(researchJob.createdAt),
+            evidence,
+            evidenceContext: evidenceSelection.context,
+            specialists: typedSpecialists,
+            repairFeedback,
+          }),
+        userId: input.userId,
+        researchJobId: researchJob.id,
+        operation: "SYNTHESIS",
+        idempotencyKey: `research:${researchJob.id}:synthesis:delivery:${input.attemptNumber ?? 1}`,
+        now: dependencies.now?.(),
+        signal: input.signal,
+      },
+      { environment },
+    );
+    output = generated.output;
+    providerName = generated.providerResult.provider;
+    providerModel = generated.providerResult.model;
+    if (generated.reservation) {
+      reservation = {
+        usageId: generated.reservation.usageId,
+        inputTokens: generated.providerResult.usage.inputTokens,
+        cachedInputTokens: generated.providerResult.usage.cachedInputTokens,
+        outputTokens: generated.providerResult.usage.outputTokens,
+        providerRequestId: generated.providerResult.providerRequestId,
+      };
+    }
+  } catch (error) {
+    const attemptNumber = input.attemptNumber ?? 1;
+    const maxAttempts = input.maxAttempts ?? 3;
+    if (
+      error instanceof GroundedModelCallError &&
+      error.retryable &&
+      attemptNumber < maxAttempts
+    ) {
+      throw new JobExecutionError(error.code, true, error.message, true, {
+        cause: error,
+      });
+    }
+    if (
+      !(error instanceof GroundedModelCallError) &&
+      !(error instanceof AiBudgetError) &&
+      !(error instanceof AiConfigurationError)
+    ) {
+      throw error;
+    }
+    const snapshotEvidence = [...snapshot.evidence];
+    output = partialSynthesis(
+      researchJob.stock.companyName,
+      typedSpecialists,
+      snapshotEvidence,
+    );
+    reportEvidence = citedEvidence(output.claims, snapshotEvidence);
+  }
+
+  const completedAt = await persistExternalReport({
+    researchJob,
+    output,
+    evidence: reportEvidence,
+    provider: providerName,
+    model: providerModel,
+    config,
+    reservation,
+  });
+  return {
+    researchJobId: researchJob.id,
+    completedAt: completedAt.toISOString(),
+    partial: providerName === "partial-fallback",
+  };
 }

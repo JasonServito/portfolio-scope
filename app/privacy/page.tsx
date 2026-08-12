@@ -24,7 +24,7 @@ export default function PrivacyPage() {
             <p className="mt-3">
               The public demo requires no account. OAuth passwords are never
               received or stored. Private portfolio values are not sent to
-              PostHog, Sentry, or public pages.
+              PostHog, Sentry, public pages, or an external research model.
             </p>
           </aside>
           <div className="space-y-10">
@@ -45,11 +45,24 @@ export default function PrivacyPage() {
               one-way-hashed user identifier. Cookies, authorization headers,
               provider keys, and private payloads are redacted.
             </PolicySection>
+            <PolicySection title="Optional external AI processing">
+              External research is disabled by default. When enabled, a model
+              receives only bounded public company identity, peer, SEC fact,
+              filing-provenance, and explicit missing-data evidence. Portfolio
+              holdings, quantities, values, watchlists, alerts, identity data,
+              and user-entered targets are not included. Requests set the
+              provider API&apos;s response-storage option to false; provider
+              processing remains governed by its applicable terms.
+              PortfolioScope retains the validated report, evidence copies,
+              versions, and usage record.
+            </PolicySection>
             <PolicySection title="Account deletion">
               The account settings flow can revoke sessions and delete the user
               with dependent private records. Shared stock catalog and public
-              source data remain. The stable public demo identity cannot be
-              deleted through the normal account flow.
+              source data remain. Cost records already incurred may remain
+              without the deleted user identifier for reconciliation. The stable
+              public demo identity cannot be deleted through the normal account
+              flow.
             </PolicySection>
           </div>
         </div>

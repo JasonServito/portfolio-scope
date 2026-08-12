@@ -25,7 +25,10 @@ export const jobDeliverySchema = z
   })
   .strict();
 
-const tickerSchema = z.string().trim().regex(/^[A-Z]{1,5}$/);
+const tickerSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Z]{1,5}$/);
 
 export const jobPayloadSchemas = {
   [BackgroundJobType.SEC_SUBMISSIONS_SYNC]: z
@@ -91,11 +94,11 @@ export const jobPolicies = {
   },
   [BackgroundJobType.RESEARCH_AGENT_RUN]: {
     maxAttempts: 3,
-    timeoutMs: 30_000,
+    timeoutMs: 60_000,
   },
   [BackgroundJobType.RESEARCH_SYNTHESIS]: {
     maxAttempts: 3,
-    timeoutMs: 30_000,
+    timeoutMs: 60_000,
   },
   [BackgroundJobType.MAINTENANCE_CLEANUP]: {
     maxAttempts: 2,

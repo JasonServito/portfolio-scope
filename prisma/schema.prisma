@@ -40,6 +40,43 @@ enum ResearchStatus {
   CANCELLED
 }
 
+enum ResearchGenerationMode {
+  DETERMINISTIC
+  RECORDED
+  EXTERNAL
+}
+
+enum AiBudgetScope {
+  GLOBAL
+  USER
+}
+
+enum AiUsageStatus {
+  RESERVED
+  SETTLED
+  RELEASED
+  UNCONFIRMED
+}
+
+enum ResearchClaimCategory {
+  SUPPORTIVE
+  COUNTERPOINT
+  RISK
+}
+
+enum EvidenceRole {
+  SUPPORTING
+  COUNTER
+}
+
+enum EvidenceSourceKind {
+  SEC_FACT
+  SEC_FILING
+  COMPANY_PROFILE
+  PEER_SET
+  DETERMINISTIC
+}
+
 enum AgentName {
   NEWS
   FINANCIALS
@@ -152,6 +189,8 @@ model User {
   secIngestionRuns           SecIngestionRun[]
   backgroundJobs             BackgroundJob[]
   backgroundJobControlEvents BackgroundJobControlEvent[]
+  aiBudgetPeriods            AiBudgetPeriod[]
+  aiUsage                    AiUsage[]
 }
 
 model Account {
@@ -296,83 +335,86 @@ model SecEntity {
 }
 
 model SecFiling {
-  id                         String             @id @default(cuid())
+  id                         String              @id @default(cuid())
   secEntityId                String
-  accessionNumber            String             @unique
+  accessionNumber            String              @unique
   formType                   String
-  filingDate                 DateTime           @db.Date
-  reportDate                 DateTime?          @db.Date
+  filingDate                 DateTime            @db.Date
+  reportDate                 DateTime?           @db.Date
   acceptanceDateTime         DateTime?
   primaryDocument            String?
   primaryDocumentDescription String?
   sourceUrl                  String
-  isAmendment                Boolean            @default(false)
+  isAmendment                Boolean             @default(false)
   amendsAccessionNumber      String?
-  createdAt                  DateTime           @default(now())
-  updatedAt                  DateTime           @updatedAt
-  secEntity                  SecEntity          @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  secEntity                  SecEntity           @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
   financialFacts             SecFinancialFact[]
+  evidenceReferences         EvidenceReference[]
 
   @@index([secEntityId, filingDate])
   @@index([secEntityId, reportDate, formType])
 }
 
 model SecRawSource {
-  id               String             @id @default(cuid())
-  secEntityId      String
-  kind             SecRawSourceKind
-  sourceUrl        String
-  objectKey        String             @unique
-  sha256           String
-  contentType      String
-  byteLength       BigInt
-  firstRetrievedAt DateTime
-  lastRetrievedAt  DateTime
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  secEntity        SecEntity          @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
-  financialFacts   SecFinancialFact[]
+  id                 String              @id @default(cuid())
+  secEntityId        String
+  kind               SecRawSourceKind
+  sourceUrl          String
+  objectKey          String              @unique
+  sha256             String
+  contentType        String
+  byteLength         BigInt
+  firstRetrievedAt   DateTime
+  lastRetrievedAt    DateTime
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  secEntity          SecEntity           @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  financialFacts     SecFinancialFact[]
+  evidenceReferences EvidenceReference[]
 
   @@unique([secEntityId, kind, sha256])
   @@index([secEntityId, kind, lastRetrievedAt])
 }
 
 model SecFinancialFact {
-  id                   String            @id @default(cuid())
+  id                   String              @id @default(cuid())
   secEntityId          String
   filingId             String?
   rawSourceId          String
-  externalKey          String            @unique
+  externalKey          String              @unique
   canonicalMetric      String
   taxonomy             String
   concept              String
   label                String
   description          String?
-  originalValue        Decimal           @db.Decimal(38, 10)
+  originalValue        Decimal             @db.Decimal(38, 10)
   originalUnit         String
-  normalizedValue      Decimal           @db.Decimal(38, 10)
+  normalizedValue      Decimal             @db.Decimal(38, 10)
   normalizedUnit       String
-  periodStart          DateTime?         @db.Date
-  periodEnd            DateTime          @db.Date
+  periodStart          DateTime?           @db.Date
+  periodEnd            DateTime            @db.Date
   periodType           SecFactPeriodType
   periodKind           SecFactPeriodKind
   fiscalYear           Int?
   fiscalPeriod         String?
   formType             String
-  filedAt              DateTime          @db.Date
+  filedAt              DateTime            @db.Date
   accessionNumber      String
   frame                String?
   sourceUrl            String
   observedAt           DateTime
   normalizationVersion String
-  isDerived            Boolean           @default(false)
+  isDerived            Boolean             @default(false)
   selection            SecFactSelection
   ambiguityReason      String?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  secEntity            SecEntity         @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
-  filing               SecFiling?        @relation(fields: [filingId], references: [id], onDelete: Restrict)
-  rawSource            SecRawSource      @relation(fields: [rawSourceId], references: [id], onDelete: Restrict)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  secEntity            SecEntity           @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  filing               SecFiling?          @relation(fields: [filingId], references: [id], onDelete: Restrict)
+  rawSource            SecRawSource        @relation(fields: [rawSourceId], references: [id], onDelete: Restrict)
+  evidenceReferences   EvidenceReference[]
 
   @@index([secEntityId, canonicalMetric, selection, periodEnd])
   @@index([secEntityId, periodKind, periodEnd])
@@ -472,23 +514,41 @@ model Alert {
 }
 
 model ResearchJob {
-  id              String          @id @default(cuid())
-  userId          String
-  stockId         String
-  status          ResearchStatus  @default(PENDING)
-  requestedAgents AgentName[]
-  createdAt       DateTime        @default(now())
-  completedAt     DateTime?
-  correlationId   String?         @unique
-  startedAt       DateTime?
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stock           Stock           @relation(fields: [stockId], references: [id], onDelete: Restrict)
-  agentRuns       AgentRun[]
-  report          ResearchReport?
-  backgroundJobs  BackgroundJob[]
+  id                    String                 @id @default(cuid())
+  userId                String
+  stockId               String
+  status                ResearchStatus         @default(PENDING)
+  generationMode        ResearchGenerationMode @default(DETERMINISTIC)
+  requestedAgents       AgentName[]
+  requestedRegeneration Boolean                @default(false)
+  generationFingerprint String?
+  sourceDataVersion     String?
+  inputDataVersion      String?
+  retrievalVersion      String?
+  calculationVersion    String?
+  generationConfigJson  Json?
+  sourceSnapshotJson    Json?
+  sourceSnapshotSha256  String?
+  aiTokenLimit          Int?
+  aiCostLimitUsd        Decimal?               @db.Decimal(12, 6)
+  aiReservedTokens      Int                    @default(0)
+  aiUsedTokens          Int                    @default(0)
+  aiReservedCostUsd     Decimal                @default(0) @db.Decimal(12, 6)
+  aiUsedCostUsd         Decimal                @default(0) @db.Decimal(12, 6)
+  createdAt             DateTime               @default(now())
+  completedAt           DateTime?
+  correlationId         String?                @unique
+  startedAt             DateTime?
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stock                 Stock                  @relation(fields: [stockId], references: [id], onDelete: Restrict)
+  agentRuns             AgentRun[]
+  report                ResearchReport?
+  backgroundJobs        BackgroundJob[]
+  aiUsage               AiUsage[]
 
   @@index([userId, stockId])
   @@index([userId, createdAt])
+  @@index([userId, stockId, generationFingerprint, completedAt])
   @@index([status])
 }
 
@@ -566,38 +626,183 @@ model BackgroundJobAttempt {
 }
 
 model AgentRun {
-  id            String       @id @default(cuid())
-  researchJobId String
-  agentName     AgentName
-  status        AgentStatus  @default(PENDING)
-  rating        AgentRating?
-  confidence    Decimal?     @db.Decimal(4, 3)
-  summary       String
-  findingsJson  Json
-  sourcesJson   Json
-  warningsJson  Json
-  startedAt     DateTime     @default(now())
-  completedAt   DateTime?
-  researchJob   ResearchJob  @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  id                  String          @id @default(cuid())
+  researchJobId       String
+  agentName           AgentName
+  status              AgentStatus     @default(PENDING)
+  rating              AgentRating?
+  confidence          Decimal?        @db.Decimal(4, 3)
+  summary             String
+  findingsJson        Json
+  sourcesJson         Json
+  warningsJson        Json
+  claimsJson          Json?
+  missingDataJson     Json?
+  provider            String?
+  model               String?
+  modelConfigJson     Json?
+  promptVersion       String?
+  outputSchemaVersion String?
+  agentVersion        String?
+  startedAt           DateTime        @default(now())
+  completedAt         DateTime?
+  researchJob         ResearchJob     @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  claims              ResearchClaim[]
+  aiUsage             AiUsage[]
 
   @@unique([researchJobId, agentName])
   @@index([agentName])
 }
 
 model ResearchReport {
-  id              String      @id @default(cuid())
-  researchJobId   String      @unique
-  stockId         String
-  overview        String
-  bullCaseJson    Json
-  bearCaseJson    Json
-  risksJson       Json
-  missingDataJson Json
-  confidence      Decimal     @db.Decimal(4, 3)
-  generatedAt     DateTime    @default(now())
-  expiresAt       DateTime
-  researchJob     ResearchJob @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
-  stock           Stock       @relation(fields: [stockId], references: [id], onDelete: Restrict)
+  id                   String          @id @default(cuid())
+  researchJobId        String          @unique
+  stockId              String
+  overview             String
+  rating               AgentRating     @default(MIXED)
+  bullCaseJson         Json
+  bearCaseJson         Json
+  risksJson            Json
+  missingDataJson      Json
+  disagreementsJson    Json?
+  confidence           Decimal         @db.Decimal(4, 3)
+  provider             String?
+  model                String?
+  modelConfigJson      Json?
+  promptVersion        String?
+  retrievalVersion     String?
+  calculationVersion   String?
+  inputDataVersion     String?
+  outputSchemaVersion  String?
+  sourceSnapshotSha256 String?
+  inputTokens          Int?
+  outputTokens         Int?
+  estimatedCostUsd     Decimal?        @db.Decimal(12, 6)
+  reportVersion        String?
+  generatedAt          DateTime        @default(now())
+  expiresAt            DateTime
+  researchJob          ResearchJob     @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  stock                Stock           @relation(fields: [stockId], references: [id], onDelete: Restrict)
+  claims               ResearchClaim[]
 
   @@index([stockId])
+}
+
+model AiBudgetPeriod {
+  id          String        @id @default(cuid())
+  scope       AiBudgetScope
+  scopeKey    String
+  userId      String?
+  periodStart DateTime      @db.Date
+  limitUsd    Decimal       @db.Decimal(12, 6)
+  reservedUsd Decimal       @default(0) @db.Decimal(12, 6)
+  usedUsd     Decimal       @default(0) @db.Decimal(12, 6)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  user        User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeKey, periodStart])
+  @@index([scope, periodStart])
+  @@index([userId, periodStart])
+}
+
+model AiUsage {
+  id                           String        @id @default(cuid())
+  idempotencyKey               String        @unique
+  status                       AiUsageStatus @default(RESERVED)
+  userId                       String?
+  researchJobId                String?
+  agentRunId                   String?
+  periodStart                  DateTime      @db.Date
+  provider                     String
+  model                        String
+  operation                    String
+  promptVersion                String
+  pricingVersion               String
+  inputCostPerMillionUsd       Decimal       @db.Decimal(12, 6)
+  cachedInputCostPerMillionUsd Decimal       @db.Decimal(12, 6)
+  outputCostPerMillionUsd      Decimal       @db.Decimal(12, 6)
+  reservedInputTokens          Int
+  reservedOutputTokens         Int
+  reservedCostUsd              Decimal       @db.Decimal(12, 6)
+  inputTokens                  Int?
+  cachedInputTokens            Int?
+  outputTokens                 Int?
+  estimatedCostUsd             Decimal?      @db.Decimal(12, 6)
+  providerRequestId            String?
+  attemptNumber                Int           @default(1)
+  errorCode                    String?
+  reservedAt                   DateTime      @default(now())
+  settledAt                    DateTime?
+  createdAt                    DateTime      @default(now())
+  updatedAt                    DateTime      @updatedAt
+  user                         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  researchJob                  ResearchJob?  @relation(fields: [researchJobId], references: [id], onDelete: SetNull)
+  agentRun                     AgentRun?     @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  @@index([periodStart, status])
+  @@index([userId, periodStart, status])
+  @@index([researchJobId, status])
+  @@index([agentRunId])
+  @@index([provider, providerRequestId])
+}
+
+model ResearchClaim {
+  id              String                @id @default(cuid())
+  reportId        String
+  agentRunId      String?
+  claimKey        String
+  category        ResearchClaimCategory
+  statement       String                @db.Text
+  confidence      Decimal               @db.Decimal(4, 3)
+  assumptionsJson Json
+  sourceDate      DateTime?             @db.Date
+  asOfDate        DateTime              @db.Date
+  isMaterial      Boolean               @default(true)
+  ordinal         Int
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  report          ResearchReport        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  agentRun        AgentRun?             @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  evidence        EvidenceReference[]
+
+  @@unique([reportId, claimKey])
+  @@unique([reportId, ordinal])
+  @@index([agentRunId])
+}
+
+model EvidenceReference {
+  id                 String             @id @default(cuid())
+  claimId            String
+  role               EvidenceRole
+  referenceKey       String
+  ordinal            Int
+  sourceKind         EvidenceSourceKind
+  title              String
+  sourceReference    String
+  secFilingId        String?
+  secRawSourceId     String?
+  secFinancialFactId String?
+  accessionNumber    String?
+  section            String?
+  sourceUrl          String?
+  objectKey          String?
+  sha256             String?
+  retrievedAt        DateTime?
+  sourceDate         DateTime?          @db.Date
+  passageStart       Int?
+  passageEnd         Int?
+  excerpt            String             @db.Text
+  metadataJson       Json
+  createdAt          DateTime           @default(now())
+  claim              ResearchClaim      @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  secFiling          SecFiling?         @relation(fields: [secFilingId], references: [id], onDelete: SetNull)
+  secRawSource       SecRawSource?      @relation(fields: [secRawSourceId], references: [id], onDelete: SetNull)
+  secFinancialFact   SecFinancialFact?  @relation(fields: [secFinancialFactId], references: [id], onDelete: SetNull)
+
+  @@unique([claimId, role, referenceKey])
+  @@unique([claimId, role, ordinal])
+  @@index([secFilingId])
+  @@index([secRawSourceId])
+  @@index([secFinancialFactId])
 }

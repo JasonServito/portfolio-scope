@@ -434,7 +434,61 @@ describe("public sample and private research route contracts", () => {
 
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual(researchResponse);
-    expect(mocks.runResearch).toHaveBeenCalledWith(actor.id, "AAPL");
+    expect(mocks.runResearch).toHaveBeenCalledWith(actor.id, "AAPL", {
+      regenerate: false,
+    });
+  });
+
+  it("requires an explicit validated option to bypass fresh-report reuse", async () => {
+    mocks.runResearch.mockResolvedValue(researchResponse);
+
+    const response = await postResearch(
+      new Request("http://localhost/api/research/aapl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerate: true }),
+      }),
+      tickerContext("aapl"),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.runResearch).toHaveBeenCalledWith(actor.id, "AAPL", {
+      regenerate: true,
+    });
+  });
+
+  it("rejects unknown research options before starting a job", async () => {
+    const response = await postResearch(
+      new Request("http://localhost/api/research/aapl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerate: false, userId: "forged" }),
+      }),
+      tickerContext("aapl"),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Research options are invalid.",
+    });
+    expect(mocks.runResearch).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed research JSON before starting a job", async () => {
+    const response = await postResearch(
+      new Request("http://localhost/api/research/aapl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"regenerate":',
+      }),
+      tickerContext("aapl"),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Research options are invalid.",
+    });
+    expect(mocks.runResearch).not.toHaveBeenCalled();
   });
 
   it("returns a stable JSON error when private research generation fails", async () => {
@@ -447,7 +501,7 @@ describe("public sample and private research route contracts", () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: "The deterministic research pipeline could not complete.",
+      error: "The research pipeline could not be queued.",
     });
   });
 });

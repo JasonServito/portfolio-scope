@@ -40,11 +40,13 @@ export default async function AdminPage() {
   return (
     <main className="mx-auto w-full max-w-7xl space-y-8 px-6 py-10">
       <div>
-        <p className="text-sm font-medium text-muted-foreground">Administrator operations</p>
+        <p className="text-sm font-medium text-muted-foreground">
+          Administrator operations
+        </p>
         <h1 className="mt-2 text-3xl font-semibold">Durable job diagnostics</h1>
         <p className="mt-2 max-w-3xl leading-7 text-muted-foreground">
-          PostgreSQL is authoritative for job state. QStash transports signed work,
-          while Redis coordinates short-lived locks and limits.
+          PostgreSQL is authoritative for job state. QStash transports signed
+          work, while Redis coordinates short-lived locks and limits.
         </p>
       </div>
 
@@ -94,9 +96,9 @@ export default async function AdminPage() {
           label="Last logical backup"
           value={
             diagnostics.lastBackup?.createdAt
-              ? new Date(
-                  diagnostics.lastBackup.createdAt,
-                ).toLocaleString("en-US")
+              ? new Date(diagnostics.lastBackup.createdAt).toLocaleString(
+                  "en-US",
+                )
               : "Not recorded"
           }
         />
@@ -105,9 +107,9 @@ export default async function AdminPage() {
           label="Latest worker heartbeat"
           value={
             diagnostics.latestWorkerHeartbeat?.at
-              ? new Date(
-                  diagnostics.latestWorkerHeartbeat.at,
-                ).toLocaleString("en-US")
+              ? new Date(diagnostics.latestWorkerHeartbeat.at).toLocaleString(
+                  "en-US",
+                )
               : "Not recorded"
           }
         />
@@ -135,7 +137,9 @@ export default async function AdminPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Feature flags and kill switches</CardTitle>
+          <CardTitle className="text-lg">
+            Feature flags and kill switches
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -185,6 +189,40 @@ export default async function AdminPage() {
                 : "not recorded"}
             </span>
           </div>
+          {diagnostics.aiUsage ? (
+            <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-muted-foreground">AI monthly used</p>
+                <p className="mt-1 font-semibold">
+                  ${diagnostics.aiUsage.usedUsd.toFixed(6)} / $
+                  {diagnostics.aiUsage.limitUsd.toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">AI reserved</p>
+                <p className="mt-1 font-semibold">
+                  ${diagnostics.aiUsage.reservedUsd.toFixed(6)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Model calls</p>
+                <p className="mt-1 font-semibold">
+                  {diagnostics.aiUsage.calls}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Needs reconciliation</p>
+                <p className="mt-1 font-semibold">
+                  {diagnostics.aiUsage.reconciliationRequired}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              AI usage tables are unavailable. The external-research kill switch
+              remains independently visible above.
+            </p>
+          )}
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {diagnostics.costReview.services.map((service) => (
               <a
@@ -228,14 +266,17 @@ export default async function AdminPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">SEC freshness by supported ticker</CardTitle>
+          <CardTitle className="text-lg">
+            SEC freshness by supported ticker
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {companies.map((company) => (
               <div className="rounded-lg border p-4" key={company.id}>
                 <p className="font-medium">
-                  {company.securities[0]?.ticker ?? "No ticker"} · {company.name}
+                  {company.securities[0]?.ticker ?? "No ticker"} ·{" "}
+                  {company.name}
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {company.lastSyncedAt

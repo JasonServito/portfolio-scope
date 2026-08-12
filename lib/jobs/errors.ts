@@ -11,10 +11,12 @@ export const JobErrorCode = {
   WORKER_AUTH_FAILED: "JOB_WORKER_AUTH_FAILED",
   WORKER_SIGNATURE_MISSING: "JOB_WORKER_SIGNATURE_MISSING",
   CANCELLED: "JOB_CANCELLED",
+  AI_CONFIGURATION_ERROR: "AI_CONFIGURATION_ERROR",
+  AI_REPORT_LIMIT_EXCEEDED: "AI_REPORT_LIMIT_EXCEEDED",
+  AI_BUDGET_EXHAUSTED: "AI_BUDGET_EXHAUSTED",
 } as const;
 
-export type JobErrorCode =
-  (typeof JobErrorCode)[keyof typeof JobErrorCode];
+export type JobErrorCode = (typeof JobErrorCode)[keyof typeof JobErrorCode];
 
 export class JobExecutionError extends Error {
   readonly name = "JobExecutionError";

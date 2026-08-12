@@ -1,12 +1,21 @@
 # PortfolioScope Production Runbook
 
-This runbook covers the M11 deployment foundation through M16 production readiness: Vercel hosting, Neon PostgreSQL, environment separation, the deterministic demo, CI, health checks, monitoring, domain setup, Auth.js, GitHub and Google OAuth, database sessions, owner-scoped private resources, SEC/R2 activation, Redis, signed QStash jobs, recurring maintenance, structured diagnostics, privacy-safe analytics, security controls, logical backups, non-production recovery drills, release verification, and rollback.
+This runbook covers the M11 deployment foundation through the default-off M18
+AI research path: Vercel hosting, Neon PostgreSQL, environment separation, the
+deterministic demo, CI, health checks, monitoring, domain setup, Auth.js, OAuth,
+database sessions, owner-scoped private resources, SEC/R2 activation, Redis,
+signed QStash jobs, maintenance, diagnostics, analytics, security, backups,
+recovery, release verification, evidence-grounded model activation, budgets,
+and rollback.
 
-External AI and later product milestones remain outside this runbook. Account-side monitors, a real backup upload, a restore drill, and rollback must still be activated and evidenced by an operator; repository automation alone does not prove those external outcomes.
+M18 repository implementation does not prove external activation. Account-side
+monitors, a real backup upload, restore/rollback drills, an OpenAI project and
+billing control, a bounded live call, source/privacy review, and usage
+reconciliation must still be evidenced by an operator.
 
 ## Service inventory and cost
 
-| Service | M11 purpose | Initial tier | Expected monthly change |
+| Service | Purpose | Initial tier | Expected monthly change |
 | --- | --- | --- | ---: |
 | Vercel | Next.js production and preview deployments | Hobby, while non-commercial terms apply | $0 |
 | Neon | Separate production and non-production PostgreSQL | Free | $0 |
@@ -22,8 +31,15 @@ External AI and later product milestones remain outside this runbook. Account-si
 | Upstash QStash | Signed background delivery and two bounded schedules | Free | $0 expected |
 | PostHog | Explicit privacy-safe product events | Free | $0 expected |
 | Playwright | Critical browser journeys in GitHub Actions | Open source | $0 |
+| OpenAI Responses API | Optional evidence interpretation; default-off | Usage-based | $0 disabled; application maximum $5 |
 
-Expected M11–M16 monthly infrastructure total: approximately `$1–2 USD`, entirely from the annualized domain cost while R2, Upstash, Sentry, Better Stack, PostHog, and CI remain inside their reviewed free allowances. The backup retention policy is 7 daily, 4 weekly, and 3 monthly objects. Do not enable a paid tier or uncapped usage without updating this table and the project cost review.
+Expected non-AI monthly infrastructure total: approximately `$1-2 USD`,
+primarily the annualized domain cost while the reviewed free allowances hold.
+The M18 application hard maximum is `$5 USD` per UTC month, so the estimated
+configured maximum total is approximately `$6-7 USD`, below the `$30 USD`
+project limit. OpenAI is a new usage-based service; verify current pricing and
+the actual provider invoice. The backup retention policy is 7 daily, 4 weekly,
+and 3 monthly objects. Do not enable an uncapped paid tier.
 
 ## Environment matrix
 
@@ -59,7 +75,16 @@ Configure each environment independently. Never copy production database credent
 | `SEC_INGESTION_ENABLED` | `false` until configured | Independent opt-in | Independent opt-in | No |
 | `PUBLIC_STOCK_PAGES_ENABLED` | Explicit local choice | Independent opt-in | Independent opt-in | No |
 | `RESEARCH_GENERATION_ENABLED` | `false` until configured | Independent opt-in | Independent opt-in | No |
-| `AI_RESEARCH_ENABLED` | `false` | `false` | `false` until M18 | No |
+| `AI_RESEARCH_ENABLED` | `false` | `false` until controlled proof | `false` until separately approved | No |
+| `OPENAI_API_KEY` | Blank by default | Environment-scoped key only for proof | Separate Production key only after approval | Yes |
+| `OPENAI_RESEARCH_MODEL` | Checked-in allowlisted default | Reviewed allowlisted model | Same reviewed model/version | No |
+| `AI_MONTHLY_BUDGET_USD` | `5` maximum | `5` maximum, preferably lower for proof | `5` maximum | No |
+| `AI_USER_MONTHLY_BUDGET_USD` | `1` | At most global limit | At most global limit | No |
+| `AI_MAX_COST_PER_JOB_USD` | `0.25` | At most user limit | At most user limit | No |
+| `AI_MAX_TOKENS_PER_JOB` | `50000` | Reviewed bound | Reviewed bound | No |
+| `AI_MAX_OUTPUT_TOKENS_PER_CALL` | `1500` | Reviewed bound | Reviewed bound | No |
+| `AI_PROVIDER_TIMEOUT_MS` | `20000` | At most `25000` | At most `25000` | No |
+| `AI_USER_MONTHLY_REPORT_LIMIT` | `5` | Reviewed quota | Reviewed quota | No |
 | `PORTFOLIO_EXPORT_ENABLED` | `false` | `false` | `false` until implemented | No |
 | `MAINTENANCE_MODE` | `false` | `false` | Emergency kill switch | No |
 | `SENTRY_DSN` | Blank or development project | Preview project/DSN | Production project/DSN | Treat as server configuration |
@@ -100,6 +125,14 @@ Rules:
 - Redis and QStash credentials are server-only and must be different between
   Preview and Production. Redis is never authoritative for users, portfolios,
   financial facts, research reports, final job state, or audit events.
+- `OPENAI_API_KEY` is server-only and must be independently scoped for Preview
+  and Production. Do not expose provider prompts, evidence, request IDs, or the
+  key through readiness, client variables, analytics, or application logs.
+- The external model receives only bounded public-company evidence. Holdings,
+  quantities, values, allocations, cost basis, alerts, notes, email, sessions,
+  and `userId` remain outside the provider request.
+- PostgreSQL owns AI budget reservations and settled/unconfirmed usage. Redis
+  rate limits supplement but never replace global, user, and job accounting.
 - Keep all M15 flags `false` until the stable HTTPS origin and signed worker
   callback have been verified in that environment.
 - Every listed feature flag must be set explicitly in Production. An absent or
@@ -165,6 +198,22 @@ idempotent seed after deployment to create/link the 25-company registry; the
 seed performs no network or R2 access. Existing unsupported securities remain
 valid. After a real backfill, preserve the SEC tables and use a forward fix
 rather than dropping facts or raw-object references.
+
+M18 migrations `20260811120000_m18_ai_research_foundation` and
+`20260811130000_m18_bind_ai_generation_config` follow the existing auth,
+isolation, SEC, and durable-job migrations. Apply them with
+`AI_RESEARCH_ENABLED=false`. It adds nullable research provenance/version fields
+and new budget, usage, claim, and evidence tables. It requires no seed or data
+backfill, and it leaves historical reports classified as deterministic. Preserve
+these additive records during rollback so usage can be reconciled.
+
+Repository/local verification (2026-08-11): `npm run db:deploy` successfully
+applied both M18 migrations, and all eight dedicated M18 database integration
+cases pass. They cover JSONB snapshot integrity, recorded and zero-network
+metered end-to-end persistence/privacy, citation-safe partial fallback, fresh
+reuse, explicit regeneration, active-run deduplication, usage reconciliation,
+and concurrent global/user/job budget enforcement. This does not verify the Preview or
+Production migration state or any live external provider.
 
 ### 4. Deploy and promote
 
@@ -594,6 +643,90 @@ before any usage can exceed the free allowances.
   pause the two named schedules; preserve job rows; and forward-fix the
   additive schema.
 
+## M18 external-AI activation
+
+M18 is a default-off interpretation layer over public evidence. SEC EDGAR fact
+excerpts and filing metadata, application catalog data, and deterministic signals
+remain the sources. OpenAI is not a financial-data source and the provider does
+not browse. Unsupported news and political-activity inputs remain explicit
+missing states. Generated output is educational and may not include buy, sell,
+or hold advice.
+
+### 1. Satisfy prerequisites
+
+- Authentication and cross-user isolation tests pass.
+- The M14 migration, private R2 boundary, SEC identity, controlled company
+  ingestion, provenance links, and manual source review are verified.
+- M15 migrations, Redis limits, signed QStash callback, duplicate-work defense,
+  and deterministic specialist/synthesis completion are verified.
+- M16 monitoring, a backup, non-production restore, and a rollback target are
+  evidenced. Deployed M17 research/citation states are usable.
+- The `$5 USD` maximum and current OpenAI pricing are approved.
+
+Repository implementation can be reviewed before those external prerequisites;
+external calls cannot be called active until they pass.
+
+### 2. Apply and verify the foundation
+
+1. Back up the isolated Preview database.
+2. Keep `AI_RESEARCH_ENABLED=false` and run `npm run db:deploy`.
+3. Confirm both M18 migrations applied in order.
+4. Run schema, type, unit, provider-contract, grounding, budget, reuse/diff, and
+   offline evaluation checks with deterministic/recorded providers.
+5. Verify old reports remain deterministic and do not gain invented provider or
+   version metadata.
+
+### 3. Configure the provider and limits
+
+Create separate Preview and Production OpenAI projects or keys. Set the complete
+M18 variable set from `.env.example` in the server environment. The checked-in
+defaults are `$5` global/month, `$1` user/month, `$0.25` per job, 50,000 tokens
+per job, 1,500 output tokens per call, a 20-second call timeout, and five user
+reports per UTC month. Runtime and database constraints reject a global value
+above `$5`.
+
+Open the provider console and record the reviewed pricing date/version. Configure
+a provider-side alert or spending stop at or below the approved allowance. The
+application's versioned cost estimate and provider accounting are independent
+controls; neither should be treated as the other.
+
+### 4. Prove privacy, grounding, and accounting in Preview
+
+1. Review a recorded-provider case and the curated offline evaluation. Treat any
+   schema, grounding, recommendation, unsupported material claim, numerical, or
+   missing-data failure as a stop.
+2. Inspect the outbound request contract and confirm it contains only bounded
+   public-company evidence. It must not contain holdings, quantities, values,
+   allocations, cost basis, alerts, private notes/history, name, email, OAuth
+   identity, session data, or `userId`.
+3. Confirm provider prompts/evidence and secrets do not appear in logs, Sentry,
+   PostHog, diagnostics, readiness, or browser payloads.
+4. Enable `AI_RESEARCH_ENABLED=true` only in Preview after base background and
+   research flags are already proven. Request one report for one supported
+   company and controlled user.
+5. Review every material claim against its cited excerpt/source. Confirm
+   counter-evidence, disagreements, missing data, model/report versions, and the
+   source snapshot are visible and persisted.
+6. Match token counts, estimated cost, reservation settlement, and provider
+   request ID to the actual OpenAI console charge. Investigate `UNCONFIRMED`
+   usage before more calls.
+7. Confirm a repeat reuses eligible work; explicit regeneration still consumes
+   quotas; a changed source/version fingerprint produces history/diff metadata.
+8. Exercise timeout and malformed-output behavior, then set the AI flag false
+   during a controlled attempt. The runner rechecks before each call/repair and
+   ordinary stock pages remain usable.
+
+### 5. Production decision
+
+Record the Preview job/report IDs, source-review notes, privacy evidence,
+version tuple, provider usage/charge, kill-switch result, reviewer, and rollback
+target. Only then repeat one bounded Production proof. Do not call the service
+live merely because the key and flag exist. Review global/user/job reservations,
+actual cost, unconfirmed usage, provider pricing, and report quality at least
+monthly. The detailed methodology and rubric are in
+[`docs/ai-research.md`](docs/ai-research.md) and
+[`docs/ai-evaluation.md`](docs/ai-evaluation.md).
+
 ## Health and readiness
 
 `GET /api/health` proves the Next.js process can respond. It does not contact PostgreSQL.
@@ -783,7 +916,8 @@ mitigation, data-integrity assessment, recovery evidence, and follow-up owner.
 
 At least monthly, open every provider link in the administrator cost panel,
 compare current usage with the service free allowance and the `<$30 USD` hard
-budget, and record the review timestamp/reference. Do not add billing API
+budget, reconcile OpenAI application reservations against its console when
+enabled, and record the review timestamp/reference. Do not add billing API
 credentials merely to automate this low-frequency review.
 
 ## Verification checklists
@@ -812,6 +946,14 @@ credentials merely to automate this low-frequency review.
 - [ ] Redis limits return controlled `429` responses, recover after their window, and do not leak identifiers in keys.
 - [ ] Admin job details, retry/cancel authorization, correlation IDs, and ticker freshness render correctly.
 - [ ] Both named schedules exist once with the reviewed HTTPS destination and UTC cadence.
+- [ ] M18 migration is applied with AI disabled; historical reports remain deterministic.
+- [ ] Offline AI evaluation and recorded-provider cases pass with no private inputs.
+- [ ] One bounded external Preview report is source-reviewed; citations,
+  counter-evidence, missing data, versions, history/diff, and partial failures render.
+- [ ] AI reservation/settlement and provider request usage match the OpenAI console;
+  no unresolved `UNCONFIRMED` charge remains before further activation.
+- [ ] Toggling `AI_RESEARCH_ENABLED=false` stops the next provider/repair attempt
+  without breaking stock pages or deterministic history.
 - [ ] Playwright public and authenticated journeys pass against the isolated Preview database.
 - [ ] CSP, HSTS, frame, referrer, permissions, and content-type headers match policy; TradingView remains usable.
 - [ ] Preview Sentry client/server/job errors carry the reviewed release and correlation context without private payloads.
@@ -844,6 +986,9 @@ credentials merely to automate this low-frequency review.
 - [ ] Production M15 flags were enabled in documented order after signed delivery proof.
 - [ ] A duplicate active SEC/research request reuses existing work and a completed QStash replay is a no-op.
 - [ ] Upstash usage remains inside the reviewed free allowances.
+- [ ] If external AI is approved, its separately scoped Production key, provider
+  billing control, `$5` application maximum, source/privacy review, one bounded
+  report, usage reconciliation, and kill-switch proof are recorded.
 - [ ] The previous Vercel production deployment is identifiable for rollback.
 - [ ] Production CSP/security headers are active and the TradingView widget still renders.
 - [ ] Sentry release/source-map mapping and privacy scrubbing are verified.
@@ -852,7 +997,7 @@ credentials merely to automate this low-frequency review.
 - [ ] The latest scheduled R2 backup is visible in admin diagnostics and retention remains within policy.
 - [ ] The last successful non-production restore drill is visible in admin diagnostics.
 - [ ] Dependabot, CI, CodeQL, Gitleaks, branch protection, and required checks are active.
-- [ ] Neon, R2, Redis, QStash, Vercel, Sentry, PostHog, and CI usage remains inside the monthly budget.
+- [ ] Neon, R2, Redis, QStash, Vercel, Sentry, PostHog, OpenAI when enabled, and CI usage remains inside the monthly budget.
 
 ## Rollback and forward fix
 
@@ -876,16 +1021,23 @@ Vercel Hobby currently limits CLI rollback to the previous production deployment
 
 ### Job or cache failure
 
-1. Set `SEC_INGESTION_ENABLED=false` and
+1. Set `AI_RESEARCH_ENABLED=false` first. If credentials or unexpected billing
+   may be involved, revoke/rotate the OpenAI key and apply the provider spending
+   stop. The runner checks the flag before every external attempt and repair.
+2. Set `SEC_INGESTION_ENABLED=false` and
    `RESEARCH_GENERATION_ENABLED=false` to stop expensive publishers.
-2. Pause `portfolioscope-recover-stale-jobs` and
+3. Pause `portfolioscope-recover-stale-jobs` and
    `portfolioscope-refresh-stale-sec` in QStash.
-3. Set `BACKGROUND_JOBS_ENABLED=false` if generic delivery itself is unsafe.
-4. Do not delete job, attempt, or control-event rows. Use `/admin` to capture
+4. Set `BACKGROUND_JOBS_ENABLED=false` if generic delivery itself is unsafe.
+5. Do not delete job, attempt, usage, claim, evidence, or control-event rows.
+   Preserve provider request IDs and reconcile `UNCONFIRMED` charges. Use `/admin` to capture
    correlation IDs and sanitized errors.
-5. Allow running work to finish or time out. Cancel only queued/retrying work.
-6. Forward-fix code or configuration, redeploy, prove one signed Preview job,
+6. Allow running work to finish or time out. Cancel only queued/retrying work.
+7. Forward-fix code or configuration, redeploy, prove one signed Preview job,
    then retry eligible failed jobs and restore flags/schedules gradually.
+
+Do not down-migrate the additive M18 tables during an incident. A compatible
+application rollback may ignore them; otherwise deploy a forward fix.
 
 ### Monitoring failure
 
@@ -909,6 +1061,14 @@ Complete this table during the real deployment. Do not mark an item complete wit
 | Private R2 bucket and least-privilege token verified | Not verified | Bucket policy and test object metadata |
 | SEC user-agent/contact verified | Not verified | Controlled request and operator review |
 | M15 migrations applied | Not verified | Deployment log showing both ordered migration names |
+| Preview/Production M18 migration applied with AI disabled | Not verified | Environment-specific migration log and historical deterministic-report check; local deployment already passes |
+| OpenAI Preview project/key and billing control configured | Not verified | Non-secret project reference, pricing review, and alert/spending-stop evidence |
+| Offline AI evaluation and manual rubric passed | Not verified | Versioned regression result and reviewer record |
+| External-AI private-data exclusion reviewed | Not verified | Outbound-contract/log/browser/analytics inspection record |
+| Bounded Preview AI report source-reviewed | Not verified | Job/report IDs, version tuple, cited-source checklist, and reviewer |
+| Preview AI usage reconciled | Not verified | Reservation/settlement, provider request ID, and console charge |
+| AI kill switch and degradation verified | Not verified | Controlled test time and stock-page/deterministic-history result |
+| Production AI explicitly approved and bounded | Not verified | Approval, one report ID, source/privacy/usage proof; leave disabled otherwise |
 | Preview Redis/QStash isolated | Not verified | Resource identifiers recorded outside source control |
 | Signed QStash delivery verified | Not verified | Preview job ID, attempt, and terminal status |
 | M15 rate limits verified | Not verified | Controlled `429` and recovery timestamp |

@@ -1,23 +1,34 @@
 export const monthlyCostPolicy = {
   budgetUsd: 30,
-  expectedUsd: { minimum: 1, maximum: 2 },
+  expectedUsd: { minimum: 1, maximum: 7 },
   services: [
+    {
+      name: "OpenAI",
+      measure:
+        "Evidence-grounded research input, cached input, and output tokens",
+      guardrail:
+        "Keep the application kill switch off by default and enforce the $5 global monthly database budget.",
+      dashboardUrl: "https://platform.openai.com/usage",
+    },
     {
       name: "Neon",
       measure: "Compute, storage, transfer, and restore history",
-      guardrail: "Remain on Free until reliability or measured use requires Launch.",
+      guardrail:
+        "Remain on Free until reliability or measured use requires Launch.",
       dashboardUrl: "https://console.neon.tech/",
     },
     {
       name: "Cloudflare R2",
       measure: "Stored bytes plus Class A and Class B operations",
-      guardrail: "Keep Standard storage within the free allowance and bounded backup retention.",
+      guardrail:
+        "Keep Standard storage within the free allowance and bounded backup retention.",
       dashboardUrl: "https://dash.cloudflare.com/",
     },
     {
       name: "Upstash",
       measure: "Redis storage/commands and QStash messages",
-      guardrail: "Keep schedules and per-run work bounded; configure a budget before any paid plan.",
+      guardrail:
+        "Keep schedules and per-run work bounded; configure a budget before any paid plan.",
       dashboardUrl: "https://console.upstash.com/",
     },
     {
@@ -29,19 +40,22 @@ export const monthlyCostPolicy = {
     {
       name: "Sentry",
       measure: "Errors, transactions, and source-map releases",
-      guardrail: "Start tracing at zero and sample only within the free event budget.",
+      guardrail:
+        "Start tracing at zero and sample only within the free event budget.",
       dashboardUrl: "https://sentry.io/",
     },
     {
       name: "PostHog",
       measure: "Schema-approved product events",
-      guardrail: "No autocapture or replay; review volume before adding events.",
+      guardrail:
+        "No autocapture or replay; review volume before adding events.",
       dashboardUrl: "https://app.posthog.com/",
     },
     {
       name: "GitHub Actions",
       measure: "CI, Playwright, backup, CodeQL, and Gitleaks minutes",
-      guardrail: "Use the public-repository allowance and keep scheduled workflows bounded.",
+      guardrail:
+        "Use the public-repository allowance and keep scheduled workflows bounded.",
       dashboardUrl: "https://github.com/settings/billing",
     },
   ],

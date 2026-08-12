@@ -116,7 +116,10 @@ describe("public demo read-only components", () => {
     );
 
     expect(markup).toContain("Read-only sample");
+    expect(markup).toContain("Deterministic");
     expect(markup).toContain("Deterministic overview.");
+    expect(markup).toContain("No LLM or external AI API was used.");
+    expect(markup).not.toContain("AI-generated");
     expect(markup).not.toContain("Run research");
     expect(markup).not.toContain("Refresh research");
   });

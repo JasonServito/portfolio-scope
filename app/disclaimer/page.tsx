@@ -33,6 +33,12 @@ export default function DisclaimerPage() {
             affected by issuer filings. TradingView widgets may be delayed or
             unavailable. Seeded demo values are not live production quotes.
           </Disclosure>
+          <Disclosure title="AI limitations">
+            Optional AI-generated research can be incomplete, incorrect, or
+            misinterpret cited evidence even after automated validation. Its
+            confidence, ratings, and summaries are not guarantees or forecasts;
+            review the linked primary evidence yourself.
+          </Disclosure>
           <Disclosure title="Do your own review">
             Verify important information with original filings and qualified
             professionals. Historical performance and deterministic signals do
