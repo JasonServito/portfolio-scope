@@ -138,14 +138,20 @@ verify both migrations independently with external AI disabled.
 ## Quality checks
 
 ```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run test:integration
-npm run build
+npm run verify
 ```
 
-CI runs the same checks against PostgreSQL after applying migrations and loading deterministic demo data.
+Run the deeper checks when the changed surface requires them:
+
+```bash
+npm run verify:db
+npm run test:integration
+npm run test:e2e
+npm run verify:security
+```
+
+CI uses the same package entrypoints against an isolated PostgreSQL service after
+applying migrations and loading deterministic demo data.
 
 ## Demo guide
 

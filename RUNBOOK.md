@@ -184,9 +184,17 @@ From a trusted operator environment with production `DATABASE_URL` and `DIRECT_U
 npm ci
 npm run db:generate
 npx prisma validate
-npm run db:deploy
-npm run db:seed
+MIGRATION_TARGET=production \
+MIGRATION_CONFIRMATION=APPLY_PRODUCTION_MIGRATIONS \
+npm run db:deploy:approved
+MIGRATION_TARGET=production \
+MIGRATION_CONFIRMATION=SEED_PRODUCTION_DATABASE \
+npm run db:seed:approved
 ```
+
+The approved commands are an execution guard, not a substitute for migration
+review and human release approval. Routine `db:deploy`, `db:migrate`, `db:seed`,
+and `verify:db` commands refuse remote database hosts.
 
 The seed uses deterministic upserts, updates only the marked demo identity and shared seeded catalog, and does not delete non-demo users. It can adopt a verified legacy demo owner at `DEMO_USER_EMAIL` without rewriting that user's primary key. It aborts on multiple markers, an unexpected configured-email owner, a conflicting stable ID, or deterministic alert/research IDs owned by another user. Changing `DEMO_USER_EMAIL` updates only the already marked identity when the new address is unclaimed. `npm run test:integration` is intentionally blocked when `NODE_ENV` or `VERCEL_ENV` is `production`; run that check only against local or Preview databases.
 
@@ -550,8 +558,13 @@ rows deliberately; the second migration adds a partial unique index and will
 stop rather than guess which user request to retain.
 
 ```bash
-npm run db:deploy
+MIGRATION_TARGET=preview \
+MIGRATION_CONFIRMATION=APPLY_PREVIEW_MIGRATIONS \
+npm run db:deploy:approved
 ```
+
+For Production, repeat only after human release approval with target
+`production` and confirmation `APPLY_PRODUCTION_MIGRATIONS`.
 
 Confirm `20260721115500_m15_job_enum_extensions` completes before
 `20260721120000_m15_caching_jobs_resilience`. The first commits the new research
@@ -669,7 +682,8 @@ external calls cannot be called active until they pass.
 ### 2. Apply and verify the foundation
 
 1. Back up the isolated Preview database.
-2. Keep `AI_RESEARCH_ENABLED=false` and run `npm run db:deploy`.
+2. Keep `AI_RESEARCH_ENABLED=false` and run the approved Preview migration:
+   `MIGRATION_TARGET=preview MIGRATION_CONFIRMATION=APPLY_PREVIEW_MIGRATIONS npm run db:deploy:approved`.
 3. Confirm both M18 migrations applied in order.
 4. Run schema, type, unit, provider-contract, grounding, budget, reuse/diff, and
    offline evaluation checks with deterministic/recorded providers.
@@ -875,7 +889,9 @@ npm run restore:postgres
 
 Also load the server-only `R2_*` values. Then:
 
-1. Run `npx prisma validate` and `npm run db:deploy` against the restored target.
+1. Run `npx prisma validate`, then apply migrations with
+   `MIGRATION_TARGET=restore-drill MIGRATION_CONFIRMATION=APPLY_RESTORE_DRILL_MIGRATIONS npm run db:deploy:approved`
+   against the restored target.
 2. Start the application with the restored target as both local runtime and
    migration URLs.
 3. Run the Playwright smoke tests.
@@ -1021,8 +1037,10 @@ Vercel Hobby currently limits CLI rollback to the previous production deployment
 - Stop the release before deploying incompatible application code.
 - Prefer an additive forward-fix migration.
 - If an application rollback would be incompatible with an already-applied migration, keep the compatible application deployed and forward-fix the database or code.
-- Rerun `npm run db:deploy`; committed Prisma migrations are designed to be repeatable.
-- Rerun `npm run db:seed` only when deterministic demo records need repair. The seed is demo-scoped and idempotent.
+- After human approval, rerun the guarded Production migration command; committed
+  Prisma migrations are designed to be repeatable.
+- Rerun the guarded Production seed command only when deterministic demo records
+  need repair. The seed is demo-scoped and idempotent.
 
 ### Job or cache failure
 
