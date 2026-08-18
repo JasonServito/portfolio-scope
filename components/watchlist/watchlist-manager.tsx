@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowUpRight, Plus, Trash2 } from "lucide-react";
+import { ArrowUpRight, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,13 +71,18 @@ function ReadOnlyWatchlist({ items }: { items: WatchlistRow[] }) {
 function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
   const router = useRouter();
   const [form, setForm] = useState({ ticker: "", targetPrice: "", notes: "" });
+  const [editForm, setEditForm] = useState({ targetPrice: "", notes: "" });
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+
   async function add(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
     setError("");
+    setNotice("");
     try {
       const response = await fetch("/api/watchlist", {
         method: "POST",
@@ -88,7 +93,9 @@ function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
         setError(await responseError(response, "Unable to add item."));
         return;
       }
+      const ticker = form.ticker.trim().toUpperCase();
       setForm({ ticker: "", targetPrice: "", notes: "" });
+      setNotice(`${ticker} was added to your watchlist.`);
       router.refresh();
     } catch {
       setError("Unable to reach the watchlist service. Please try again.");
@@ -100,6 +107,7 @@ function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
     if (!window.confirm(`Remove ${ticker} from the watchlist?`)) return;
     setRemovingId(id);
     setError("");
+    setNotice("");
     try {
       const response = await fetch(`/api/watchlist/${id}`, {
         method: "DELETE",
@@ -108,6 +116,8 @@ function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
         setError(await responseError(response, "Unable to remove item."));
         return;
       }
+      if (editingId === id) setEditingId(null);
+      setNotice(`${ticker} was removed from your watchlist.`);
       router.refresh();
     } catch {
       setError("Unable to reach the watchlist service. Please try again.");
@@ -115,6 +125,41 @@ function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
       setRemovingId(null);
     }
   }
+
+  async function save(item: WatchlistRow) {
+    setPending(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/watchlist/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      if (!response.ok) {
+        setError(await responseError(response, "Unable to update item."));
+        return;
+      }
+      setEditingId(null);
+      setNotice(`${item.ticker} target price and notes were updated.`);
+      router.refresh();
+    } catch {
+      setError("Unable to reach the watchlist service. Please try again.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function beginEditing(item: WatchlistRow) {
+    setError("");
+    setNotice("");
+    setEditingId(item.id);
+    setEditForm({
+      targetPrice: item.targetPrice === null ? "" : String(item.targetPrice),
+      notes: item.notes ?? "",
+    });
+  }
+
   return (
     <div className="grid gap-6">
       <Card>
@@ -123,7 +168,7 @@ function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
         </CardHeader>
         <CardContent>
           <form
-            className="grid gap-3 md:grid-cols-[0.7fr_1fr_2fr_auto] md:items-end"
+            className="grid gap-3 lg:grid-cols-[minmax(8rem,0.7fr)_minmax(9rem,1fr)_minmax(14rem,2fr)_auto] lg:items-end"
             onSubmit={add}
           >
             <label className="grid gap-1.5 text-sm font-medium">
@@ -167,21 +212,30 @@ function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
               <Plus />
               {pending ? "Adding…" : "Add"}
             </Button>
-            {error && (
-              <p
-                className="text-sm text-destructive md:col-span-4"
-                role="alert"
-              >
-                {error}
-              </p>
-            )}
           </form>
         </CardContent>
       </Card>
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          {notice}
+        </p>
+      ) : null}
       <WatchlistItems
+        editForm={editForm}
+        editingId={editingId}
         emptyMessage="Your watchlist is empty. Add a seeded ticker to start monitoring it."
         items={items}
+        onCancelEdit={() => setEditingId(null)}
+        onEdit={beginEditing}
+        onEditFormChange={setEditForm}
         onRemove={remove}
+        onSave={save}
+        pending={pending}
         removingId={removingId}
       />
     </div>
@@ -191,12 +245,26 @@ function EditableWatchlistManager({ items }: { items: WatchlistRow[] }) {
 function WatchlistItems({
   emptyMessage,
   items,
+  editForm,
+  editingId = null,
+  onCancelEdit,
+  onEdit,
+  onEditFormChange,
   onRemove,
+  onSave,
+  pending = false,
   removingId = null,
 }: {
   emptyMessage: string;
   items: WatchlistRow[];
+  editForm?: { targetPrice: string; notes: string };
+  editingId?: string | null;
+  onCancelEdit?: () => void;
+  onEdit?: (item: WatchlistRow) => void;
+  onEditFormChange?: (value: { targetPrice: string; notes: string }) => void;
   onRemove?: (id: string, ticker: string) => void;
+  onSave?: (item: WatchlistRow) => void;
+  pending?: boolean;
   removingId?: string | null;
 }) {
   if (items.length === 0) {
@@ -232,28 +300,102 @@ function WatchlistItems({
                   {item.companyName}
                 </p>
               </div>
-              {onRemove ? (
-                <Button
-                  aria-label={`Remove ${item.ticker}`}
-                  disabled={removingId !== null}
-                  onClick={() => onRemove(item.id, item.ticker)}
-                  size="icon-sm"
-                  variant="destructive"
-                >
-                  <Trash2 />
-                </Button>
-              ) : null}
+              <div className="flex gap-1">
+                {onEdit && editingId !== item.id ? (
+                  <Button
+                    aria-label={`Edit ${item.ticker}`}
+                    disabled={pending || removingId !== null}
+                    onClick={() => onEdit(item)}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <Pencil />
+                  </Button>
+                ) : null}
+                {onRemove && editingId !== item.id ? (
+                  <Button
+                    aria-label={`Remove ${item.ticker}`}
+                    disabled={pending || removingId !== null}
+                    onClick={() => onRemove(item.id, item.ticker)}
+                    size="icon-sm"
+                    variant="destructive"
+                  >
+                    <Trash2 />
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
             <p className="text-muted-foreground">{item.sector}</p>
-            {item.targetPrice !== null && (
-              <p>
-                <span className="text-muted-foreground">Target:</span>{" "}
-                {formatCurrency(item.targetPrice, "USD")}
-              </p>
+            {editingId === item.id && editForm && onEditFormChange && onSave ? (
+              <div className="grid gap-3 pt-2">
+                <label className="grid gap-1.5 font-medium">
+                  Target price <span className="sr-only">optional</span>
+                  <input
+                    aria-label={`${item.ticker} target price`}
+                    className="h-10 rounded-lg border bg-background px-3 font-normal"
+                    min="0.0001"
+                    onChange={(event) =>
+                      onEditFormChange({
+                        ...editForm,
+                        targetPrice: event.target.value,
+                      })
+                    }
+                    placeholder="No target set"
+                    step="any"
+                    type="number"
+                    value={editForm.targetPrice}
+                  />
+                </label>
+                <label className="grid gap-1.5 font-medium">
+                  Notes <span className="sr-only">optional</span>
+                  <textarea
+                    aria-label={`${item.ticker} notes`}
+                    className="min-h-24 rounded-lg border bg-background px-3 py-2 font-normal"
+                    maxLength={500}
+                    onChange={(event) =>
+                      onEditFormChange({
+                        ...editForm,
+                        notes: event.target.value,
+                      })
+                    }
+                    placeholder="What are you monitoring?"
+                    value={editForm.notes}
+                  />
+                </label>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    disabled={pending}
+                    onClick={() => onSave(item)}
+                    size="sm"
+                  >
+                    Save changes
+                  </Button>
+                  <Button
+                    aria-label={`Cancel editing ${item.ticker}`}
+                    disabled={pending}
+                    onClick={onCancelEdit}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <X />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p>
+                  <span className="text-muted-foreground">Target:</span>{" "}
+                  {item.targetPrice === null
+                    ? "Not set"
+                    : formatCurrency(item.targetPrice, "USD")}
+                </p>
+                <p className={item.notes ? undefined : "text-muted-foreground"}>
+                  {item.notes || "No notes yet."}
+                </p>
+              </>
             )}
-            {item.notes && <p>{item.notes}</p>}
           </CardContent>
         </Card>
       ))}

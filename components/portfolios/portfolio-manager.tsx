@@ -36,11 +36,13 @@ export function PortfolioManager({
   const [pending, setPending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
     setError("");
+    setNotice("");
     try {
       const response = await fetch("/api/portfolios", {
         method: "POST",
@@ -52,7 +54,9 @@ export function PortfolioManager({
         return;
       }
       captureAnalyticsEvent("portfolio_created", {});
+      const name = form.name.trim();
       setForm({ name: "", baseCurrency: "USD" });
+      setNotice(`${name} was created.`);
       router.refresh();
     } catch {
       setError("Unable to reach the portfolio service. Please try again.");
@@ -67,6 +71,7 @@ export function PortfolioManager({
     }
     setDeletingId(portfolio.id);
     setError("");
+    setNotice("");
     try {
       const response = await fetch(`/api/portfolios/${portfolio.id}`, {
         method: "DELETE",
@@ -75,6 +80,7 @@ export function PortfolioManager({
         setError(await responseError(response, "Unable to delete portfolio."));
         return;
       }
+      setNotice(`${portfolio.name} was deleted.`);
       router.refresh();
     } catch {
       setError("Unable to reach the portfolio service. Please try again.");
@@ -91,7 +97,7 @@ export function PortfolioManager({
         </CardHeader>
         <CardContent>
           <form
-            className="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end"
+            className="grid gap-3 lg:grid-cols-[minmax(14rem,1fr)_10rem_auto] lg:items-end"
             onSubmit={create}
           >
             <label className="grid gap-1.5 text-sm font-medium">
@@ -127,12 +133,17 @@ export function PortfolioManager({
               <Plus />
               {pending ? "Creating…" : "Create"}
             </Button>
-            {error ? (
-              <p className="text-sm text-destructive sm:col-span-3" role="alert">
-                {error}
-              </p>
-            ) : null}
           </form>
+          {error ? (
+            <p className="mt-3 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {notice ? (
+            <p className="mt-3 text-sm text-muted-foreground" role="status">
+              {notice}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -141,8 +152,7 @@ export function PortfolioManager({
           <CardContent className="py-12 text-center">
             <p className="font-medium">No private portfolios yet.</p>
             <p className="mt-2 text-sm text-muted-foreground">
-              Create one above. Ownership is assigned from your authenticated
-              session, never from form input.
+              Create one above, then add the stocks you own.
             </p>
           </CardContent>
         </Card>
@@ -155,7 +165,8 @@ export function PortfolioManager({
                   <div>
                     <CardTitle>{portfolio.name}</CardTitle>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {portfolio.baseCurrency} · {portfolio.holdingCount} holding
+                      {portfolio.baseCurrency} · {portfolio.holdingCount}{" "}
+                      holding
                       {portfolio.holdingCount === 1 ? "" : "s"}
                     </p>
                   </div>
@@ -172,7 +183,8 @@ export function PortfolioManager({
               </CardHeader>
               <CardContent className="flex items-center justify-between gap-4">
                 <p className="text-xs text-muted-foreground">
-                  Updated {new Date(portfolio.updatedAt).toLocaleDateString("en-US")}
+                  Updated{" "}
+                  {new Date(portfolio.updatedAt).toLocaleDateString("en-US")}
                 </p>
                 <Link
                   className={buttonVariants({ variant: "outline", size: "sm" })}

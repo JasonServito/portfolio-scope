@@ -203,6 +203,16 @@ test.describe("authenticated production boundaries", () => {
       where: { ticker: "AAPL" },
       select: { id: true },
     });
+    await db.alert.create({
+      data: {
+        userId: userB.id,
+        stockId: stock.id,
+        type: "WATCHLIST_MOVE",
+        severity: "MEDIUM",
+        title: "Review AAPL target",
+        message: "AAPL reached the configured review point.",
+      },
+    });
     const currentCreatedAt = new Date();
     await createResearchFixture({
       userId: userA.id,
@@ -244,7 +254,7 @@ test.describe("authenticated production boundaries", () => {
     });
     await expect(privateNavigation).toBeVisible();
     await expect(
-      privateNavigation.getByRole("link", { name: "Portfolios" }),
+      privateNavigation.getByRole("link", { name: "Dashboard" }),
     ).toBeVisible();
     await expect(
       privateNavigation.getByRole("link", { name: "Watchlist" }),
@@ -266,6 +276,117 @@ test.describe("authenticated production boundaries", () => {
       page.getByText("E2E long-term portfolio", { exact: true }),
     ).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/CAD.*0 holdings/i)).toBeVisible();
+
+    await page.getByRole("link", { name: "Open", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "E2E long-term portfolio" }),
+    ).toBeVisible();
+    await page.getByLabel("Name").fill("E2E managed portfolio");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "Portfolio settings were saved.",
+    );
+
+    await page.getByLabel("Ticker").fill("AAPL");
+    await page.getByLabel("Shares").fill("2");
+    await page.getByLabel("Average cost").fill("150");
+    await page.getByRole("button", { name: "Add holding" }).click();
+    await expect(page.getByText("Apple Inc.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status")).toContainText(
+      "AAPL was added to this portfolio.",
+    );
+  });
+
+  test("an authenticated user adds, edits, and removes a watchlist item", async ({
+    context,
+    page,
+  }) => {
+    await authenticate(context, tokenB);
+    await page.goto("/app/watchlist");
+
+    await page.getByLabel("Ticker").fill("MSFT");
+    await page.getByLabel("Target price").fill("500");
+    await page.getByLabel("Notes").fill("Review cloud growth.");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "MSFT was added to your watchlist.",
+    );
+    await expect(page.getByText("Review cloud growth.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit MSFT" }).click();
+    await page.getByLabel("MSFT target price").fill("510");
+    await page.getByLabel("MSFT notes").fill("Updated cloud thesis.");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "MSFT target price and notes were updated.",
+    );
+    await expect(page.getByText("Updated cloud thesis.")).toBeVisible();
+    await expect(page.getByText("$510.00")).toBeVisible();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Remove MSFT" }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "MSFT was removed from your watchlist.",
+    );
+    await expect(page.getByText(/your watchlist is empty/i)).toBeVisible();
+  });
+
+  test("an authenticated user resolves and reopens an owned alert", async ({
+    context,
+    page,
+  }) => {
+    await authenticate(context, tokenB);
+    await page.goto("/app/alerts");
+
+    await expect(page.getByText("Review AAPL target")).toBeVisible();
+    await page.getByRole("button", { name: "Resolve" }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "Review AAPL target was resolved.",
+    );
+    await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Reopen" }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "Review AAPL target was reopened.",
+    );
+    await expect(page.getByText("active", { exact: true })).toBeVisible();
+  });
+
+  test("authenticated Create and Add controls fit a mobile viewport", async ({
+    context,
+    page,
+  }) => {
+    await authenticate(context, tokenB);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/app");
+
+    await expect(
+      page.getByRole("heading", { name: "Dashboard" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create" })).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+
+    await page.goto("/app/watchlist");
+    await expect(
+      page.getByRole("button", { name: "Add", exact: true }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
   });
 
   test("a second user cannot open another user's portfolio", async ({

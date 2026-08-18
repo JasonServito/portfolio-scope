@@ -30,13 +30,11 @@ export default async function PrivatePortfolioPage({
           <ArrowLeft /> Back to portfolios
         </Link>
         <p className="mt-6 text-sm font-medium text-muted-foreground">
-          Private portfolio
+          Portfolio
         </p>
         <h1 className="mt-2 text-3xl font-semibold">{portfolio.name}</h1>
         <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Reads and mutations are scoped to your server-side session. A foreign
-          portfolio or holding identifier returns the same not-found response as
-          a missing record.
+          Update the portfolio details and keep its holdings current.
         </p>
       </div>
 

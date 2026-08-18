@@ -59,6 +59,7 @@ export function PrivatePortfolioManager({
   const [editForm, setEditForm] = useState({ shares: "", averageCost: "" });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function request(
     url: string,
@@ -71,7 +72,9 @@ export function PrivatePortfolioManager({
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!response.ok) {
-      throw new Error(await responseError(response, "The change was rejected."));
+      throw new Error(
+        await responseError(response, "The change was rejected."),
+      );
     }
   }
 
@@ -79,11 +82,17 @@ export function PrivatePortfolioManager({
     event.preventDefault();
     setPending(true);
     setError("");
+    setNotice("");
     try {
       await request(`/api/portfolios/${id}`, "PATCH", portfolioForm);
+      setNotice("Portfolio settings were saved.");
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to update portfolio.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to update portfolio.",
+      );
     } finally {
       setPending(false);
     }
@@ -93,15 +102,20 @@ export function PrivatePortfolioManager({
     event.preventDefault();
     setPending(true);
     setError("");
+    setNotice("");
     try {
       await request("/api/holdings", "POST", {
         portfolioId: id,
         ...holdingForm,
       });
+      const ticker = holdingForm.ticker.trim().toUpperCase();
       setHoldingForm({ ticker: "", shares: "", averageCost: "" });
+      setNotice(`${ticker} was added to this portfolio.`);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to add holding.");
+      setError(
+        caught instanceof Error ? caught.message : "Unable to add holding.",
+      );
     } finally {
       setPending(false);
     }
@@ -110,26 +124,35 @@ export function PrivatePortfolioManager({
   async function updateHolding(holdingId: string) {
     setPending(true);
     setError("");
+    setNotice("");
     try {
       await request(`/api/holdings/${holdingId}`, "PATCH", editForm);
       setEditingId(null);
+      setNotice("The holding was updated.");
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to update holding.");
+      setError(
+        caught instanceof Error ? caught.message : "Unable to update holding.",
+      );
     } finally {
       setPending(false);
     }
   }
 
   async function removeHolding(holding: PrivateHolding) {
-    if (!window.confirm(`Remove ${holding.ticker} from this portfolio?`)) return;
+    if (!window.confirm(`Remove ${holding.ticker} from this portfolio?`))
+      return;
     setPending(true);
     setError("");
+    setNotice("");
     try {
       await request(`/api/holdings/${holding.id}`, "DELETE");
+      setNotice(`${holding.ticker} was removed from this portfolio.`);
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to delete holding.");
+      setError(
+        caught instanceof Error ? caught.message : "Unable to delete holding.",
+      );
     } finally {
       setPending(false);
     }
@@ -137,13 +160,24 @@ export function PrivatePortfolioManager({
 
   return (
     <div className="grid gap-6">
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          {notice}
+        </p>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Portfolio settings</CardTitle>
         </CardHeader>
         <CardContent>
           <form
-            className="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end"
+            className="grid gap-3 lg:grid-cols-[minmax(14rem,1fr)_10rem_auto] lg:items-end"
             onSubmit={savePortfolio}
           >
             <Field
@@ -181,7 +215,7 @@ export function PrivatePortfolioManager({
         </CardHeader>
         <CardContent>
           <form
-            className="grid gap-3 sm:grid-cols-3 sm:items-end"
+            className="grid gap-3 lg:grid-cols-[minmax(8rem,0.8fr)_minmax(9rem,1fr)_minmax(10rem,1fr)_auto] lg:items-end"
             onSubmit={addHolding}
           >
             <Field
@@ -222,14 +256,9 @@ export function PrivatePortfolioManager({
               type="number"
               value={holdingForm.averageCost}
             />
-            <div className="flex items-center justify-between gap-3 sm:col-span-3">
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-              <Button disabled={pending} type="submit">
-                <Plus /> Add holding
-              </Button>
-            </div>
+            <Button disabled={pending} type="submit">
+              <Plus /> Add holding
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -270,7 +299,10 @@ export function PrivatePortfolioManager({
                           className="h-9 w-28 rounded-md border bg-background px-2"
                           min="0.000001"
                           onChange={(event) =>
-                            setEditForm({ ...editForm, shares: event.target.value })
+                            setEditForm({
+                              ...editForm,
+                              shares: event.target.value,
+                            })
                           }
                           step="any"
                           type="number"

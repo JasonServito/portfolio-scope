@@ -12,11 +12,12 @@ export default async function PrivateWatchlistPage() {
     <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
       <div>
         <p className="text-sm font-medium text-muted-foreground">
-          Private research queue
+          Stocks you follow
         </p>
         <h1 className="mt-2 text-3xl font-semibold">Your watchlist</h1>
         <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Watchlist reads and mutations are keyed to your authenticated user ID.
+          Add companies, record a target price, and keep short notes about what
+          you are monitoring.
         </p>
       </div>
       <WatchlistManager

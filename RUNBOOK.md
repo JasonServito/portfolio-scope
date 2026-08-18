@@ -580,9 +580,13 @@ origin; QStash signs the full callback URL, so a mismatched host causes a
 controlled `401`.
 
 The Redis keys are prefixed by environment and private identifiers are hashed.
-Cache failure degrades to the provider or PostgreSQL where safe. Mutation,
-research, and admin rate limits fail closed because silently losing an abuse
-boundary is unsafe.
+Cache failure degrades to the provider or PostgreSQL where safe. Ordinary
+authenticated portfolio, holding, watchlist, and alert mutations fall back to a
+stricter process-local 20-request-per-minute user and IP limit when Redis is
+unavailable; this keeps basic CRUD usable without disabling abuse controls.
+Restore Redis promptly because the fallback is not shared across application
+instances. Research, administrator, and worker mutation limits still fail
+closed, and public stock reads retain their existing fail-open policy.
 
 ### 3. Prove signed delivery before enabling publishers
 

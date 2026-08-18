@@ -6,7 +6,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/session";
 
 const privateNavigation = [
-  ["/app", "Portfolios"],
+  ["/app", "Dashboard"],
   ["/app/watchlist", "Watchlist"],
   ["/app/alerts", "Alerts"],
   ["/app/research", "Research"],
@@ -38,7 +38,7 @@ export default async function ProtectedAppLayout({
                 PortfolioScope
               </span>
               <span className="block text-[11px] text-muted-foreground">
-                Private workspace
+                Your dashboard
               </span>
             </span>
           </Link>
@@ -84,7 +84,7 @@ export default async function ProtectedAppLayout({
       <div id="private-content">{children}</div>
       <footer className="border-t bg-background">
         <div className="mx-auto max-w-7xl px-6 py-5 text-xs text-muted-foreground lg:px-8">
-          <p>Your portfolio data stays private to your account.</p>
+          <p>Educational portfolio tracking — not financial advice.</p>
         </div>
       </footer>
     </div>

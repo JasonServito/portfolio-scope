@@ -12,12 +12,11 @@ export default async function PrivateAlertsPage() {
     <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
       <div>
         <p className="text-sm font-medium text-muted-foreground">
-          Private risk state
+          Portfolio updates
         </p>
         <h1 className="mt-2 text-3xl font-semibold">Your alerts</h1>
         <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Status changes require both an authenticated session and alert
-          ownership. Admin role alone does not bypass this boundary.
+          Review active alerts and resolve items once you have assessed them.
         </p>
       </div>
       <PrivateAlerts
