@@ -22,9 +22,9 @@ export default async function PrivateResearchPage() {
         </p>
         <h1 className="mt-2 text-3xl font-semibold">Your research</h1>
         <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Start evidence-grounded research, follow independently retryable
-          specialists, and revisit the claims and source record from each run.
-          Reports here are scoped to your authenticated account.
+          Start stock research and revisit the findings, risks, missing
+          information, and sources from each report. Reports here are private to
+          your account.
         </p>
       </div>
       <PrivateResearch

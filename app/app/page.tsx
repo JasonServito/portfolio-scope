@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Database, ShieldCheck, UserRound } from "lucide-react";
+import { Bell, Binoculars, WalletCards } from "lucide-react";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
 import { PortfolioManager } from "@/components/portfolios/portfolio-manager";
@@ -16,18 +16,18 @@ export default async function PrivateWorkspacePage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
-      <AnalyticsEvent
-        name="sign_in_completed"
-        oncePerSession
-        properties={{}}
-      />
+      <AnalyticsEvent name="sign_in_completed" oncePerSession properties={{}} />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-muted-foreground">Authenticated workspace</p>
-          <h1 className="mt-2 text-3xl font-semibold">Welcome, {user.name ?? "investor"}</h1>
+          <p className="text-sm font-medium text-muted-foreground">
+            Your workspace
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold">
+            Welcome, {user.name ?? "investor"}
+          </h1>
           <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-            Create and manage portfolios that are scoped to your authenticated
-            identity at every server-side data boundary.
+            Create and manage your portfolios, follow stocks, and review alerts
+            in one place.
           </p>
         </div>
         <Badge variant="outline">{user.role}</Badge>
@@ -35,19 +35,19 @@ export default async function PrivateWorkspacePage() {
 
       <section className="grid gap-4 md:grid-cols-3">
         <StatusCard
-          description="GitHub and Google identities connect through Auth.js."
-          icon={UserRound}
-          title="OAuth identity"
+          description="Create portfolios and keep their holdings organized."
+          icon={WalletCards}
+          title="Portfolios"
         />
         <StatusCard
-          description="The active session is persisted in PostgreSQL and can be revoked immediately."
-          icon={Database}
-          title="Database session"
+          description="Keep a short list of companies you want to follow."
+          icon={Binoculars}
+          title="Watchlist"
         />
         <StatusCard
-          description="Role and resource ownership are server-controlled; foreign identifiers do not grant access."
-          icon={ShieldCheck}
-          title="Role boundary"
+          description="Review portfolio and stock signals that may need attention."
+          icon={Bell}
+          title="Alerts"
         />
       </section>
 

@@ -7,7 +7,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: getSiteUrl(),
   title: {
-    default: "PortfolioScope · Portfolio analytics with an audit trail",
+    default: "PortfolioScope · Portfolio and stock dashboard",
     template: "%s | PortfolioScope",
   },
   description: siteConfig.description,
@@ -16,15 +16,13 @@ export const metadata: Metadata = {
   creator: "Jason Servito",
   keywords: [
     "portfolio analytics",
-    "SEC EDGAR",
+    "stock dashboard",
+    "watchlist",
     "investment research",
-    "Next.js",
-    "Prisma",
-    "PostgreSQL",
   ],
   openGraph: {
     type: "website",
-    title: "PortfolioScope · Portfolio analytics with an audit trail",
+    title: "PortfolioScope · Portfolio and stock dashboard",
     description: siteConfig.description,
     siteName: siteConfig.name,
     images: [
@@ -32,13 +30,13 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1733,
         height: 909,
-        alt: "PortfolioScope — portfolio analytics with an audit trail",
+        alt: "PortfolioScope portfolio and stock dashboard",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "PortfolioScope · Portfolio analytics with an audit trail",
+    title: "PortfolioScope · Portfolio and stock dashboard",
     description: siteConfig.description,
     images: ["/og.png"],
   },

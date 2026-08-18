@@ -12,7 +12,7 @@ import { getLatestResearch } from "@/lib/research/orchestrator";
 export const metadata: Metadata = {
   title: "Sample research",
   description:
-    "Inspect a read-only deterministic PortfolioScope research report with specialist results, sources, counterpoints, risks, and missing data.",
+    "Review a read-only sample report with findings, sources, counterpoints, risks, and missing information.",
   alternates: { canonical: "/research" },
 };
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function SampleResearchPage() {
         />
       ) : null}
       <PublicContent
-        description="The public sample preserves specialist findings, sources, warnings, and missing information. It is deterministic, read-only, and does not make external LLM calls."
+        description="Review a prebuilt sample with findings, sources, warnings, and missing information. It is read-only and will not start or change research."
         eyebrow="Read-only sample"
         title="Research that keeps the evidence visible."
       >
@@ -37,7 +37,8 @@ export default async function SampleResearchPage() {
           <div>
             <p className="font-semibold">Apple Inc. &middot; AAPL</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Continue to stock detail for market context and SEC provenance.
+              Continue to stock detail for market context and company
+              fundamentals.
             </p>
           </div>
           <Link

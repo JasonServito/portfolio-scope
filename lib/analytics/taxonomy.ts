@@ -22,7 +22,6 @@ export const analyticsEventSchemas = {
       reportMode: z.enum(["demo", "private"]),
     })
     .strict(),
-  architecture_page_viewed: z.object({}).strict(),
 } as const;
 
 export type AnalyticsEventName = keyof typeof analyticsEventSchemas;

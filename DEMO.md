@@ -1,6 +1,11 @@
 # PortfolioScope demo script
 
-This script keeps a recruiter or interviewer walkthrough focused on the product's strongest engineering signals. Allow about two minutes.
+This script keeps a recruiter or interviewer walkthrough focused on an
+understandable stock-dashboard product first, with engineering depth available
+in the repository. Allow about two minutes.
+
+Product screens stay focused on investor tasks. Use the repository documentation
+when a reviewer wants implementation, security, data-source, or operational detail.
 
 ## Before the demo
 
@@ -16,31 +21,43 @@ Do not describe the seeded market data as live. Do not frame research output as 
 
 ### 1. Position the product - 20 seconds
 
-From the landing page, explain that PortfolioScope emphasizes period-based portfolio analytics and source-backed research rather than trading. Select **Explore the read-only demo**. No OAuth or account setup is required.
+From the landing page, explain that PortfolioScope is a stock dashboard for
+managing portfolios, following stocks, and simplifying stock research rather
+than trading. Select **Explore the read-only demo**. No account setup is required.
 
 ### 2. Show portfolio analytics - 35 seconds
 
-On the dashboard, use step one of **Follow the evidence**. Call out total value, cost basis, selected-period return, allocation, and alerts. Change the period once to demonstrate that the chart and rankings use the same typed analytics layer rather than component-local calculations.
+On the dashboard, use step one of **Explore the dashboard**. Call out total
+value, cost basis, selected-period return, allocation, and alerts. Change the
+period once and show that the chart and rankings update together.
 
 ### 3. Open a holding - 30 seconds
 
 Select **Inspect holdings**, then open AAPL. Show the comparable return windows and explain that deterministic snapshots make the demo repeatable and calculations testable.
 
-### 4. Trace the evidence - 25 seconds
+### 4. Show understandable stock analysis - 25 seconds
 
-On stock detail, distinguish the attributed TradingView widget from the persisted SEC facts. Point out filing period, accession, retrieval time, units, normalization version, freshness, and explicit missing-data states.
+On stock detail, distinguish the attributed TradingView market context from the
+persisted financial facts. Focus on what the values mean and on clear
+missing/stale states. Mention that detailed SEC lineage is preserved internally
+and documented in the repository rather than walking through accession and
+normalization metadata.
 
 ### 5. Inspect research - 20 seconds
 
-Open the research section or `/research`. Explain that this M17 sample is deterministic and makes no external LLM calls. Show that findings, counterpoints, risks, missing data, and sources remain separate and visible.
+Open the research section or `/research`. Explain that the public sample is
+prebuilt and read-only. Show that findings, counterpoints, risks, missing data,
+and sources remain separate and visible.
 
-### 6. Close on engineering depth - 10 seconds
+### 6. Close with the repository - 10 seconds
 
-Use the final tour step to open `/architecture`, then follow the repository link if time permits. Summarize the boundaries: Next.js routes, typed services, provider adapters, Prisma/PostgreSQL authority, signed jobs, ephemeral Redis coordination, tests, and CI.
+Open the repository documentation. Summarize the boundaries: Next.js routes,
+typed services, provider adapters, Prisma/PostgreSQL authority, signed jobs,
+ephemeral Redis coordination, tests, and CI. External AI remains default-off.
 
 ## Checked-in recruiter assets
 
-- Screenshots: `public/screenshots/landing.png`, `dashboard.png`, `holdings.png`, `alerts.png`, `stock-detail.png`, `research.png`, and `architecture.png`
+- Screenshots: `public/screenshots/landing.png`, `dashboard.png`, `holdings.png`, `watchlist.png`, `alerts.png`, `stock-detail.png`, and `research.png`
 - Short recording: `public/demo/recruiter-tour.webm`
 - Social preview: `public/og.png`
 
@@ -64,7 +81,7 @@ Store approved images in `public/screenshots/` with descriptive kebab-case names
 - `alerts.png` — multiple severities and at least one ticker link
 - `stock-detail.png` — stock context, chart, position, and related risks
 - `research.png` — overview plus visible specialist navigation
-- `architecture.png` — rendered README architecture diagram, if a static asset is needed
+- `watchlist.png` — followed companies with notes and target context
 - `ci.png` - optional; add only from a real passing workflow with no sensitive repository details
 
 Capture only real application states. Avoid cropped labels, transient loading states, browser notifications, local paths, secrets, and placeholder data. Re-capture screenshots whenever seeded values or primary layouts materially change.

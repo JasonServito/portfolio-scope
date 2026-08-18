@@ -141,7 +141,7 @@ describe("M18 research UI", () => {
 
     expect(markup).toContain('href="/app/research/job-private"');
     expect(markup).toContain("Open private report");
-    expect(markup).toContain("AI-generated");
+    expect(markup).toContain("AI-assisted");
   });
 
   it("renders active and partial job states without a new-run control", () => {
@@ -172,8 +172,8 @@ describe("M18 research UI", () => {
       />,
     );
 
-    expect(activeMarkup).toContain("without queuing another run");
-    expect(partialMarkup).toContain("will not start another billable run");
+    expect(activeMarkup).toContain("without starting another run");
+    expect(partialMarkup).toContain("without starting another run");
     expect(activeMarkup).not.toContain("Run research");
     expect(partialMarkup).not.toContain("Regenerate report");
   });
@@ -230,7 +230,7 @@ describe("M18 research UI", () => {
     expect(markup).toContain("Regenerate report");
   });
 
-  it("labels external reports and exposes claims, counter-evidence, versions, and cost", () => {
+  it("labels public external reports without exposing technical generation details", () => {
     const markup = renderToStaticMarkup(
       <ResearchTabs
         initialResearch={externalResearch}
@@ -239,12 +239,12 @@ describe("M18 research UI", () => {
       />,
     );
 
-    expect(markup).toContain("AI-generated");
+    expect(markup).toContain("AI-assisted");
     expect(markup).toContain("Claims and evidence");
     expect(markup).toContain("Counter-evidence");
     expect(markup).toContain("Margin fact");
-    expect(markup).toContain("Report: report-v2");
-    expect(markup).toContain("$0.0023");
+    expect(markup).not.toContain("Report: report-v2");
+    expect(markup).not.toContain("$0.0023");
     expect(markup).toContain("This report is partial");
     expect(markup).not.toContain("Regenerate report");
   });

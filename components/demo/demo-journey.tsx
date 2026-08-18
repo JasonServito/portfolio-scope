@@ -16,17 +16,12 @@ const steps = [
   },
   {
     href: "/stocks/aapl",
-    label: "Evidence",
-    shortLabel: "Inspect sources",
-  },
-  {
-    href: "/architecture",
-    label: "Architecture",
-    shortLabel: "Trace the system",
+    label: "Stock",
+    shortLabel: "Review a company",
   },
 ] as const;
 
-export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 | 4 }) {
+export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 }) {
   const next = Array.from(steps)[currentStep] ?? null;
 
   return (
@@ -40,10 +35,10 @@ export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 | 4 }) {
             Two-minute tour
           </p>
           <h2 className="mt-2 font-semibold" id="demo-journey-heading">
-            Follow the evidence
+            Explore the dashboard
           </h2>
         </div>
-        <ol className="grid flex-1 gap-2 sm:grid-cols-4">
+        <ol className="grid flex-1 gap-2 sm:grid-cols-3">
           {steps.map((step, index) => {
             const number = index + 1;
             const complete = number < currentStep;
@@ -75,7 +70,9 @@ export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 | 4 }) {
                     )}
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-xs font-medium">{step.label}</span>
+                    <span className="block text-xs font-medium">
+                      {step.label}
+                    </span>
                     <span className="mt-0.5 block truncate text-[10px] text-white/45">
                       {step.shortLabel}
                     </span>

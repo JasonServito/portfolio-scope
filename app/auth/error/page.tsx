@@ -6,13 +6,15 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthErrorContent } from "@/lib/auth/errors";
 
-export const metadata: Metadata = { title: "Authentication error" };
+export const metadata: Metadata = { title: "Sign-in problem" };
 
 type AuthErrorPageProps = {
   searchParams?: Promise<{ error?: string | string[] }>;
 };
 
-export default async function AuthErrorPage({ searchParams }: AuthErrorPageProps) {
+export default async function AuthErrorPage({
+  searchParams,
+}: AuthErrorPageProps) {
   const params = await searchParams;
   const error = Array.isArray(params?.error) ? params.error[0] : params?.error;
   const content = getAuthErrorContent(error);
@@ -27,7 +29,9 @@ export default async function AuthErrorPage({ searchParams }: AuthErrorPageProps
           <CardTitle className="text-xl">{content.title}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <p className="leading-6 text-muted-foreground">{content.description}</p>
+          <p className="leading-6 text-muted-foreground">
+            {content.description}
+          </p>
           <div className="flex flex-wrap gap-2">
             <Link className={buttonVariants()} href="/auth/signin">
               Try sign-in again

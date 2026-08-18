@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, ArrowRight, Database, LineChart } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Database,
+  LineChart,
+} from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
@@ -72,13 +78,13 @@ export default async function StockPage({ params }: StockPageProps) {
               <ArrowLeft className="size-4" />
               Holdings
             </Link>
-            <Link className={buttonVariants()} href="/architecture">
-              Architecture
+            <Link className={buttonVariants()} href="#research">
+              View research
               <ArrowRight className="size-4" />
             </Link>
           </>
         }
-        description={`${stock.companyName} market context, SEC-derived fundamentals, demo position exposure, and deterministic risk signals.`}
+        description={`${stock.companyName} market context, financial fundamentals, demo position exposure, and risk signals.`}
         eyebrow="Stock detail"
         title={stock.ticker}
       >
@@ -110,8 +116,18 @@ export default async function StockPage({ params }: StockPageProps) {
               <h2 className="text-2xl font-semibold tracking-[-0.025em]">
                 {stock.companyName}
               </h2>
-              <Badge className="border-background/20 text-background" variant="outline">{stock.exchange}</Badge>
-              <Badge className="border-background/20 text-background" variant="outline">{stock.currency}</Badge>
+              <Badge
+                className="border-background/20 text-background"
+                variant="outline"
+              >
+                {stock.exchange}
+              </Badge>
+              <Badge
+                className="border-background/20 text-background"
+                variant="outline"
+              >
+                {stock.currency}
+              </Badge>
             </div>
             <p className="mt-2 text-sm text-background/55">
               {stock.sector} / {stock.industry}
@@ -187,7 +203,10 @@ export default async function StockPage({ params }: StockPageProps) {
           ))}
         </section>
 
-        <section className="grid scroll-mt-28 gap-4 lg:grid-cols-[1.4fr_1fr]" id="market-context">
+        <section
+          className="grid scroll-mt-28 gap-4 lg:grid-cols-[1.4fr_1fr]"
+          id="market-context"
+        >
           <Card>
             <CardHeader>
               <CardTitle>Public market chart</CardTitle>
@@ -292,14 +311,21 @@ export default async function StockPage({ params }: StockPageProps) {
           ))}
         </section>
 
-        <section aria-labelledby="sec-fundamentals-heading" className="scroll-mt-28" id="fundamentals">
+        <section
+          aria-labelledby="sec-fundamentals-heading"
+          className="scroll-mt-28"
+          id="fundamentals"
+        >
           <h2 className="sr-only" id="sec-fundamentals-heading">
             SEC fundamentals and provenance
           </h2>
           <SecFundamentals data={fundamentals} />
         </section>
 
-        <section className="grid scroll-mt-28 gap-4 lg:grid-cols-[1fr_1fr]" id="risk">
+        <section
+          className="grid scroll-mt-28 gap-4 lg:grid-cols-[1fr_1fr]"
+          id="risk"
+        >
           <Card>
             <CardHeader>
               <CardTitle>Risk flags</CardTitle>
@@ -366,14 +392,14 @@ export default async function StockPage({ params }: StockPageProps) {
         <section className="scroll-mt-28 space-y-4" id="research">
           <div>
             <p className="text-sm font-medium text-muted-foreground">
-              Deterministic research layer
+              Stock research
             </p>
             <h2 className="mt-1 text-2xl font-semibold tracking-tight">
               Explainable stock research
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Deterministic specialist agents interpret seeded facts, surface
-              missing data, and preserve their evidence alongside the synthesis.
+              Review the available findings, risks, counterpoints, missing
+              information, and supporting sources for this company.
             </p>
           </div>
           <ResearchTabs

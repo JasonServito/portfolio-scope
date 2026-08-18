@@ -42,7 +42,7 @@ function PublicSiteHeader() {
               PortfolioScope
             </span>
             <span className="hidden text-[11px] text-muted-foreground sm:block">
-              Analytics with an audit trail
+              Portfolio dashboard
             </span>
           </span>
         </Link>
@@ -97,12 +97,6 @@ function PublicSiteHeader() {
             {item.label}
           </Link>
         ))}
-        <Link
-          className={buttonVariants({ variant: "ghost", size: "sm" })}
-          href="/research"
-        >
-          Sample research
-        </Link>
       </nav>
     </header>
   );
@@ -118,22 +112,21 @@ function PublicSiteFooter() {
             <p className="font-semibold">{siteConfig.name}</p>
           </div>
           <p className="mt-4 text-sm leading-6 text-background/65">
-            A non-commercial engineering project for transparent portfolio
-            analytics, source-backed fundamentals, and explainable research.
+            A non-commercial stock dashboard for understanding portfolios,
+            following companies, and reviewing research.
           </p>
         </div>
         <FooterGroup
           links={[
             ["/dashboard?demo=true", "Read-only demo"],
+            ["/holdings", "Holdings"],
+            ["/watchlist", "Watchlist"],
             ["/research", "Sample research"],
-            ["/architecture", "Architecture"],
-            ["/methodology", "Methodology"],
           ]}
           title="Explore"
         />
         <FooterGroup
           links={[
-            ["/data-sources", "Data sources"],
             ["/privacy", "Privacy"],
             ["/disclaimer", "Disclaimer"],
             [siteConfig.repositoryUrl, "GitHub repository"],
@@ -144,7 +137,9 @@ function PublicSiteFooter() {
       <div className="border-t border-background/15">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-6 py-5 text-xs text-background/55 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <p>Educational project. Not investment advice or a brokerage.</p>
-          <p>SEC EDGAR facts · Attributed TradingView widgets · Seeded demo data</p>
+          <p>
+            SEC EDGAR facts · Attributed TradingView widgets · Seeded demo data
+          </p>
         </div>
       </div>
     </footer>

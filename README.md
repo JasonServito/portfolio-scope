@@ -1,49 +1,55 @@
 # PortfolioScope
 
-PortfolioScope is a full-stack portfolio analytics and explainable stock-research demo built for long-term investors. It combines period-based performance, holding contribution analysis, deterministic risk alerts, and specialist research agents in a polished recruiter-ready experience.
+PortfolioScope is a full-stack stock dashboard for managing portfolios, following
+stocks, reviewing company fundamentals, and simplifying stock research. It is
+built for beginner-to-intermediate investors and doubles as a recruiter-ready
+example of a secure, tested, deployable application.
 
 > This is an educational analytics demo, not a brokerage or financial-advice product. PortfolioScope fundamentals come from SEC EDGAR when ingested, market charts are attributed TradingView widgets, and portfolio/research fixtures remain deterministic and seeded. Optional AI research interprets only supplied public evidence; it is disabled by default and is not itself a financial-data source. The app does not place trades, predict prices, or issue buy/sell/hold recommendations.
 
 ## Product highlights
 
-- Portfolio performance across 1D, 1W, 1M, 3M, and 1Y periods
-- Holding-level returns, gain/loss, allocation, and contribution analysis
-- Winners, losers, sector allocation, and portfolio value history
-- Explainable, rule-based concentration, drawdown, price-move, and watchlist alerts
-- Stock detail views with attributed TradingView charts and SEC-derived fundamentals
-- Filing-level source, period, retrieval, freshness, and normalization provenance
-- Private R2 retention for raw SEC submissions and Company Facts payloads
-- Evidence-grounded research agents with claim citations, counter-evidence, missing-data states, history, and report diffs
-- Deterministic and recorded model providers plus a default-off, budget-capped OpenAI provider
-- Deterministic seeded data for a stable, repeatable demo
-- GitHub and Google OAuth through Auth.js with revocable database sessions
-- Server-controlled USER and ADMIN roles, protected routes, and account deletion
-- Owner-scoped private portfolios, holdings, watchlists, alerts, and research history
-- A database-marked public demo that stays read-only in every environment
-- PostgreSQL-authoritative jobs with signed QStash delivery, bounded retries, attempt history, and admin controls
-- Redis-backed short caches, per-company locks, and per-user/IP abuse limits without permanent Redis state
-- Responsive Next.js UI backed by typed services, APIs, Prisma, and PostgreSQL
+- One-click, deterministic, read-only demo
+- Private portfolios, holdings, watchlists, alerts, and research history
+- Portfolio performance, allocation, gain/loss, and holding contribution views
+- Stock pages with attributed TradingView charts and persisted SEC fundamentals
+- Clear missing, stale, partial, and error states
+- GitHub and Google sign-in through Auth.js
+- Responsive Next.js UI backed by typed services, Prisma, and PostgreSQL
+
+The visible product is intentionally smaller than the implementation underneath.
+For technical reviewers, the repository includes owner-scoped authorization,
+SEC ingestion and internal provenance, private raw-source storage, durable signed
+jobs, caching and rate limits, monitoring, backups, CI/CD, and a default-off,
+budget-capped evidence-grounded AI architecture.
 
 ## Product tour
 
-The public landing page leads directly into a four-step, read-only recruiter journey: portfolio overview, holding detail, source-backed evidence, and architecture. The checked-in assets are generated from the real seeded application with `npm run demo:capture`; the narration and fallback path are in [`DEMO.md`](DEMO.md).
+The public landing page leads into a deterministic, read-only product demo. The
+checked-in assets are generated from the seeded application with
+`npm run demo:capture`; the current narration and fallback path are in
+[`DEMO.md`](DEMO.md).
 
 ![PortfolioScope landing page](public/screenshots/landing.png)
 
-| View         | What it demonstrates                                            |
-| ------------ | --------------------------------------------------------------- |
-| Landing      | Clear product positioning and one-click demo entry              |
-| Dashboard    | Period analytics, allocation, winners/losers, and alert context |
-| Holdings     | Comparable return windows and position-level performance        |
-| Alerts       | Transparent risk rules with links to affected securities        |
-| Stock detail | Price, position, risks, and explainable specialist research     |
-| Architecture | System boundaries, source flow, security, and reliability       |
+| View         | What it demonstrates                                                     |
+| ------------ | ------------------------------------------------------------------------ |
+| Landing      | Clear product positioning and one-click demo entry                       |
+| Dashboard    | Portfolio summary, allocation, performance, and alert context            |
+| Holdings     | Comparable return windows and position-level performance                 |
+| Watchlist    | Stocks the user follows, with editable notes and targets where supported |
+| Alerts       | Explainable rules linked to affected securities                          |
+| Stock detail | Market context, financial facts, and structured research                 |
 
 The short walkthrough recording is available at [`public/demo/recruiter-tour.webm`](public/demo/recruiter-tour.webm).
 
-### Resume-ready project summary
+Product routes stay focused on the dashboard, holdings, watchlist, alerts, stock
+detail, and research. Architecture, methodology, data-source, security, and
+operations detail remains in repository documentation.
 
-- Built a production-oriented Next.js 15 portfolio analytics platform with typed period-return and contribution services, Prisma/PostgreSQL persistence, responsive visualizations, and deterministic fixtures.
+### Technical project summary
+
+- Built a production-oriented Next.js stock dashboard with typed portfolio services, Prisma/PostgreSQL persistence, responsive visualizations, and deterministic fixtures.
 - Designed owner-scoped Auth.js workflows, a server-enforced read-only public demo, explicit admin authorization, signed/idempotent background jobs, and privacy-safe observability.
 - Integrated SEC EDGAR provenance and private raw-source retention while preserving ambiguity, freshness, and missing-data states alongside attributed TradingView market context.
 
@@ -74,7 +80,7 @@ The application keeps presentation, orchestration, domain calculations, provider
 
 ## Tech stack
 
-- Next.js 15, React 19, and TypeScript
+- Next.js 16, React 19, and TypeScript
 - Tailwind CSS and shadcn/ui-style components
 - Recharts for portfolio and stock visualizations
 - Prisma ORM and PostgreSQL
@@ -157,10 +163,10 @@ applying migrations and loading deterministic demo data.
 
 The focused recruiter walkthrough takes about two minutes:
 
-1. Start on the landing page and enter the read-only demo without OAuth.
+1. Start on the landing page and enter the read-only demo without an account.
 2. Use the guided dashboard prompt to inspect period analytics and a holding.
-3. Distinguish attributed TradingView market context from persisted SEC facts and provenance.
-4. Open the deterministic sample research and finish on the public architecture page or repository.
+3. Open a stock page and distinguish attributed market context from persisted financial facts.
+4. Open the deterministic sample research, then use the repository documentation for engineering depth.
 
 Detailed talking points, fallback steps, and screenshot framing are in [`DEMO.md`](DEMO.md).
 
@@ -197,23 +203,26 @@ No public demo URL is claimed here until a deployment is verified.
 
 ## Project documentation
 
-- [`README.md`](README.md) — product, architecture, setup, deployment, and roadmap
-- [`DEMO.md`](DEMO.md) — recruiter walkthrough and screenshot capture checklist
-
-- [`RUNBOOK.md`](RUNBOOK.md) — production deployment, monitoring, and rollback
+- [`docs/PRD.md`](docs/PRD.md) — authoritative product direction and non-goals
+- [`docs/task-backlog.md`](docs/task-backlog.md) — canonical active roadmap, including M19 cancellation and M20-M28
+- [`docs/task-backlog-part-2.md`](docs/task-backlog-part-2.md) — historical M11-M18 detail and superseded M19 proposal
+- [`docs/architecture.md`](docs/architecture.md) — current technical architecture and planned architectural intent
+- [`docs/deployment.md`](docs/deployment.md) — deployment and external-activation reference
+- [`RUNBOOK.md`](RUNBOOK.md) — production operations, monitoring, and rollback
+- [`DEMO.md`](DEMO.md) — current recruiter walkthrough and capture checklist
 - [`docs/sec-data.md`](docs/sec-data.md) — SEC contracts, normalization, provenance, freshness, and operations
-
-- [`docs/ai-research.md`](docs/ai-research.md) — M18 grounding, privacy, providers, budgets, activation, and rollback
-- [`docs/ai-evaluation.md`](docs/ai-evaluation.md) — offline metrics, curated cases, and manual review rubric
+- [`docs/ai-research.md`](docs/ai-research.md) and [`docs/ai-evaluation.md`](docs/ai-evaluation.md) — M18 safeguards and evaluation
 
 ## Roadmap
 
-- M17 frontend and recruiter-demo experience implemented in the repository
-- M18 repository completion gates and local migrations verified; external OpenAI activation and deployed evidence remain pending
-- Activate and verify the implemented Redis/QStash M15 layer in Preview and Production
-- Activate and externally verify M16 monitors, analytics, backup delivery, restore evidence, and rollback controls
-- Complete deployed UX/accessibility checks and the M18 controlled Preview evaluation before any Production AI activation
-- Replaceable licensed market-data providers when justified
-- Benchmarking, dividends, and portfolio import
+- M19 portfolio risk and scenario analytics is cancelled after a deliberate scope reassessment.
+- M20 product simplification is complete; M21-M22 prioritize authenticated reliability and measured performance.
+- M23-M26 plan a gated market-price decision, target alerts, simpler stock detail, three financial trend charts, and upcoming earnings.
+- M27 separates controlled live AI activation from the completed M18 repository architecture.
+- M28 is a low-priority, human-involved visual design pass after behavior is stable.
 
-Brokerage connectivity, trading, price prediction, and investment recommendations remain outside the product’s scope.
+M21-M28 remain `NOT_STARTED`. Market-price and earnings providers remain
+undecided and require feasibility analysis plus human approval before a new
+service is introduced. Brokerage connectivity, trading, institutional risk
+analytics, generalized catalysts, price prediction, and investment
+recommendations remain outside the product's scope.

@@ -4,9 +4,6 @@ import { getSiteUrl } from "@/lib/site";
 
 const publicRoutes = [
   "",
-  "/architecture",
-  "/methodology",
-  "/data-sources",
   "/privacy",
   "/disclaimer",
   "/research",

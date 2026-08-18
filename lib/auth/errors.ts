@@ -36,7 +36,7 @@ const authErrorContent: Record<string, AuthErrorContent> = {
   Configuration: {
     title: "Sign-in is temporarily unavailable",
     description:
-      "Authentication is not configured for this environment. The read-only recruiter demo is still available.",
+      "Sign-in is not available here right now. The read-only demo is still available.",
   },
   AccountDeletion: {
     title: "The account could not be deleted",
@@ -56,9 +56,8 @@ const authErrorContent: Record<string, AuthErrorContent> = {
 };
 
 const defaultAuthError: AuthErrorContent = {
-  title: "Authentication could not be completed",
-  description:
-    "The sign-in attempt failed safely. Try again or continue with the read-only recruiter demo.",
+  title: "Sign-in could not be completed",
+  description: "Try again or continue with the read-only demo.",
 };
 
 export function getAuthErrorContent(error: string | null | undefined) {

@@ -1,11 +1,9 @@
 import Link from "next/link";
-import { ExternalLink } from "lucide-react";
 
 import { SessionControls } from "@/components/auth/session-controls";
 import { BrandMark } from "@/components/layout/brand-mark";
 import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/session";
-import { siteConfig } from "@/lib/site";
 
 const privateNavigation = [
   ["/app", "Portfolios"],
@@ -36,7 +34,9 @@ export default async function ProtectedAppLayout({
           >
             <BrandMark />
             <span>
-              <span className="block text-sm font-semibold">PortfolioScope</span>
+              <span className="block text-sm font-semibold">
+                PortfolioScope
+              </span>
               <span className="block text-[11px] text-muted-foreground">
                 Private workspace
               </span>
@@ -83,17 +83,8 @@ export default async function ProtectedAppLayout({
       </header>
       <div id="private-content">{children}</div>
       <footer className="border-t bg-background">
-        <div className="mx-auto flex max-w-7xl flex-col gap-2 px-6 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between lg:px-8">
-          <p>Private records are scoped to the authenticated session.</p>
-          <a
-            className="inline-flex items-center gap-1 font-medium hover:text-foreground"
-            href={siteConfig.repositoryUrl}
-            rel="noreferrer"
-            target="_blank"
-          >
-            Source repository
-            <ExternalLink className="size-3" />
-          </a>
+        <div className="mx-auto max-w-7xl px-6 py-5 text-xs text-muted-foreground lg:px-8">
+          <p>Your portfolio data stays private to your account.</p>
         </div>
       </footer>
     </div>

@@ -3,15 +3,10 @@ import Link from "next/link";
 import {
   ArrowRight,
   BarChart3,
-  Braces,
-  Database,
-  ExternalLink,
-  FileSearch,
+  Bell,
+  Binoculars,
   Gauge,
   LockKeyhole,
-  Route,
-  ServerCog,
-  ShieldCheck,
 } from "lucide-react";
 
 import { AnalyticsLink } from "@/components/analytics/analytics-link";
@@ -22,59 +17,68 @@ import { buttonVariants } from "@/components/ui/button";
 import { siteConfig } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Portfolio analytics with an audit trail",
+  title: "Portfolio and stock dashboard",
   description: siteConfig.description,
   alternates: { canonical: "/" },
 };
 
 const capabilityCards = [
   {
-    title: "Period-aware analytics",
+    title: "Understand your portfolio",
     description:
-      "See value, return, allocation, and holding contribution over the same selected observation window.",
+      "Review value, return, allocation, and each holding's contribution over the same selected period.",
     icon: BarChart3,
-    detail: "Typed calculation services",
+    detail: "Portfolio overview and holdings",
   },
   {
-    title: "Financial-data provenance",
+    title: "Follow stocks",
     description:
-      "Inspect filing period, accession, retrieval time, units, and normalization status beside SEC-derived facts.",
-    icon: FileSearch,
-    detail: "SEC EDGAR + private R2",
+      "Keep companies on a watchlist and open stock pages for market context and financial fundamentals.",
+    icon: Binoculars,
+    detail: "Watchlist and stock detail",
   },
   {
-    title: "Explainable research",
+    title: "Review clear signals",
     description:
-      "Review deterministic specialist outputs, missing information, counterpoints, and the sources behind synthesis.",
-    icon: Braces,
-    detail: "Structured, testable results",
+      "See alerts, research findings, risks, counterpoints, missing information, and supporting sources.",
+    icon: Bell,
+    detail: "Alerts and stock research",
   },
 ] as const;
 
 const journey = [
-  ["01", "Portfolio", "Change the period and see the whole dashboard reconcile."],
+  [
+    "01",
+    "Portfolio",
+    "Change the period and see the whole dashboard reconcile.",
+  ],
   ["02", "Holding", "Open a major position and inspect its contribution."],
-  ["03", "Evidence", "Compare market context with SEC-controlled fundamentals."],
-  ["04", "Architecture", "Trace the same journey through production boundaries."],
+  ["03", "Stock", "Review market context, fundamentals, risks, and research."],
 ] as const;
 
 export default function Home() {
   return (
     <PublicSiteShell>
       <section className="relative overflow-hidden border-b">
-        <div className="landing-grid absolute inset-0 opacity-45" aria-hidden="true" />
+        <div
+          className="landing-grid absolute inset-0 opacity-45"
+          aria-hidden="true"
+        />
         <div className="relative mx-auto grid min-h-[calc(100vh-4.5rem)] w-full max-w-7xl items-center gap-12 px-6 py-14 lg:grid-cols-[0.92fr_1.08fr] lg:px-8 lg:py-20">
           <div>
-            <Badge className="border-primary/20 bg-primary/5 text-primary" variant="outline">
-              Production-oriented · Demo-first · Read-only
+            <Badge
+              className="border-primary/20 bg-primary/5 text-primary"
+              variant="outline"
+            >
+              Stock dashboard · Demo-first · Read-only
             </Badge>
             <h1 className="mt-7 max-w-3xl text-5xl font-semibold tracking-[-0.055em] text-balance sm:text-6xl lg:text-[4.6rem] lg:leading-[0.98]">
               Know what moved your portfolio—and why.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
-              PortfolioScope combines period-based portfolio analytics,
-              deterministic risk signals, and source-backed company research in
-              one inspectable full-stack product.
+              PortfolioScope brings portfolios, watchlists, alerts, company
+              fundamentals, and stock research into one straightforward
+              dashboard.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <AnalyticsLink
@@ -95,9 +99,9 @@ export default function Home() {
                   size: "lg",
                   className: "min-h-11 px-5",
                 })}
-                href="/architecture"
+                href="/stocks/aapl"
               >
-                See how it is built
+                Explore a stock
               </Link>
             </div>
             <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-muted-foreground">
@@ -106,8 +110,8 @@ export default function Home() {
                 No account required
               </span>
               <span className="flex items-center gap-1.5">
-                <ShieldCheck className="size-3.5 text-primary" />
-                Server-enforced read-only data
+                <LockKeyhole className="size-3.5 text-primary" />
+                Read-only sample data
               </span>
               <span className="flex items-center gap-1.5">
                 <Gauge className="size-3.5 text-primary" />
@@ -125,21 +129,23 @@ export default function Home() {
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-background/55">
-                Recruiter path
+                Product tour
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-[-0.035em]">
-                The strongest signal, in four stops.
+                See the core product in three stops.
               </h2>
             </div>
             <p className="max-w-xl text-sm leading-6 text-background/60">
-              The public journey stays available without OAuth and connects
-              product decisions to the engineering beneath them.
+              The public journey stays available without an account and focuses
+              on the tasks an investor comes here to complete.
             </p>
           </div>
-          <ol className="mt-9 grid gap-px overflow-hidden rounded-2xl border border-background/15 bg-background/15 md:grid-cols-4">
+          <ol className="mt-9 grid gap-px overflow-hidden rounded-2xl border border-background/15 bg-background/15 md:grid-cols-3">
             {journey.map(([number, title, description]) => (
               <li className="bg-foreground p-5" key={number}>
-                <span className="font-mono text-xs text-[#6ee7b7]">{number}</span>
+                <span className="font-mono text-xs text-[#6ee7b7]">
+                  {number}
+                </span>
                 <p className="mt-8 font-semibold">{title}</p>
                 <p className="mt-2 text-sm leading-6 text-background/55">
                   {description}
@@ -159,8 +165,8 @@ export default function Home() {
             A portfolio dashboard that shows its work.
           </h2>
           <p className="mt-4 text-base leading-7 text-muted-foreground">
-            Every major surface answers a practical investing question and
-            exposes the data boundary behind the answer.
+            Every major surface answers a practical investing question and keeps
+            the next action clear.
           </p>
         </div>
         <div className="mt-10 grid gap-4 lg:grid-cols-3">
@@ -186,69 +192,6 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-y bg-muted/35">
-        <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-20 lg:grid-cols-[0.9fr_1.1fr] lg:px-8">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-              Engineering proof
-            </p>
-            <h2 className="mt-4 text-4xl font-semibold tracking-[-0.04em] text-balance">
-              Production boundaries you can explain in an interview.
-            </h2>
-            <p className="mt-5 text-base leading-7 text-muted-foreground">
-              The modular monolith keeps UI, authorization, services, providers,
-              and persistence distinct while background jobs remain durable and
-              observable.
-            </p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              <Link
-                className={buttonVariants({ variant: "outline" })}
-                href="/architecture"
-              >
-                Explore architecture
-                <Route className="size-4" />
-              </Link>
-              <a
-                className={buttonVariants({ variant: "ghost" })}
-                href={siteConfig.repositoryUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                View source
-                <ExternalLink className="size-4" />
-              </a>
-            </div>
-          </div>
-
-          <div
-            aria-label="PortfolioScope system flow from interface to services and data infrastructure"
-            className="grid gap-3 sm:grid-cols-2"
-            role="img"
-          >
-            <ArchitectureNode
-              detail="Responsive public, demo, private, and admin routes"
-              icon={Gauge}
-              label="Next.js interface"
-            />
-            <ArchitectureNode
-              detail="Session, role, ownership, and demo boundaries"
-              icon={LockKeyhole}
-              label="Authorization"
-            />
-            <ArchitectureNode
-              detail="Analytics, SEC, research, and durable job orchestration"
-              icon={ServerCog}
-              label="Typed services"
-            />
-            <ArchitectureNode
-              detail="PostgreSQL authority, ephemeral Redis, private R2"
-              icon={Database}
-              label="Data layer"
-            />
-          </div>
-        </div>
-      </section>
-
       <section className="mx-auto w-full max-w-7xl px-6 py-16 lg:px-8">
         <div className="grid gap-5 rounded-2xl border bg-card p-6 md:grid-cols-[1fr_auto] md:items-center md:p-8">
           <div>
@@ -256,8 +199,8 @@ export default function Home() {
               Ready to inspect the product?
             </p>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Start with the deterministic demo, open a holding, inspect its SEC
-              provenance, and finish on the public architecture page.
+              Start with the read-only demo, open a holding, and review a
+              stock&apos;s fundamentals, risks, and research.
             </p>
           </div>
           <AnalyticsLink
@@ -266,29 +209,11 @@ export default function Home() {
             eventProperties={{ entryPoint: "landing" }}
             href="/dashboard?demo=true"
           >
-            Start the two-minute tour
+            Start the product tour
             <ArrowRight className="size-4" />
           </AnalyticsLink>
         </div>
       </section>
     </PublicSiteShell>
-  );
-}
-
-function ArchitectureNode({
-  detail,
-  icon: Icon,
-  label,
-}: {
-  detail: string;
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-}) {
-  return (
-    <div className="rounded-2xl border bg-background p-5">
-      <Icon className="size-5 text-primary" />
-      <p className="mt-5 font-semibold">{label}</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
-    </div>
   );
 }

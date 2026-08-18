@@ -48,9 +48,9 @@ function statusLabel(status: ResearchJobDetailData["status"]) {
 }
 
 function generationLabel(mode: ResearchJobDetailData["generationMode"]) {
-  if (mode === "EXTERNAL") return "AI-generated";
-  if (mode === "RECORDED") return "Recorded AI";
-  if (mode === "DETERMINISTIC") return "Deterministic";
+  if (mode === "EXTERNAL") return "AI-assisted";
+  if (mode === "RECORDED") return "Saved sample";
+  if (mode === "DETERMINISTIC") return "Prebuilt";
   return null;
 }
 
@@ -100,11 +100,11 @@ function ReportComparison({
             </p>
           </div>
           <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">Evidence inputs</p>
+            <p className="text-xs text-muted-foreground">Sources</p>
             <p className="mt-1 text-sm font-medium">
               {diff.source.snapshotChanged || diff.source.dataChanged
-                ? "Source snapshot changed"
-                : "Source snapshot unchanged"}
+                ? "Sources changed"
+                : "Sources unchanged"}
             </p>
           </div>
         </div>
@@ -127,8 +127,8 @@ function JobStatus({ job }: { job: ResearchJobDetailData }) {
         role="status"
       >
         <CheckCircle2 aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        The report is complete. Review its claims, counter-evidence, missing
-        information, and generation record below.
+        The report is complete. Review its findings, counterpoints, missing
+        information, and sources below.
       </div>
     );
   }
@@ -154,9 +154,8 @@ function JobStatus({ job }: { job: ResearchJobDetailData }) {
         role="status"
       >
         <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        Specialist output was preserved, but the report is not complete. This
-        page checks for retry or recovery updates; it will not start another
-        billable run.
+        Some completed work was preserved, but the report is not complete. This
+        page checks for retry or recovery updates without starting another run.
       </div>
     );
   }
@@ -170,8 +169,8 @@ function JobStatus({ job }: { job: ResearchJobDetailData }) {
         aria-hidden="true"
         className="mt-0.5 size-4 shrink-0 animate-spin"
       />
-      Specialist work is running in the background. This page checks the
-      existing job for updates without queuing another run.
+      Research is running in the background. This page checks the current report
+      for updates without starting another run.
     </div>
   );
 }

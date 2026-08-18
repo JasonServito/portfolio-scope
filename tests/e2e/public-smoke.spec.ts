@@ -9,9 +9,7 @@ test.describe("public production smoke @smoke", () => {
         level: 1,
       }),
     ).toBeVisible();
-    await expect(
-      page.getByText(/no account required/i),
-    ).toBeVisible();
+    await expect(page.getByText(/no account required/i)).toBeVisible();
 
     await page
       .getByRole("link", { name: /explore the read-only demo/i })
@@ -24,34 +22,21 @@ test.describe("public production smoke @smoke", () => {
       page.getByText(/north star portfolio · read-only demo/i),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: /follow the evidence/i }),
+      page.getByRole("heading", { name: /explore the dashboard/i }),
     ).toBeVisible();
   });
 
-  test("public technical pages expose the architecture and methodology", async ({
+  test("removed technical routes return the expected not-found fallback", async ({
     page,
   }) => {
-    await page.goto("/architecture");
-    await expect(
-      page.getByRole("heading", {
-        name: /one deployable system/i,
-        level: 1,
-      }),
-    ).toBeVisible();
-    await expect(page.getByText("PostgreSQL authority", { exact: false })).toBeVisible();
-
-    await page.getByRole("link", { name: "Methodology" }).first().click();
-    await expect(page).toHaveURL(/\/methodology/);
-    await expect(
-      page.getByRole("heading", {
-        name: /transparent inputs/i,
-        level: 1,
-      }),
-    ).toBeVisible();
-    await expect(page.getByText("missing ≠ zero", { exact: true })).toBeVisible();
+    for (const route of ["/architecture", "/methodology", "/data-sources"]) {
+      const response = await page.goto(route);
+      expect(response?.status()).toBe(404);
+      await expect(page.getByText(/page could not be found/i)).toBeVisible();
+    }
   });
 
-  test("sample research remains public and explicitly deterministic", async ({
+  test("sample research remains public and explicitly read-only", async ({
     page,
   }) => {
     await page.goto("/research");
@@ -63,7 +48,7 @@ test.describe("public production smoke @smoke", () => {
       }),
     ).toBeVisible();
     await expect(
-      page.getByText(/does not make external llm calls/i),
+      page.getByText(/will not start or change research/i),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /open full stock detail/i }),
@@ -83,13 +68,15 @@ test.describe("public production smoke @smoke", () => {
       page.getByText("SEC-derived fundamentals", { exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByText(/market chart and quote data are provided by tradingview/i),
+      page.getByText(
+        /market chart and quote data are provided by tradingview/i,
+      ),
     ).toBeVisible();
     await expect(
       page.getByText("Fundamentals: SEC EDGAR", { exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: /follow the evidence/i }),
+      page.getByRole("heading", { name: /explore the dashboard/i }),
     ).toBeVisible();
   });
 
@@ -136,8 +123,10 @@ test.describe("public production smoke @smoke", () => {
     ]);
 
     expect(sitemap.status()).toBe(200);
-    expect(sitemapBody).toContain("/architecture");
-    expect(sitemapBody).toContain("/data-sources");
+    expect(sitemapBody).not.toContain("/architecture");
+    expect(sitemapBody).not.toContain("/methodology");
+    expect(sitemapBody).not.toContain("/data-sources");
+    expect(sitemapBody).toContain("/stocks/aapl");
 
     expect(robots.status()).toBe(200);
     expect(robotsBody).toContain("Disallow: /admin");
@@ -155,10 +144,21 @@ test.describe("public production smoke @smoke", () => {
         name: "Public navigation on small screens",
       }),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Architecture" })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole("link", { name: "Methodology" })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole("link", { name: "Data sources" })).toHaveCount(
+      0,
+    );
     await page.getByRole("link", { name: "Try demo" }).click();
 
     await expect(
-      page.getByRole("navigation", { name: "Public navigation on small screens" }),
+      page.getByRole("navigation", {
+        name: "Public navigation on small screens",
+      }),
     ).toBeHidden();
     await expect(
       page.getByRole("navigation", {

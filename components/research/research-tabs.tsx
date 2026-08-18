@@ -63,20 +63,19 @@ function formatDate(value: string | null) {
 }
 
 function generationLabel(research: StockResearch) {
-  if (research.generationMode === "EXTERNAL") return "AI-generated";
-  if (research.generationMode === "RECORDED") return "Recorded AI output";
-  return "Deterministic";
+  if (research.generationMode === "EXTERNAL") return "AI-assisted";
+  return "Prebuilt sample";
 }
 
 function generationDescription(research: StockResearch) {
   const date = new Date(research.generatedAt).toLocaleDateString("en-US");
   if (research.generationMode === "EXTERNAL") {
-    return `AI-generated ${date} from the cited evidence snapshot. Model output was schema-validated; verify material claims against primary sources.`;
+    return `Prepared ${date} from the cited sources. Verify important claims against the original sources.`;
   }
   if (research.generationMode === "RECORDED") {
-    return `Generated ${date} from recorded model output for evaluation. No live model call was made for this view.`;
+    return `Prepared ${date} from a saved sample report.`;
   }
-  return `Generated ${date} from deterministic demo inputs. No LLM or external AI API was used.`;
+  return `Prepared ${date} for the read-only demo.`;
 }
 
 function ClaimCard({
@@ -168,74 +167,6 @@ function ClaimCard({
   );
 }
 
-function MetadataCard({ research }: { research: StockResearch }) {
-  const metadata = research.metadata;
-  if (!metadata) return null;
-
-  const versions = [
-    ["Prompt", metadata.promptVersion],
-    ["Output schema", metadata.outputSchemaVersion],
-    ["Retrieval", metadata.retrievalVersion],
-    ["Calculations", metadata.calculationVersion],
-    ["Source data", metadata.sourceDataVersion],
-    ["Input data", metadata.inputDataVersion],
-    ["Report", metadata.reportVersion],
-  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-
-  return (
-    <Card className="lg:col-span-2">
-      <CardHeader>
-        <CardTitle className="text-base">Generation record</CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <p className="text-xs text-muted-foreground">Provider and model</p>
-          <p className="mt-1 break-words text-sm font-medium">
-            {[metadata.provider, metadata.model].filter(Boolean).join(" · ") ||
-              "Not applicable"}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Token usage</p>
-          <p className="mt-1 text-sm font-medium">
-            {metadata.inputTokens ?? 0} input / {metadata.outputTokens ?? 0}{" "}
-            output
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Estimated AI cost</p>
-          <p className="mt-1 text-sm font-medium">
-            {metadata.estimatedCostUsd === null
-              ? "Not applicable"
-              : `$${metadata.estimatedCostUsd.toFixed(4)}`}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Source snapshot</p>
-          <p
-            className="mt-1 truncate font-mono text-xs"
-            title={metadata.sourceSnapshotSha256 ?? undefined}
-          >
-            {metadata.sourceSnapshotSha256 ?? "Not recorded"}
-          </p>
-        </div>
-        {versions.length ? (
-          <div className="sm:col-span-2 lg:col-span-4">
-            <p className="text-xs text-muted-foreground">Versioned inputs</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {versions.map(([label, value]) => (
-                <Badge key={label} variant="outline">
-                  {label}: {value}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
 function Overview({
   onEvidenceSelect,
   research,
@@ -309,9 +240,9 @@ function Overview({
             aria-hidden="true"
             className="mt-0.5 size-4 shrink-0"
           />
-          This report is partial. {failedAgents.length} specialist
-          {failedAgents.length === 1 ? "" : "s"} failed, and the synthesis
-          preserves the resulting evidence gaps.
+          This report is partial. {failedAgents.length} topic
+          {failedAgents.length === 1 ? "" : "s"} could not be completed, and
+          the overall confidence reflects the missing information.
         </div>
       ) : null}
 
@@ -361,8 +292,6 @@ function Overview({
           </CardContent>
         </Card>
       ))}
-
-      <MetadataCard research={research} />
     </div>
   );
 }
@@ -398,7 +327,7 @@ function ReadOnlyResearchTabs({
           </h3>
           <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
             The public demo is read-only and cannot start a research job. Try
-            another seeded company to inspect an existing deterministic report.
+            another company to inspect an available sample report.
           </p>
           <Badge className="mt-5" variant="outline">
             Read-only demo
@@ -471,8 +400,8 @@ function EditableResearchTabs({
             Research has not been generated
           </h3>
           <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-            Start the configured evidence-grounded pipeline. External AI remains
-            default-off and can run only within the configured usage limits.
+            Start a new research report using the available company information
+            and sources.
           </p>
           {error ? (
             <p className="mt-4 text-sm text-destructive" role="alert">
@@ -659,14 +588,14 @@ function ResearchReportContent({
             ) : (
               <ShieldCheck aria-hidden="true" className="size-4" />
             )}
-            <p className="font-medium">Evidence-grounded research workspace</p>
+            <p className="font-medium">Stock research report</p>
             <Badge variant={isAiGenerated ? "default" : "secondary"}>
               {generationLabel(research)}
             </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Claims, counter-evidence, missing information, and generation
-            versions remain visible for review.
+            Review findings, counterpoints, risks, missing information, and
+            supporting sources.
           </p>
         </div>
         {action}
@@ -714,8 +643,8 @@ function ResearchReportContent({
                 ) : (
                   <Card className="border-dashed">
                     <CardContent className="p-8 text-center text-sm text-muted-foreground">
-                      This specialist output is missing from the research job.
-                      The gap remains visible in synthesis confidence.
+                      This topic is missing from the report. The gap remains
+                      visible in the overall confidence.
                     </CardContent>
                   </Card>
                 )}
@@ -747,7 +676,7 @@ function ResearchReportContent({
               {agentSources.length ? (
                 <section>
                   <h3 className="text-sm font-semibold">
-                    Specialist source summaries
+                    Additional source summaries
                   </h3>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     {agentSources.map((source, index) => (

@@ -28,7 +28,7 @@ const captures = [
   ["/alerts", "alerts.png"],
   ["/stocks/aapl", "stock-detail.png"],
   ["/research", "research.png"],
-  ["/architecture", "architecture.png"],
+  ["/watchlist", "watchlist.png"],
 ];
 
 for (const [route, filename] of captures) {
@@ -36,9 +36,13 @@ for (const [route, filename] of captures) {
     waitUntil: "domcontentloaded",
   });
   if (route.startsWith("/dashboard")) {
-    await screenshotPage.waitForSelector(".recharts-surface", { timeout: 10_000 });
+    await screenshotPage.waitForSelector(".recharts-surface", {
+      timeout: 10_000,
+    });
   }
-  await screenshotPage.waitForTimeout(route.startsWith("/stocks/") ? 2_500 : 1_500);
+  await screenshotPage.waitForTimeout(
+    route.startsWith("/stocks/") ? 2_500 : 1_500,
+  );
   await screenshotPage.screenshot({
     animations: "allow",
     fullPage: true,
@@ -66,7 +70,13 @@ await videoPage.goto(new URL("/", baseUrl).toString(), {
   waitUntil: "domcontentloaded",
 });
 await videoPage.waitForTimeout(1_400);
-await videoPage.getByRole("link", { name: /explore the read-only demo/i }).click();
+await videoPage
+  .getByRole("link", { name: /explore the read-only demo/i })
+  .click();
+await videoPage.waitForTimeout(1_400);
+await videoPage.goto(new URL("/holdings", baseUrl).toString(), {
+  waitUntil: "domcontentloaded",
+});
 await videoPage.waitForTimeout(1_400);
 await videoPage.goto(new URL("/stocks/aapl", baseUrl).toString(), {
   waitUntil: "domcontentloaded",
@@ -76,10 +86,6 @@ await videoPage.locator("#fundamentals").scrollIntoViewIfNeeded();
 await videoPage.waitForTimeout(1_400);
 await videoPage.locator("#research").scrollIntoViewIfNeeded();
 await videoPage.waitForTimeout(1_400);
-await videoPage.goto(new URL("/architecture", baseUrl).toString(), {
-  waitUntil: "domcontentloaded",
-});
-await videoPage.waitForTimeout(1_500);
 
 await videoPage.close();
 await videoContext.close();

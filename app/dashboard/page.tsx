@@ -15,7 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataState } from "@/components/ui/data-state";
-import { formatCurrency, formatSignedCurrency, formatSignedPercent } from "@/lib/formatters";
+import {
+  formatCurrency,
+  formatSignedCurrency,
+  formatSignedPercent,
+} from "@/lib/formatters";
 import { getDemoDashboardData } from "@/lib/portfolio/dashboard-data";
 import { isPerformancePeriod } from "@/lib/portfolio/performance";
 
@@ -27,7 +31,9 @@ type DashboardPageProps = {
   }>;
 };
 
-async function getSelectedPeriod(searchParams?: DashboardPageProps["searchParams"]) {
+async function getSelectedPeriod(
+  searchParams?: DashboardPageProps["searchParams"],
+) {
   const params = await searchParams;
   const requestedPeriod = Array.isArray(params?.period)
     ? params?.period[0]
@@ -38,7 +44,9 @@ async function getSelectedPeriod(searchParams?: DashboardPageProps["searchParams
     : "1M";
 }
 
-export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+export default async function DashboardPage({
+  searchParams,
+}: DashboardPageProps) {
   const selectedPeriod = await getSelectedPeriod(searchParams);
   const { activeAlertCount, alerts, analytics } =
     await getDemoDashboardData(selectedPeriod);
@@ -52,15 +60,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       />
       <PageShell
         actions={
-          <>
-            <Link className={buttonVariants({ variant: "ghost" })} href="/architecture">
-              Architecture
-            </Link>
-            <Link className={buttonVariants()} href="/holdings">
-              Inspect holdings
-              <ArrowRight className="size-4" />
-            </Link>
-          </>
+          <Link className={buttonVariants()} href="/holdings">
+            Inspect holdings
+            <ArrowRight className="size-4" />
+          </Link>
         }
         description="A deterministic overview of portfolio value, performance, allocation, holding contribution, and active risk signals."
         eyebrow="North Star Portfolio · Read-only demo"
@@ -102,7 +105,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                     <div>
                       <CardTitle>Portfolio performance</CardTitle>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {formatSignedPercent(analytics.summary.periodReturn)} from{" "}
+                        {formatSignedPercent(analytics.summary.periodReturn)}{" "}
+                        from{" "}
                         {formatCurrency(
                           analytics.summary.periodStartValue,
                           analytics.portfolio.baseCurrency,

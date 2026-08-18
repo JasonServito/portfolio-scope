@@ -239,6 +239,25 @@ test.describe("authenticated production boundaries", () => {
   }) => {
     await authenticate(context, tokenB);
     await page.goto("/app");
+    const privateNavigation = page.getByRole("navigation", {
+      name: "Private workspace navigation",
+    });
+    await expect(privateNavigation).toBeVisible();
+    await expect(
+      privateNavigation.getByRole("link", { name: "Portfolios" }),
+    ).toBeVisible();
+    await expect(
+      privateNavigation.getByRole("link", { name: "Watchlist" }),
+    ).toBeVisible();
+    await expect(
+      privateNavigation.getByRole("link", { name: "Alerts" }),
+    ).toBeVisible();
+    await expect(
+      privateNavigation.getByRole("link", { name: "Research" }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Architecture" })).toHaveCount(
+      0,
+    );
     await page.getByLabel("Portfolio name").fill("E2E long-term portfolio");
     await page.getByLabel("Base currency").fill("CAD");
     await page.getByRole("button", { name: "Create" }).click();
@@ -294,7 +313,7 @@ test.describe("authenticated production boundaries", () => {
       new RegExp(`/app/research/${currentResearchJobId}$`),
     );
     await expect(
-      page.getByText("AI-generated", { exact: true }).first(),
+      page.getByText("AI-assisted", { exact: true }).first(),
     ).toBeVisible();
     await expect(page.getByText("Changes from previous report")).toBeVisible();
     await expect(
@@ -302,7 +321,7 @@ test.describe("authenticated production boundaries", () => {
         .getByText("Current revenue evidence supports a bounded claim.")
         .first(),
     ).toBeVisible();
-    await expect(page.getByText("Report: m18-report-e2e")).toBeVisible();
+    await expect(page.getByText("Report: m18-report-e2e")).toHaveCount(0);
 
     await page
       .getByRole("button", { name: "AAPL revenue filing evidence" })

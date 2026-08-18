@@ -1,14 +1,13 @@
 export const siteConfig = {
   name: "PortfolioScope",
   description:
-    "A production-oriented portfolio analytics and investment research platform with transparent calculations, SEC provenance, and a one-click recruiter demo.",
+    "A straightforward stock dashboard for portfolios, watchlists, alerts, and company research, with a one-click read-only demo.",
   repositoryUrl: "https://github.com/JasonServito/portfolio-scope",
 } as const;
 
 export const publicNavigation = [
-  { href: "/architecture", label: "Architecture" },
-  { href: "/methodology", label: "Methodology" },
-  { href: "/data-sources", label: "Data sources" },
+  { href: "/stocks/aapl", label: "Stock detail" },
+  { href: "/research", label: "Sample research" },
 ] as const;
 
 export function getSiteUrl() {

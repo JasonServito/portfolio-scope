@@ -733,7 +733,7 @@ function seededAgentOutput(stock, agentName) {
     [AgentName.SYNTHESIS]: {
       rating: AgentRating.MIXED,
       confidence: 0.66,
-      summary: `${stock.companyName} has five visible deterministic specialist views with explicit evidence gaps.`,
+      summary: `${stock.companyName} research covers five topics and keeps missing information visible.`,
       findings: [
         {
           label: "Research posture",
@@ -845,7 +845,7 @@ async function seedResearch(user, stockRecords) {
 
     const reportData = {
       stockId: stockRecord.id,
-      overview: `${stock.companyName} has five deterministic specialist views. The synthesis balances seeded operating context, peer coverage, and visible risk inputs; it is research context, not financial advice.`,
+      overview: `This ${stock.companyName} report combines company context, peer coverage, and visible risk factors. It is research context, not financial advice.`,
       bullCaseJson: [
         `The seeded ${stock.sector.toLowerCase()} profile provides supportive operating context.`,
       ],

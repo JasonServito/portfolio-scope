@@ -51,7 +51,10 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/30 px-6 py-12">
       <div className="w-full max-w-md space-y-4">
-        <Link className="inline-flex items-center gap-2 text-sm font-semibold" href="/">
+        <Link
+          className="inline-flex items-center gap-2 text-sm font-semibold"
+          href="/"
+        >
           <span className="size-3 rounded-full bg-emerald-500" />
           PortfolioScope
         </Link>
@@ -59,9 +62,9 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
         {notice === "sessions-revoked" ? (
           <Alert>
             <ShieldCheck className="size-4" />
-            <AlertTitle>All sessions were revoked</AlertTitle>
+            <AlertTitle>You were signed out everywhere</AlertTitle>
             <AlertDescription>
-              Sign in again to create a new database-backed session.
+              Sign in again when you are ready to continue.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -70,8 +73,8 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
           <Alert variant="destructive">
             <AlertTitle>Sign-in was not completed</AlertTitle>
             <AlertDescription>
-              The provider returned a controlled authentication error. Try again
-              or continue with the demo.
+              We could not complete sign-in. Try again or continue with the
+              demo.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -81,8 +84,8 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             <h1 className="text-xl font-medium">Sign in to PortfolioScope</h1>
             <CardDescription>
               {localDisposableAuthAvailable
-                ? "Use a trusted OAuth provider or the guarded local validation identity."
-                : "Use a trusted OAuth provider. PortfolioScope never receives or stores your provider password."}
+                ? "Choose a sign-in method or use the local test account."
+                : "Choose a sign-in method to access your portfolios. PortfolioScope never receives or stores your provider password."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -96,7 +99,11 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             <ProviderForm
               callbackUrl={callbackUrl}
               configured={googleConfigured}
-              icon={<span aria-hidden="true" className="text-sm font-semibold">G</span>}
+              icon={
+                <span aria-hidden="true" className="text-sm font-semibold">
+                  G
+                </span>
+              }
               label="Continue with Google"
               provider="google"
             />
@@ -104,23 +111,31 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             {localDisposableAuthAvailable ? (
               <form action={signInWithLocalDisposable}>
                 <input name="callbackUrl" type="hidden" value={callbackUrl} />
-                <Button className="w-full" size="lg" type="submit" variant="outline">
+                <Button
+                  className="w-full"
+                  size="lg"
+                  type="submit"
+                  variant="outline"
+                >
                   <FlaskConical className="size-4" />
-                  Create or reuse local validation identity
+                  Continue with local test account
                 </Button>
               </form>
             ) : null}
 
             {!githubConfigured || !googleConfigured ? (
               <p className="text-xs leading-5 text-muted-foreground">
-                One or more OAuth providers are not configured in this
-                environment. The recruiter demo remains available without sign-in.
+                Some sign-in options are unavailable here. The read-only demo
+                remains available without an account.
               </p>
             ) : null}
 
             <div className="pt-2">
               <Link
-                className={buttonVariants({ variant: "secondary", className: "w-full" })}
+                className={buttonVariants({
+                  variant: "secondary",
+                  className: "w-full",
+                })}
                 href="/dashboard?demo=true"
               >
                 Continue with the read-only demo
@@ -130,13 +145,13 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
         </Card>
 
         <p className="text-xs leading-5 text-muted-foreground">
-          New identities receive the server-controlled USER role. Accounts that
-          share an email are not merged automatically when signed out.
+          For your security, return with the same sign-in provider you used when
+          creating the account.
         </p>
         {localDisposableAuthAvailable ? (
           <p className="text-xs leading-5 text-muted-foreground">
-            Local validation creates one disposable, non-demo USER. Administrator
-            access still requires a trusted database update.
+            The local test account is available only in supported development
+            environments.
           </p>
         ) : null}
       </div>

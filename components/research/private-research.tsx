@@ -29,10 +29,10 @@ function formatStatus(status: ResearchJobRow["status"]) {
 }
 
 function formatMode(mode: ResearchJobRow["generationMode"]) {
-  if (mode === "EXTERNAL") return "AI-generated";
-  if (mode === "RECORDED") return "Recorded AI";
-  if (mode === "DETERMINISTIC") return "Deterministic";
-  return "Mode unavailable";
+  if (mode === "EXTERNAL") return "AI-assisted";
+  if (mode === "RECORDED") return "Saved sample";
+  if (mode === "DETERMINISTIC") return "Prebuilt";
+  return "Type unavailable";
 }
 
 type ResearchWorkspaceSummary = {
@@ -110,7 +110,7 @@ export function PrivateResearch({
     <div className="grid gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>Run evidence-grounded research</CardTitle>
+          <CardTitle>Start stock research</CardTitle>
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-3 sm:flex-row" onSubmit={run}>
@@ -128,7 +128,7 @@ export function PrivateResearch({
               />
             </label>
             <Button className="sm:self-end" disabled={pending} type="submit">
-              <Play /> {pending ? "Queuing..." : "Queue research"}
+              <Play /> {pending ? "Starting..." : "Start research"}
             </Button>
           </form>
           {error ? (
@@ -137,21 +137,19 @@ export function PrivateResearch({
             </p>
           ) : null}
           <p className="mt-3 text-xs leading-5 text-muted-foreground">
-            External AI is used only when it is enabled by an administrator and
-            the configured user, job, and monthly cost limits allow the run. If
-            AI is disabled, the deterministic path remains available; an enabled
-            but invalid or exhausted AI configuration blocks a new run.
+            New reports use the research option available for this account and
+            remain subject to its report and monthly usage limits.
           </p>
           {workspace ? (
             <div className="mt-4 grid gap-3 rounded-lg border bg-muted/20 p-4 text-sm sm:grid-cols-3">
               <div>
-                <p className="text-muted-foreground">External AI</p>
+                <p className="text-muted-foreground">Research option</p>
                 <p className="mt-1 font-medium">
                   {workspace.enabled && workspace.configurationReady
                     ? "Available within limits"
                     : workspace.enabled
                       ? "Configuration incomplete"
-                      : "Disabled (deterministic mode)"}
+                      : "Prebuilt reports only"}
                 </p>
               </div>
               <div>
@@ -183,14 +181,12 @@ export function PrivateResearch({
               className="mt-3 text-sm text-muted-foreground"
               aria-live="polite"
             >
-              Specialist jobs are running in the background. This view refreshes
-              while work is active.
+              Research is in progress. This view refreshes while work is active.
             </p>
           ) : null}
           {hasPartialJob ? (
             <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">
-              A research run preserved partial specialist output and needs an
-              administrator retry before synthesis can finish.
+              A report is incomplete and needs an administrator to retry it.
             </p>
           ) : null}
         </CardContent>

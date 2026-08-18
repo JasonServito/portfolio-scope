@@ -10,12 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AgentResult, ResearchEvidenceRecord } from "@/lib/research/types";
 
 const agentLabels: Record<AgentResult["agentName"], string> = {
-  NEWS: "News Agent",
-  FINANCIALS: "Financials Agent",
-  COMPETITORS: "Competitors Agent",
-  POLITICAL_ACTIVITY: "Political Activity Agent",
-  RISK: "Risk Agent",
-  SYNTHESIS: "Synthesis",
+  NEWS: "News",
+  FINANCIALS: "Financials",
+  COMPETITORS: "Competitors",
+  POLITICAL_ACTIVITY: "Political Activity",
+  RISK: "Risk",
+  SYNTHESIS: "Overview",
 };
 
 function ClaimCitation({
@@ -87,15 +87,8 @@ export function AgentResultCard({
           </div>
         </div>
         <p className="text-sm leading-6 text-muted-foreground">
-          {result.summary || "This specialist did not return a summary."}
+          {result.summary || "This topic does not have a summary."}
         </p>
-        {result.provider || result.model || result.agentVersion ? (
-          <p className="text-xs text-muted-foreground">
-            {[result.provider, result.model, result.agentVersion]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        ) : null}
       </CardHeader>
       <CardContent className="grid gap-5 lg:grid-cols-[1.3fr_1fr]">
         <div className="space-y-5">
@@ -185,7 +178,7 @@ export function AgentResultCard({
               </div>
             ) : (
               <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                No findings are available for this specialist.
+                No findings are available for this topic.
               </p>
             )}
           </section>
@@ -218,7 +211,7 @@ export function AgentResultCard({
               ))
             ) : (
               <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                No source is available. This gap is included in synthesis
+                No source is available. This gap is included in the overall
                 confidence.
               </p>
             )}

@@ -7,11 +7,11 @@ export function synthesizeResearch(
   const completed = agents.filter((agent) => agent.status === "COMPLETED");
   if (completed.length === 0) {
     return {
-      overview: `No specialist research is available for ${companyName}.`,
+      overview: `No research is available for ${companyName}.`,
       bullCase: [],
       bearCase: [],
       risks: [],
-      missingData: ["All specialist agent outputs are missing."],
+      missingData: ["The report has no completed topic results."],
       confidence: 0,
     };
   }
@@ -28,7 +28,7 @@ export function synthesizeResearch(
     completed.reduce((sum, agent) => sum + agent.confidence, 0) /
     completed.length;
   return {
-    overview: `${companyName} has ${completed.length} deterministic specialist views. The synthesis balances seeded operating context, peer coverage, and visible risk inputs; it is research context, not financial advice.`,
+    overview: `This ${companyName} report combines ${completed.length} research topics, company context, peer coverage, and visible risk factors. It is research context, not financial advice.`,
     bullCase: positive.flatMap((agent) =>
       agent.findings.slice(0, 1).map((finding) => finding.detail),
     ),

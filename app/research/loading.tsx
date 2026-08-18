@@ -7,7 +7,7 @@ export default function ResearchLoading() {
   return (
     <PublicSiteShell>
       <PublicContent
-        description="Loading the deterministic evidence workspace."
+        description="Loading the read-only sample report."
         eyebrow="Read-only sample"
         title="Research that keeps the evidence visible."
       >

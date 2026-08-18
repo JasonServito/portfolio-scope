@@ -14,7 +14,6 @@ const mobileNavItems = [
   { href: "/holdings", label: "Holdings" },
   { href: "/watchlist", label: "Watchlist" },
   { href: "/alerts", label: "Alerts" },
-  { href: "/architecture", label: "Architecture" },
 ];
 
 const searchDestinations: Record<string, string> = {
@@ -119,15 +118,24 @@ export function AppHeader({
             >
               <Home className="size-4" />
             </Link>
-            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/aapl">
+            <Link
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+              href="/stocks/aapl"
+            >
               AAPL
             </Link>
-            <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href="/stocks/msft">
+            <Link
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+              href="/stocks/msft"
+            >
               MSFT
             </Link>
             <Link
               aria-label="Open alerts"
-              className={buttonVariants({ variant: "outline", size: "icon-sm" })}
+              className={buttonVariants({
+                variant: "outline",
+                size: "icon-sm",
+              })}
               href="/alerts"
             >
               <Bell className="size-4" />

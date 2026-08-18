@@ -1,11 +1,8 @@
 import Link from "next/link";
 import {
-  BookOpen,
   BarChart3,
   Bell,
   Binoculars,
-  Boxes,
-  Database,
   LayoutDashboard,
   LineChart,
   WalletCards,
@@ -51,24 +48,6 @@ const researchNavItems = [
   },
 ];
 
-const projectNavItems = [
-  {
-    href: "/architecture",
-    label: "Architecture",
-    icon: Boxes,
-  },
-  {
-    href: "/methodology",
-    label: "Methodology",
-    icon: BookOpen,
-  },
-  {
-    href: "/data-sources",
-    label: "Data sources",
-    icon: Database,
-  },
-];
-
 type AppSidebarProps = {
   activePath: string;
 };
@@ -84,16 +63,23 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
               PortfolioScope
             </span>
             <span className="block text-xs text-muted-foreground">
-              Analytics with an audit trail
+              Portfolio dashboard
             </span>
           </span>
         </Link>
       </div>
 
       <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-5">
-        <NavGroup activePath={activePath} items={primaryNavItems} label="Demo workspace" />
-        <NavGroup activePath={activePath} items={researchNavItems} label="Stock research" />
-        <NavGroup activePath={activePath} items={projectNavItems} label="Project" />
+        <NavGroup
+          activePath={activePath}
+          items={primaryNavItems}
+          label="Demo workspace"
+        />
+        <NavGroup
+          activePath={activePath}
+          items={researchNavItems}
+          label="Stock research"
+        />
       </nav>
 
       <div className="m-3 rounded-lg border bg-background p-4">
@@ -102,14 +88,13 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
           <Badge variant="outline">Read-only</Badge>
         </div>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Seeded portfolio data stays available without OAuth. Mutations are
-          blocked on the server.
+          Browse the sample portfolio without an account. Changes are disabled.
         </p>
         <Link
           className="mt-3 inline-flex text-xs font-semibold text-primary hover:underline"
-          href="/architecture"
+          href="/research"
         >
-          Finish at architecture →
+          View sample research →
         </Link>
       </div>
     </aside>
@@ -141,13 +126,14 @@ function NavGroup({
           const Icon = item.icon;
           const isActive =
             activePath === item.href ||
-            (item.href.startsWith("/stocks") && activePath.startsWith(item.href));
+            (item.href.startsWith("/stocks") &&
+              activePath.startsWith(item.href));
 
           return (
             <Link
               className={cn(
                 "flex h-9 items-center gap-3 rounded-lg px-2 text-sm font-medium text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                isActive && "bg-sidebar-accent text-sidebar-accent-foreground"
+                isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
               )}
               href={item.href}
               key={item.href}
