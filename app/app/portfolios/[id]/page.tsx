@@ -26,6 +26,7 @@ export default async function PrivatePortfolioPage({
         <Link
           className={buttonVariants({ variant: "ghost", size: "sm" })}
           href="/app"
+          prefetch={false}
         >
           <ArrowLeft /> Back to portfolios
         </Link>

@@ -31,6 +31,7 @@ export default async function ProtectedAppLayout({
             aria-label="PortfolioScope private workspace"
             className="flex items-center gap-3"
             href="/app"
+            prefetch={false}
           >
             <BrandMark />
             <span>
@@ -51,6 +52,7 @@ export default async function ProtectedAppLayout({
                 className={buttonVariants({ variant: "ghost", size: "sm" })}
                 href={href}
                 key={href}
+                prefetch={false}
               >
                 {label}
               </Link>
@@ -58,6 +60,7 @@ export default async function ProtectedAppLayout({
             <Link
               className={buttonVariants({ variant: "outline", size: "sm" })}
               href="/dashboard?demo=true"
+              prefetch={false}
             >
               Public demo
             </Link>
@@ -75,6 +78,7 @@ export default async function ProtectedAppLayout({
               className={buttonVariants({ variant: "ghost", size: "sm" })}
               href={href}
               key={href}
+              prefetch={false}
             >
               {label}
             </Link>

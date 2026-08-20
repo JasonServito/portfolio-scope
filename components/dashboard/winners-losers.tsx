@@ -3,10 +3,7 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  formatSignedCurrency,
-  formatSignedPercent,
-} from "@/lib/formatters";
+import { formatSignedCurrency, formatSignedPercent } from "@/lib/formatters";
 import type { WinnerLoser } from "@/lib/portfolio/types";
 
 type WinnersLosersProps = {
@@ -15,11 +12,7 @@ type WinnersLosersProps = {
   currency: string;
 };
 
-export function WinnersLosers({
-  currency,
-  items,
-  title,
-}: WinnersLosersProps) {
+export function WinnersLosers({ currency, items, title }: WinnersLosersProps) {
   return (
     <Card>
       <CardHeader>
@@ -40,6 +33,7 @@ export function WinnersLosers({
                 className="flex items-center justify-between gap-4 rounded-lg border px-3 py-3 transition hover:bg-muted/40"
                 href={`/stocks/${item.ticker.toLowerCase()}`}
                 key={item.id}
+                prefetch={false}
               >
                 <div className="min-w-0">
                   <p className="flex items-center gap-2 font-medium">

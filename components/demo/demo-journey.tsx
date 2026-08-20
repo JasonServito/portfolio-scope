@@ -53,6 +53,7 @@ export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 }) {
                     active && "border-[#6ee7b7]/45 bg-[#6ee7b7]/8",
                   )}
                   href={step.href}
+                  prefetch={false}
                 >
                   <span
                     className={cn(
@@ -86,6 +87,7 @@ export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 }) {
           <Link
             className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-background px-3 text-xs font-semibold text-foreground transition hover:bg-background/90"
             href={next.href}
+            prefetch={false}
           >
             Next
             <ArrowRight className="size-3.5" />

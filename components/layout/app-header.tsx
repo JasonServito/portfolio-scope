@@ -65,7 +65,11 @@ export function AppHeader({
   return (
     <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
       <div className="flex min-h-16 items-center gap-3 px-4 sm:px-6">
-        <Link className="flex items-center gap-2 lg:hidden" href="/dashboard">
+        <Link
+          className="flex items-center gap-2 lg:hidden"
+          href="/dashboard"
+          prefetch={false}
+        >
           <BrandMark className="size-8 rounded-lg" />
           <span className="text-sm font-semibold">PortfolioScope</span>
         </Link>
@@ -115,18 +119,21 @@ export function AppHeader({
               aria-label="PortfolioScope home"
               className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
               href="/"
+              prefetch={false}
             >
               <Home className="size-4" />
             </Link>
             <Link
               className={buttonVariants({ variant: "ghost", size: "sm" })}
               href="/stocks/aapl"
+              prefetch={false}
             >
               AAPL
             </Link>
             <Link
               className={buttonVariants({ variant: "ghost", size: "sm" })}
               href="/stocks/msft"
+              prefetch={false}
             >
               MSFT
             </Link>
@@ -137,6 +144,7 @@ export function AppHeader({
                 size: "icon-sm",
               })}
               href="/alerts"
+              prefetch={false}
             >
               <Bell className="size-4" />
             </Link>
@@ -157,6 +165,7 @@ export function AppHeader({
             )}
             href={item.href}
             key={item.href}
+            prefetch={false}
           >
             {item.label}
           </Link>

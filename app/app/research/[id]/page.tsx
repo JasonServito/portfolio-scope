@@ -27,6 +27,7 @@ export default async function PrivateResearchDetailPage({
           <Link
             className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             href="/app/research"
+            prefetch={false}
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
             Research history
@@ -43,6 +44,7 @@ export default async function PrivateResearchDetailPage({
         <Link
           className={buttonVariants({ variant: "outline" })}
           href={`/stocks/${job.ticker.toLowerCase()}`}
+          prefetch={false}
         >
           Public stock context
           <ExternalLink aria-hidden="true" className="size-4" />

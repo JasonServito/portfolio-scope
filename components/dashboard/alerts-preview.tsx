@@ -34,6 +34,7 @@ export function AlertsPreview({ alerts }: AlertsPreviewProps) {
                 className="block rounded-lg border px-3 py-3 transition hover:bg-muted/40"
                 href={href}
                 key={alert.id}
+                prefetch={false}
               >
                 <div className="flex items-center gap-2">
                   <Badge variant={severityVariant(alert.severity)}>

@@ -13,6 +13,7 @@ export async function SessionControls() {
       <Link
         className={buttonVariants({ variant: "outline", size: "sm" })}
         href="/auth/signin"
+        prefetch={false}
       >
         Sign in
       </Link>
@@ -25,12 +26,18 @@ export async function SessionControls() {
         aria-label="Open account settings"
         className={buttonVariants({ variant: "ghost", size: "sm" })}
         href="/app/account"
+        prefetch={false}
       >
         <UserRound className="size-4" />
         <span className="hidden sm:inline">{user.name ?? "Account"}</span>
       </Link>
       <form action={signOutCurrentSession}>
-        <Button aria-label="Sign out" size="icon-sm" type="submit" variant="ghost">
+        <Button
+          aria-label="Sign out"
+          size="icon-sm"
+          type="submit"
+          variant="ghost"
+        >
           <LogOut className="size-4" />
         </Button>
       </form>

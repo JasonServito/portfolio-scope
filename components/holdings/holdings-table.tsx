@@ -88,6 +88,7 @@ export function HoldingsTable({
                 <Link
                   className="inline-flex items-center gap-2 hover:underline"
                   href={`/stocks/${holding.ticker.toLowerCase()}`}
+                  prefetch={false}
                 >
                   {holding.ticker}
                   <ArrowUpRight className="size-3 text-muted-foreground" />

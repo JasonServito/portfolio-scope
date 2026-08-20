@@ -111,6 +111,7 @@ function ReportComparison({
         <Link
           className="text-sm font-medium underline-offset-4 hover:underline"
           href={`/app/research/${comparison.previousJobId}`}
+          prefetch={false}
         >
           Open previous private report
         </Link>

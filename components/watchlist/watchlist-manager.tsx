@@ -8,15 +8,27 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/formatters";
+import type { WatchlistPrice } from "@/lib/portfolio/watchlist-prices";
 
 export type WatchlistRow = {
   id: string;
   ticker: string;
   companyName: string;
   sector: string;
+  price: WatchlistPrice;
   targetPrice: number | null;
   notes: string | null;
 };
+
+const priceDateFormatter = new Intl.DateTimeFormat("en-US", {
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  month: "short",
+  timeZone: "UTC",
+  timeZoneName: "short",
+  year: "numeric",
+});
 
 async function responseError(response: Response, fallback: string) {
   try {
@@ -55,8 +67,8 @@ function ReadOnlyWatchlist({ items }: { items: WatchlistRow[] }) {
         </CardHeader>
         <CardContent>
           <p className="text-sm leading-6 text-muted-foreground">
-            Explore the curated companies and open their research pages. Public
-            demo items cannot be added or removed.
+            Explore the curated companies and open their research pages. Prices
+            are cached demo snapshots, and public demo items cannot be changed.
           </p>
         </CardContent>
       </Card>
@@ -291,6 +303,7 @@ function WatchlistItems({
                   <Link
                     className="inline-flex items-center gap-2 hover:underline"
                     href={`/stocks/${item.ticker.toLowerCase()}`}
+                    prefetch={false}
                   >
                     {item.ticker}
                     <ArrowUpRight aria-hidden="true" className="size-4" />
@@ -328,6 +341,7 @@ function WatchlistItems({
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
             <p className="text-muted-foreground">{item.sector}</p>
+            <WatchlistPriceDetails price={item.price} />
             {editingId === item.id && editForm && onEditFormChange && onSave ? (
               <div className="grid gap-3 pt-2">
                 <label className="grid gap-1.5 font-medium">
@@ -389,7 +403,7 @@ function WatchlistItems({
                   <span className="text-muted-foreground">Target:</span>{" "}
                   {item.targetPrice === null
                     ? "Not set"
-                    : formatCurrency(item.targetPrice, "USD")}
+                    : `${formatCurrency(item.targetPrice, item.price.currency)} ${item.price.currency}`}
                 </p>
                 <p className={item.notes ? undefined : "text-muted-foreground"}>
                   {item.notes || "No notes yet."}
@@ -400,5 +414,35 @@ function WatchlistItems({
         </Card>
       ))}
     </section>
+  );
+}
+
+function WatchlistPriceDetails({ price }: { price: WatchlistPrice }) {
+  if (price.state === "MISSING") {
+    return (
+      <div>
+        <p>
+          <span className="text-muted-foreground">Latest price:</span>{" "}
+          Unavailable
+        </p>
+        <p className="text-xs text-muted-foreground">
+          No cached demo observation is available.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p>
+        <span className="text-muted-foreground">Latest price:</span>{" "}
+        {formatCurrency(price.amount, price.currency)} {price.currency}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Cached demo price · observed{" "}
+        {priceDateFormatter.format(new Date(price.observedAt))}
+        {price.state === "STALE" ? " · stale" : ""}
+      </p>
+    </div>
   );
 }

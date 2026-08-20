@@ -312,6 +312,11 @@ test.describe("authenticated production boundaries", () => {
       "MSFT was added to your watchlist.",
     );
     await expect(page.getByText("Review cloud growth.")).toBeVisible();
+    await expect(
+      page.getByText("Latest price:", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(/Cached demo price.*stale/i)).toBeVisible();
+    await expect(page.getByText(/\$[\d,.]+ USD/).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Edit MSFT" }).click();
     await page.getByLabel("MSFT target price").fill("510");
@@ -328,6 +333,22 @@ test.describe("authenticated production boundaries", () => {
     await expect(page.getByRole("status")).toContainText(
       "MSFT was removed from your watchlist.",
     );
+    await expect(page.getByText(/your watchlist is empty/i)).toBeVisible();
+
+    await page.getByLabel("Ticker").fill("JPM");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "JPM was added to your watchlist.",
+    );
+    await expect(
+      page.getByText("Latest price: Unavailable", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("No cached demo observation is available."),
+    ).toBeVisible();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Remove JPM" }).click();
     await expect(page.getByText(/your watchlist is empty/i)).toBeVisible();
   });
 

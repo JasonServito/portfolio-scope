@@ -380,6 +380,16 @@ describe("private alerts and research services", () => {
     );
   });
 
+  it("keeps existing alerts available when target reconciliation fails", async () => {
+    mocks.watchlistItemFindMany.mockRejectedValue(
+      new Error("cached price read failed"),
+    );
+    mocks.alertFindMany.mockResolvedValue([{ id: "alert-a" }]);
+
+    await expect(listUserAlerts(actorId)).resolves.toEqual([{ id: "alert-a" }]);
+    expect(mocks.alertFindMany).toHaveBeenCalled();
+  });
+
   it("returns an owned research job together with its private report", async () => {
     mocks.researchJobFindFirst.mockResolvedValue({
       agentRuns: [],

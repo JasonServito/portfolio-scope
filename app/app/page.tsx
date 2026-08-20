@@ -26,7 +26,7 @@ async function PrivateDashboardContent() {
   const [portfolios, watchlist, alerts] = await Promise.all([
     listPortfolios(user.id),
     getUserWatchlist(user.id),
-    listUserAlerts(user.id),
+    listUserAlerts(user.id, { reconcileTargetCrossings: false }),
   ]);
   const activeAlertCount = alerts.filter(
     (alert) => alert.status === "ACTIVE",
@@ -109,6 +109,7 @@ function StatusCard({
         <Link
           className="inline-flex font-medium text-primary hover:underline"
           href={href}
+          prefetch={false}
         >
           {detail}
         </Link>

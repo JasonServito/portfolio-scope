@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 
-import { SessionControls } from "@/components/auth/session-controls";
 import { BrandMark } from "@/components/layout/brand-mark";
 import { AnalyticsLink } from "@/components/analytics/analytics-link";
 import { buttonVariants } from "@/components/ui/button";
@@ -56,6 +55,7 @@ function PublicSiteHeader() {
               className={buttonVariants({ variant: "ghost", size: "sm" })}
               href={item.href}
               key={item.href}
+              prefetch={false}
             >
               {item.label}
             </Link>
@@ -77,10 +77,17 @@ function PublicSiteHeader() {
             eventName="demo_opened"
             eventProperties={{ entryPoint: "navigation" }}
             href="/dashboard?demo=true"
+            prefetch={false}
           >
             Try demo
           </AnalyticsLink>
-          <SessionControls />
+          <Link
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            href="/app"
+            prefetch={false}
+          >
+            Open app
+          </Link>
         </div>
       </div>
 
@@ -93,6 +100,7 @@ function PublicSiteHeader() {
             className={buttonVariants({ variant: "ghost", size: "sm" })}
             href={item.href}
             key={item.href}
+            prefetch={false}
           >
             {item.label}
           </Link>
@@ -172,6 +180,7 @@ function FooterGroup({
               <Link
                 className="transition hover:text-background focus-visible:text-background"
                 href={href}
+                prefetch={false}
               >
                 {label}
               </Link>

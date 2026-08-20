@@ -1,12 +1,14 @@
 import { WatchlistManager } from "@/components/watchlist/watchlist-manager";
 import { requireUser } from "@/lib/auth/session";
 import { getUserWatchlist } from "@/lib/portfolio/management";
+import { presentWatchlistPrice } from "@/lib/portfolio/watchlist-prices";
 
 export const dynamic = "force-dynamic";
 
 export default async function PrivateWatchlistPage() {
   const user = await requireUser("/app/watchlist");
   const items = await getUserWatchlist(user.id);
+  const now = new Date();
 
   return (
     <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
@@ -26,6 +28,11 @@ export default async function PrivateWatchlistPage() {
           ticker: item.stock.ticker,
           companyName: item.stock.companyName,
           sector: item.stock.sector,
+          price: presentWatchlistPrice(
+            item.stock.prices,
+            item.stock.currency,
+            now,
+          ),
           targetPrice: item.targetPrice ? Number(item.targetPrice) : null,
           notes: item.notes,
         }))}

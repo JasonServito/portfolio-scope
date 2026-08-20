@@ -96,6 +96,13 @@ describe("public demo read-only components", () => {
             ticker: "AAPL",
             companyName: "Apple Inc.",
             sector: "Technology",
+            price: {
+              amount: 200,
+              currency: "USD",
+              observedAt: "2026-06-26T21:00:00.000Z",
+              source: "PortfolioScope demo fixture",
+              state: "STALE",
+            },
             targetPrice: 210,
             notes: "Review the next filing.",
           },
@@ -105,6 +112,8 @@ describe("public demo read-only components", () => {
     );
 
     expect(markup).toContain("Read-only demo");
+    expect(markup).toContain("Cached demo price");
+    expect(markup).toContain("stale");
     expect(markup).toContain('href="/stocks/aapl"');
     expect(markup).not.toContain("<form");
     expect(markup).not.toContain("Remove AAPL");

@@ -220,12 +220,14 @@ export function PrivateResearch({
                   <Link
                     className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                     href={`/stocks/${job.ticker.toLowerCase()}`}
+                    prefetch={false}
                   >
                     Public stock context
                   </Link>
                   <Link
                     className="inline-flex items-center gap-1 text-sm font-medium underline-offset-4 hover:underline"
                     href={`/app/research/${job.id}`}
+                    prefetch={false}
                   >
                     Open private report
                     <ArrowRight aria-hidden="true" className="size-4" />

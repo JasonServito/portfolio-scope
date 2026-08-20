@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { calculatePercentChange } from "@/lib/portfolio/calculations";
-import { getDemoPortfolioAnalytics } from "@/lib/portfolio/analytics";
+import { getDemoPortfolioAnalyticsByPeriods } from "@/lib/portfolio/analytics";
 import {
   generateRiskAlerts,
   type RiskAlert,
@@ -79,21 +79,34 @@ async function getWatchlistRiskInputs(): Promise<WatchlistRiskInput[]> {
 }
 
 export async function getDemoRiskAlerts(): Promise<RiskAlert[]> {
-  const [baseAnalytics, oneDayAnalytics, oneMonthAnalytics, watchlistItems] =
-    await Promise.all([
-      getDemoPortfolioAnalytics("1M"),
-      getDemoPortfolioAnalytics("1D"),
-      getDemoPortfolioAnalytics("1M"),
-      getWatchlistRiskInputs(),
-    ]);
+  return getDemoRiskAlertsWithAnalytics(
+    getDemoPortfolioAnalyticsByPeriods(["1M", "1D"]),
+  );
+}
 
-  if (!baseAnalytics || !oneDayAnalytics || !oneMonthAnalytics) {
+export async function getDemoRiskAlertsWithAnalytics(
+  analyticsByPeriodPromise: ReturnType<
+    typeof getDemoPortfolioAnalyticsByPeriods
+  >,
+): Promise<RiskAlert[]> {
+  const [analyticsByPeriod, watchlistItems] = await Promise.all([
+    analyticsByPeriodPromise,
+    getWatchlistRiskInputs(),
+  ]);
+  const oneMonthAnalytics = analyticsByPeriod.find(
+    (analytics) => analytics?.period === "1M",
+  );
+  const oneDayAnalytics = analyticsByPeriod.find(
+    (analytics) => analytics?.period === "1D",
+  );
+
+  if (!oneMonthAnalytics || !oneDayAnalytics) {
     return [];
   }
 
   return generateRiskAlerts({
-    asOf: baseAnalytics.asOf,
-    holdings: baseAnalytics.holdings,
+    asOf: oneMonthAnalytics.asOf,
+    holdings: oneMonthAnalytics.holdings,
     oneDayHoldings: oneDayAnalytics.holdings,
     oneMonthHoldings: oneMonthAnalytics.holdings,
     watchlistItems,

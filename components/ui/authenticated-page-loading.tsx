@@ -3,7 +3,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function AuthenticatedPageLoading() {
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
+    <main
+      aria-busy="true"
+      aria-label="Loading account view"
+      className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10"
+    >
+      <p className="sr-only" role="status">
+        Loading account view.
+      </p>
       <div className="space-y-3">
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-9 w-48" />

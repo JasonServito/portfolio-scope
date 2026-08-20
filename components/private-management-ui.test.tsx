@@ -9,6 +9,7 @@ vi.stubGlobal("React", React);
 
 import { PrivateAlerts } from "@/components/alerts/private-alerts";
 import { PrivatePortfolioManager } from "@/components/portfolios/private-portfolio-manager";
+import { AuthenticatedPageLoading } from "@/components/ui/authenticated-page-loading";
 import { WatchlistManager } from "@/components/watchlist/watchlist-manager";
 
 describe("authenticated management states", () => {
@@ -21,6 +22,13 @@ describe("authenticated management states", () => {
             ticker: "AAPL",
             companyName: "Apple Inc.",
             sector: "Technology",
+            price: {
+              amount: 203.12,
+              currency: "USD",
+              observedAt: "2026-08-19T20:00:00.000Z",
+              source: "PortfolioScope demo fixture",
+              state: "CACHED",
+            },
             targetPrice: 210,
             notes: "Review earnings.",
           },
@@ -30,6 +38,8 @@ describe("authenticated management states", () => {
 
     expect(markup).toContain("Add to watchlist");
     expect(markup).toContain("Target price");
+    expect(markup).toContain("$203.12 USD");
+    expect(markup).toContain("Cached demo price");
     expect(markup).toContain("Review earnings.");
     expect(markup).toContain("Edit AAPL");
     expect(markup).toContain("Remove AAPL");
@@ -56,5 +66,12 @@ describe("authenticated management states", () => {
     expect(markup).toContain(
       "No private alerts have been created for your account.",
     );
+  });
+
+  it("announces authenticated route loading without exposing private data", () => {
+    const markup = renderToStaticMarkup(<AuthenticatedPageLoading />);
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain("Loading account view.");
   });
 });

@@ -89,6 +89,7 @@ export default function Home() {
                 eventName="demo_opened"
                 eventProperties={{ entryPoint: "landing" }}
                 href="/dashboard?demo=true"
+                prefetch={false}
               >
                 Explore the read-only demo
                 <ArrowRight className="size-4" />
@@ -100,6 +101,7 @@ export default function Home() {
                   className: "min-h-11 px-5",
                 })}
                 href="/stocks/aapl"
+                prefetch={false}
               >
                 Explore a stock
               </Link>
@@ -208,6 +210,7 @@ export default function Home() {
             eventName="demo_opened"
             eventProperties={{ entryPoint: "landing" }}
             href="/dashboard?demo=true"
+            prefetch={false}
           >
             Start the product tour
             <ArrowRight className="size-4" />

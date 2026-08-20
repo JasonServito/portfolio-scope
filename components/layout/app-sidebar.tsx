@@ -56,7 +56,7 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
   return (
     <aside className="hidden min-h-screen w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground lg:flex lg:flex-col">
       <div className="border-b px-5 py-5">
-        <Link className="flex items-center gap-3" href="/">
+        <Link className="flex items-center gap-3" href="/" prefetch={false}>
           <BrandMark />
           <span>
             <span className="block text-sm font-semibold leading-5">
@@ -93,6 +93,7 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
         <Link
           className="mt-3 inline-flex text-xs font-semibold text-primary hover:underline"
           href="/research"
+          prefetch={false}
         >
           View sample research →
         </Link>
@@ -137,6 +138,7 @@ function NavGroup({
               )}
               href={item.href}
               key={item.href}
+              prefetch={false}
             >
               <Icon className="size-4" />
               {item.label}

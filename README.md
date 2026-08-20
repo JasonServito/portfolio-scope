@@ -210,19 +210,21 @@ No public demo URL is claimed here until a deployment is verified.
 - [`docs/deployment.md`](docs/deployment.md) — deployment and external-activation reference
 - [`RUNBOOK.md`](RUNBOOK.md) — production operations, monitoring, and rollback
 - [`DEMO.md`](DEMO.md) — current recruiter walkthrough and capture checklist
+- [`PERFORMANCE.md`](PERFORMANCE.md) — repeatable M22 request-path conditions, traces, and before/after evidence
+- [`MARKET_PRICES.md`](MARKET_PRICES.md) — M23 source decision, licensing evidence, freshness, and target-crossing semantics
 - [`docs/sec-data.md`](docs/sec-data.md) — SEC contracts, normalization, provenance, freshness, and operations
 - [`docs/ai-research.md`](docs/ai-research.md) and [`docs/ai-evaluation.md`](docs/ai-evaluation.md) — M18 safeguards and evaluation
 
 ## Roadmap
 
 - M19 portfolio risk and scenario analytics is cancelled after a deliberate scope reassessment.
-- M20 product simplification is complete; M21-M22 prioritize authenticated reliability and measured performance.
-- M23-M26 plan a gated market-price decision, target alerts, simpler stock detail, three financial trend charts, and upcoming earnings.
+- M20-M23 product simplification, authenticated reliability, measured request-path work, cached demo watchlist prices, and target alerts are complete.
+- M24-M26 plan simpler stock detail, three financial trend charts, and upcoming earnings.
 - M27 separates controlled live AI activation from the completed M18 repository architecture.
 - M28 is a low-priority, human-involved visual design pass after behavior is stable.
 
-M21-M28 remain `NOT_STARTED`. Market-price and earnings providers remain
-undecided and require feasibility analysis plus human approval before a new
-service is introduced. Brokerage connectivity, trading, institutional risk
+M24-M28 remain `NOT_STARTED`. No licensed market-price or earnings provider is
+selected; a future service requires feasibility analysis plus human approval.
+Brokerage connectivity, trading, institutional risk
 analytics, generalized catalysts, price prediction, and investment
 recommendations remain outside the product's scope.

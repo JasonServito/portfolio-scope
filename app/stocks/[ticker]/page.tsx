@@ -74,14 +74,15 @@ export default async function StockPage({ params }: StockPageProps) {
             <Link
               className={buttonVariants({ variant: "ghost" })}
               href="/holdings"
+              prefetch={false}
             >
               <ArrowLeft className="size-4" />
               Holdings
             </Link>
-            <Link className={buttonVariants()} href="#research">
+            <a className={buttonVariants()} href="#research">
               View research
               <ArrowRight className="size-4" />
-            </Link>
+            </a>
           </>
         }
         description={`${stock.companyName} market context, financial fundamentals, demo position exposure, and risk signals.`}
@@ -100,13 +101,13 @@ export default async function StockPage({ params }: StockPageProps) {
             ["#risk", "Risk flags"],
             ["#research", "Research"],
           ].map(([href, label]) => (
-            <Link
+            <a
               className={buttonVariants({ variant: "ghost", size: "sm" })}
               href={href}
               key={href}
             >
               {label}
-            </Link>
+            </a>
           ))}
         </nav>
 
@@ -344,6 +345,7 @@ export default async function StockPage({ params }: StockPageProps) {
                     className="block rounded-lg border p-4 transition hover:bg-muted/30"
                     href="/alerts"
                     key={alert.id}
+                    prefetch={false}
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge

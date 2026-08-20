@@ -60,7 +60,7 @@ export default async function DashboardPage({
       />
       <PageShell
         actions={
-          <Link className={buttonVariants()} href="/holdings">
+          <Link className={buttonVariants()} href="/holdings" prefetch={false}>
             Inspect holdings
             <ArrowRight className="size-4" />
           </Link>

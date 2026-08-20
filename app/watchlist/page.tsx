@@ -5,11 +5,13 @@ import { PageShell } from "@/components/layout/page-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { WatchlistManager } from "@/components/watchlist/watchlist-manager";
 import { getDemoWatchlist } from "@/lib/portfolio/management";
+import { presentWatchlistPrice } from "@/lib/portfolio/watchlist-prices";
 
 export const dynamic = "force-dynamic";
 
 export default async function WatchlistPage() {
   const items = await getDemoWatchlist();
+  const now = new Date();
   return (
     <AppLayout>
       <PageShell
@@ -38,6 +40,11 @@ export default async function WatchlistPage() {
               ticker: item.stock.ticker,
               companyName: item.stock.companyName,
               sector: item.stock.sector,
+              price: presentWatchlistPrice(
+                item.stock.prices,
+                item.stock.currency,
+                now,
+              ),
               targetPrice: item.targetPrice ? Number(item.targetPrice) : null,
               notes: item.notes,
             }))}

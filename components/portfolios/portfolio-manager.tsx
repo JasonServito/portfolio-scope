@@ -189,6 +189,7 @@ export function PortfolioManager({
                 <Link
                   className={buttonVariants({ variant: "outline", size: "sm" })}
                   href={`/app/portfolios/${portfolio.id}`}
+                  prefetch={false}
                 >
                   Open
                   <ArrowRight />
