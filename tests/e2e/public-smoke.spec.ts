@@ -55,26 +55,54 @@ test.describe("public production smoke @smoke", () => {
     ).toBeVisible();
   });
 
-  test("public stock page preserves SEC and TradingView boundaries", async ({
+  test("public stock page presents accessible key metrics and secondary filing evidence", async ({
     page,
   }) => {
     await page.route(/tradingview\.com/, (route) => route.abort());
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/stocks/AAPL");
 
     await expect(
       page.getByRole("heading", { name: "AAPL", level: 1 }),
     ).toBeVisible();
     await expect(
-      page.getByText("SEC-derived fundamentals", { exact: true }),
+      page.getByText(/Apple designs consumer devices/i),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Key Metrics", level: 2 }),
+    ).toBeVisible();
+    await expect(page.locator("[data-headline-metric]")).toHaveCount(10);
+    await expect(
+      page.getByRole("heading", { name: "Financial Trends", level: 2 }),
+    ).toBeVisible();
+    await expect(page.locator("[data-financial-trend]")).toHaveCount(3);
+    await expect(
+      page
+        .locator('[data-financial-trend="REVENUE"]')
+        .getByRole("heading", { name: "Quarterly Revenue", level: 3 }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("SEC-derived fundamentals", { exact: true }),
+    ).toHaveCount(0);
     await expect(
       page.getByText(
         /market chart and quote data are provided by tradingview/i,
       ),
     ).toBeVisible();
+    const firstExplanation = page.getByText("What this means").first();
+    await firstExplanation.focus();
+    await expect(firstExplanation).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(
-      page.getByText("Fundamentals: SEC EDGAR", { exact: true }),
+      page.getByText(/total market value of a company's outstanding shares/i),
     ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
     await expect(
       page.getByRole("heading", { name: /explore the dashboard/i }),
     ).toBeVisible();

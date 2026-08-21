@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { demoPortfolioName } from "@/lib/demo";
+import { getCompanyDescription } from "@/lib/portfolio/company-descriptions";
 import { calculatePercentChange } from "@/lib/portfolio/calculations";
 import { getDemoRiskAlertsWithAnalytics } from "@/lib/portfolio/alerts-data";
 import { getDemoPortfolioAnalyticsByPeriods } from "@/lib/portfolio/analytics";
@@ -35,6 +36,7 @@ export type StockDetailData = {
     industry: string;
     exchange: string;
     currency: string;
+    description: string;
   };
   latestPrice: number | null;
   asOf: string | null;
@@ -143,6 +145,11 @@ export async function getDemoStockDetail(
       industry: stock.industry,
       exchange: stock.exchange,
       currency: stock.currency,
+      description: getCompanyDescription({
+        ticker: stock.ticker,
+        companyName: stock.companyName,
+        industry: stock.industry,
+      }),
     },
     latestPrice: latestPrice ? toNumber(latestPrice.close) : null,
     asOf: latestPrice?.timestamp.toISOString() ?? null,

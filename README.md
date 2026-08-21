@@ -12,7 +12,8 @@ example of a secure, tested, deployable application.
 - One-click, deterministic, read-only demo
 - Private portfolios, holdings, watchlists, alerts, and research history
 - Portfolio performance, allocation, gain/loss, and holding contribution views
-- Stock pages with attributed TradingView charts and persisted SEC fundamentals
+- Stock pages with attributed TradingView market context, persisted SEC
+  fundamentals, and accessible quarterly financial trends
 - Clear missing, stale, partial, and error states
 - GitHub and Google sign-in through Auth.js
 - Responsive Next.js UI backed by typed services, Prisma, and PostgreSQL
@@ -212,6 +213,7 @@ No public demo URL is claimed here until a deployment is verified.
 - [`DEMO.md`](DEMO.md) — current recruiter walkthrough and capture checklist
 - [`PERFORMANCE.md`](PERFORMANCE.md) — repeatable M22 request-path conditions, traces, and before/after evidence
 - [`MARKET_PRICES.md`](MARKET_PRICES.md) — M23 source decision, licensing evidence, freshness, and target-crossing semantics
+- [`FINANCIAL_TRENDS.md`](FINANCIAL_TRENDS.md) — M25 trend semantics, missing-data behavior, and revenue-mix feasibility
 - [`docs/sec-data.md`](docs/sec-data.md) — SEC contracts, normalization, provenance, freshness, and operations
 - [`docs/ai-research.md`](docs/ai-research.md) and [`docs/ai-evaluation.md`](docs/ai-evaluation.md) — M18 safeguards and evaluation
 

@@ -1,11 +1,5 @@
 import Link from "next/link";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Database,
-  LineChart,
-} from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
@@ -85,7 +79,7 @@ export default async function StockPage({ params }: StockPageProps) {
             </a>
           </>
         }
-        description={`${stock.companyName} market context, financial fundamentals, demo position exposure, and risk signals.`}
+        description={`${stock.companyName} stock overview, financials, market context, and research.`}
         eyebrow="Stock detail"
         title={stock.ticker}
       >
@@ -97,7 +91,7 @@ export default async function StockPage({ params }: StockPageProps) {
         >
           {[
             ["#market-context", "Market context"],
-            ["#fundamentals", "SEC fundamentals"],
+            ["#fundamentals", "Financials"],
             ["#risk", "Risk flags"],
             ["#research", "Research"],
           ].map(([href, label]) => (
@@ -130,19 +124,12 @@ export default async function StockPage({ params }: StockPageProps) {
                 {stock.currency}
               </Badge>
             </div>
-            <p className="mt-2 text-sm text-background/55">
+            <p className="mt-2 text-sm text-background/60">
               {stock.sector} / {stock.industry}
             </p>
-            <div className="mt-5 flex flex-wrap gap-2 text-[11px] text-background/60">
-              <span className="flex items-center gap-1.5 rounded-full border border-background/15 px-2.5 py-1">
-                <LineChart className="size-3 text-[#6ee7b7]" />
-                Market context: TradingView
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full border border-background/15 px-2.5 py-1">
-                <Database className="size-3 text-[#6ee7b7]" />
-                Fundamentals: SEC EDGAR
-              </span>
-            </div>
+            <p className="mt-4 max-w-3xl text-sm leading-6 text-background/75">
+              {stock.description}
+            </p>
           </div>
           <div className="md:text-right">
             <p className="text-3xl font-semibold tracking-normal">
@@ -312,14 +299,7 @@ export default async function StockPage({ params }: StockPageProps) {
           ))}
         </section>
 
-        <section
-          aria-labelledby="sec-fundamentals-heading"
-          className="scroll-mt-28"
-          id="fundamentals"
-        >
-          <h2 className="sr-only" id="sec-fundamentals-heading">
-            SEC fundamentals and provenance
-          </h2>
+        <section className="scroll-mt-28" id="fundamentals">
           <SecFundamentals data={fundamentals} />
         </section>
 
