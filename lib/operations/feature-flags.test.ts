@@ -9,9 +9,9 @@ describe("operational feature flags", () => {
   it("defaults every missing production flag to disabled", () => {
     const summary = getFeatureFlagSummary({ NODE_ENV: "production" });
 
-    expect(
-      Object.values(summary).every((flag) => flag.enabled === false),
-    ).toBe(true);
+    expect(Object.values(summary).every((flag) => flag.enabled === false)).toBe(
+      true,
+    );
     expect(summary.SEC_INGESTION_ENABLED.source).toBe(
       "safe-production-default",
     );
@@ -25,6 +25,11 @@ describe("operational feature flags", () => {
     ).toBe(true);
     expect(
       isFeatureEnabled("AI_RESEARCH_ENABLED", {
+        NODE_ENV: "development",
+      }),
+    ).toBe(false);
+    expect(
+      isFeatureEnabled("EARNINGS_SYNC_ENABLED", {
         NODE_ENV: "development",
       }),
     ).toBe(false);

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getSentryTracesSampleRate,
   scrubSentryEvent,
+  scrubSentrySpan,
 } from "@/lib/observability/sentry-config";
 
 describe("Sentry privacy configuration", () => {
@@ -34,9 +35,9 @@ describe("Sentry privacy configuration", () => {
     expect(
       getSentryTracesSampleRate({ SENTRY_TRACES_SAMPLE_RATE: "0.1" }),
     ).toBe(0.1);
-    expect(
-      getSentryTracesSampleRate({ SENTRY_TRACES_SAMPLE_RATE: "2" }),
-    ).toBe(0);
+    expect(getSentryTracesSampleRate({ SENTRY_TRACES_SAMPLE_RATE: "2" })).toBe(
+      0,
+    );
     expect(getSentryTracesSampleRate({})).toBe(0);
   });
 
@@ -46,5 +47,35 @@ describe("Sentry privacy configuration", () => {
         user: { id: "user_0123456789abcdef", email: "ignored@example.test" },
       }).user,
     ).toEqual({ id: "user_0123456789abcdef" });
+  });
+
+  it("redacts query-string credentials from requests and outbound spans", () => {
+    const event = scrubSentryEvent({
+      breadcrumbs: [
+        {
+          category: "http",
+          data: { http: { query: "symbol=AAPL&apikey=server-secret" } },
+        },
+      ],
+      request: {
+        url: "https://api.earningsapi.com/v1/earnings?symbol=AAPL&apikey=server-secret",
+      },
+    });
+    const span = scrubSentrySpan({
+      data: {
+        "http.url":
+          "https://api.earningsapi.com/v1/earnings?apikey=server-secret&symbol=AAPL",
+        apiKey: "server-secret",
+      },
+      description:
+        "GET https://api.earningsapi.com/v1/earnings?symbol=AAPL&apikey=server-secret",
+      span_id: "0123456789abcdef",
+      start_timestamp: 1,
+      trace_id: "0123456789abcdef0123456789abcdef",
+    });
+
+    expect(event.request?.url).toContain("apikey=[REDACTED]");
+    expect(JSON.stringify(event.breadcrumbs)).not.toContain("server-secret");
+    expect(JSON.stringify(span)).not.toContain("server-secret");
   });
 });

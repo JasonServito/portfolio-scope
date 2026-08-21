@@ -16,11 +16,7 @@ class FakeRedis implements RedisCommands {
     return (this.values.get(key) as T | undefined) ?? null;
   }
 
-  async set<T>(
-    key: string,
-    value: T,
-    options?: { nx?: boolean; ex?: number },
-  ) {
+  async set<T>(key: string, value: T, options?: { nx?: boolean; ex?: number }) {
     void options?.ex;
     if (options?.nx && this.values.has(key)) return null;
     this.values.set(key, value);
@@ -28,7 +24,10 @@ class FakeRedis implements RedisCommands {
   }
 
   async del(...keys: string[]) {
-    return keys.reduce((count, key) => count + Number(this.values.delete(key)), 0);
+    return keys.reduce(
+      (count, key) => count + Number(this.values.delete(key)),
+      0,
+    );
   }
 
   async eval<TResult>(script: string, keys: string[], args: string[]) {
@@ -47,7 +46,11 @@ describe("Redis ephemeral store", () => {
   const environment = { NODE_ENV: "test" } as NodeJS.ProcessEnv;
 
   it("namespaces and hashes private identifiers", () => {
-    const key = buildRedisKey("fundamentals", "user@example.com:AAPL", environment);
+    const key = buildRedisKey(
+      "fundamentals",
+      "user@example.com:AAPL",
+      environment,
+    );
     expect(key).toMatch(/^portfolioscope:test:fundamentals:[a-f0-9]{32}$/);
     expect(key).not.toContain("user@example.com");
   });
@@ -100,6 +103,20 @@ describe("Redis ephemeral store", () => {
     ).resolves.toEqual({ delayMs: 125, unavailable: false });
   });
 
+  it("retains an atomic one-time claim until its expiry", async () => {
+    const store = new EphemeralStore(new FakeRedis(), environment);
+
+    await expect(
+      store.claimOnce("earnings", "AAPL:2026-08-21", 86_400),
+    ).resolves.toBe(true);
+    await expect(
+      store.claimOnce("earnings", "AAPL:2026-08-21", 86_400),
+    ).resolves.toBe(false);
+    await expect(
+      store.claimOnce("earnings", "AAPL:2026-08-22", 86_400),
+    ).resolves.toBe(true);
+  });
+
   it("degrades cache reads but fails explicit rate limits when unconfigured", async () => {
     const store = new EphemeralStore(null, environment);
     await expect(store.getJson("cache", "key")).resolves.toBeNull();
@@ -110,6 +127,9 @@ describe("Redis ephemeral store", () => {
         limit: 1,
         windowSeconds: 60,
       }),
+    ).rejects.toBeInstanceOf(RedisUnavailableError);
+    await expect(
+      store.claimOnce("earnings", "AAPL:2026-08-21", 86_400),
     ).rejects.toBeInstanceOf(RedisUnavailableError);
   });
 });

@@ -5,6 +5,7 @@ import {
   AgentStatus,
   ResearchGenerationMode,
   ResearchStatus,
+  type UpcomingEarningsState,
 } from "@prisma/client";
 import { expect, test, type BrowserContext } from "@playwright/test";
 
@@ -19,6 +20,8 @@ let userAId = "";
 let userBId = "";
 let portfolioAId = "";
 let currentResearchJobId = "";
+let previousEarningsState: UpcomingEarningsState | null = null;
+let earningsStockId = "";
 
 async function createResearchFixture(input: {
   userId: string;
@@ -203,6 +206,40 @@ test.describe("authenticated production boundaries", () => {
       where: { ticker: "AAPL" },
       select: { id: true },
     });
+    earningsStockId = stock.id;
+    previousEarningsState = await db.upcomingEarningsState.findUnique({
+      where: { stockId: stock.id },
+    });
+    const eventDate = new Date();
+    eventDate.setUTCDate(eventDate.getUTCDate() + 14);
+    eventDate.setUTCHours(0, 0, 0, 0);
+    await Promise.all([
+      db.holding.create({
+        data: {
+          portfolioId: portfolio.id,
+          stockId: stock.id,
+          shares: 1,
+          averageCost: 150,
+          costBasis: 150,
+        },
+      }),
+      db.upcomingEarningsState.upsert({
+        where: { stockId: stock.id },
+        update: {
+          eventDate,
+          fetchedAt: new Date(),
+          marketSession: "AFTER_MARKET",
+          source: "M26 persisted browser fixture",
+        },
+        create: {
+          stockId: stock.id,
+          eventDate,
+          fetchedAt: new Date(),
+          marketSession: "AFTER_MARKET",
+          source: "M26 persisted browser fixture",
+        },
+      }),
+    ]);
     await db.alert.create({
       data: {
         userId: userB.id,
@@ -240,6 +277,14 @@ test.describe("authenticated production boundaries", () => {
         },
       });
     }
+    if (earningsStockId) {
+      await db.upcomingEarningsState.deleteMany({
+        where: { stockId: earningsStockId },
+      });
+      if (previousEarningsState) {
+        await db.upcomingEarningsState.create({ data: previousEarningsState });
+      }
+    }
     await db.$disconnect();
   });
 
@@ -258,6 +303,9 @@ test.describe("authenticated production boundaries", () => {
     ).toBeVisible();
     await expect(
       privateNavigation.getByRole("link", { name: "Watchlist" }),
+    ).toBeVisible();
+    await expect(
+      privateNavigation.getByRole("link", { name: "Earnings" }),
     ).toBeVisible();
     await expect(
       privateNavigation.getByRole("link", { name: "Alerts" }),
@@ -474,6 +522,26 @@ test.describe("authenticated production boundaries", () => {
     const evidence = page.locator("[id^='evidence-ev_current_revenue']");
     await expect(evidence).toBeVisible();
     await expect(evidence).toBeFocused();
+  });
+
+  test("an owner sees the persisted earnings observation for a holding", async ({
+    context,
+    page,
+  }) => {
+    await authenticate(context, tokenA);
+    await page.goto("/app/earnings");
+
+    await expect(
+      page.getByRole("heading", { name: "Upcoming earnings" }),
+    ).toBeVisible();
+    const earnings = page.locator("[data-upcoming-earnings]");
+    await expect(earnings.getByText("AAPL", { exact: true })).toBeVisible();
+    await expect(earnings.getByText("Expected", { exact: true })).toBeVisible();
+    await expect(earnings.getByText("After market close")).toBeVisible();
+    await expect(earnings.getByText("Holding", { exact: true })).toBeVisible();
+    await expect(
+      earnings.getByText(/M26 persisted browser fixture/),
+    ).toBeVisible();
   });
 
   test("a second user cannot open another user's research report", async ({

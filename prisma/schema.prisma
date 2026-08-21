@@ -169,6 +169,11 @@ enum SecFactSelection {
   AMBIGUOUS
 }
 
+enum EarningsMarketSession {
+  BEFORE_MARKET
+  AFTER_MARKET
+}
+
 model User {
   id                         String                      @id @default(cuid())
   name                       String?
@@ -297,8 +302,24 @@ model Stock {
   alerts         Alert[]
   researchJobs   ResearchJob[]
   reports        ResearchReport[]
+  upcomingEarnings UpcomingEarningsState?
 
   @@index([companyId])
+}
+
+model UpcomingEarningsState {
+  id            String                 @id @default(cuid())
+  stockId       String                 @unique
+  eventDate     DateTime?              @db.Date
+  marketSession EarningsMarketSession?
+  source        String                 @db.VarChar(64)
+  fetchedAt     DateTime
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  stock         Stock                  @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([eventDate])
+  @@index([fetchedAt])
 }
 
 model Company {

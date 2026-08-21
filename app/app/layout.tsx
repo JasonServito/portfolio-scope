@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth/session";
 const privateNavigation = [
   ["/app", "Dashboard"],
   ["/app/watchlist", "Watchlist"],
+  ["/app/earnings", "Earnings"],
   ["/app/alerts", "Alerts"],
   ["/app/research", "Research"],
 ] as const;

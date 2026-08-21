@@ -83,10 +83,12 @@ export function buildRedisKey(
   return `${environmentPrefix(environment)}:${safeCategory}:${digest(identifier)}`;
 }
 
-export function isRedisConfigured(environment: NodeJS.ProcessEnv = process.env) {
+export function isRedisConfigured(
+  environment: NodeJS.ProcessEnv = process.env,
+) {
   return Boolean(
     environment.UPSTASH_REDIS_REST_URL?.trim() &&
-      environment.UPSTASH_REDIS_REST_TOKEN?.trim(),
+    environment.UPSTASH_REDIS_REST_TOKEN?.trim(),
   );
 }
 
@@ -173,6 +175,29 @@ export class EphemeralStore {
     }
   }
 
+  async claimOnce(category: string, identifier: string, ttlSeconds: number) {
+    if (!this.client) {
+      throw new RedisUnavailableError("Redis is not configured.");
+    }
+
+    try {
+      const result = await this.client.set(
+        this.key(`claim:${category}`, identifier),
+        "claimed",
+        { ex: ttlSeconds, nx: true },
+      );
+      return result === "OK";
+    } catch (error) {
+      if (error instanceof RedisUnavailableError) throw error;
+      throw new RedisUnavailableError(
+        "Redis claim coordination is unavailable.",
+        {
+          cause: error,
+        },
+      );
+    }
+  }
+
   async releaseLock(category: string, identifier: string, token: string) {
     if (!this.client) return false;
     try {
@@ -193,7 +218,8 @@ export class EphemeralStore {
     limit: number;
     windowSeconds: number;
   }) {
-    if (!this.client) throw new RedisUnavailableError("Redis is not configured.");
+    if (!this.client)
+      throw new RedisUnavailableError("Redis is not configured.");
 
     try {
       const result = await this.client.eval<[number, number]>(

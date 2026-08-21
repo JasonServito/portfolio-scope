@@ -10,6 +10,7 @@ const publicRoutes = [
   "/dashboard",
   "/holdings",
   "/watchlist",
+  "/earnings",
   "/alerts",
   "/stocks/aapl",
 ] as const;

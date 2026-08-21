@@ -1,6 +1,7 @@
 import { BackgroundJobType, type Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { EARNINGS_STALE_AFTER_MS } from "@/lib/earnings/service";
 import { isBackgroundFeatureEnabled } from "@/lib/jobs/config";
 import { JobErrorCode, JobExecutionError } from "@/lib/jobs/errors";
 import {
@@ -168,8 +169,15 @@ export async function executeBackgroundJobHandler(
         BackgroundJobType.MAINTENANCE_CLEANUP,
         job.payloadJson,
       );
+      const now = new Date();
+      const expiredEarnings = await db.upcomingEarningsState.deleteMany({
+        where: {
+          fetchedAt: {
+            lt: new Date(now.getTime() - EARNINGS_STALE_AFTER_MS),
+          },
+        },
+      });
       if (payload.operation === "RECOVER_STALE_JOBS") {
-        const now = new Date();
         const staleRunningCutoff = new Date(now.getTime() - 10 * 60 * 1000);
         const undeliveredCutoff = new Date(now.getTime() - 15 * 60 * 1000);
         const staleRunning =
@@ -182,11 +190,19 @@ export async function executeBackgroundJobHandler(
             undeliveredCutoff,
             now,
           );
-        return { ...staleRunning, undeliveredFailed: undelivered.count };
+        return {
+          ...staleRunning,
+          earningsDeleted: expiredEarnings.count,
+          undeliveredFailed: undelivered.count,
+        };
       }
 
       if (!isBackgroundFeatureEnabled("SEC_INGESTION_ENABLED")) {
-        return { queued: 0, skipped: "SEC ingestion is disabled." };
+        return {
+          earningsDeleted: expiredEarnings.count,
+          queued: 0,
+          skipped: "SEC ingestion is disabled.",
+        };
       }
 
       const staleBefore = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -210,7 +226,10 @@ export async function executeBackgroundJobHandler(
           }),
         );
       }
-      return { queued: queued.length };
+      return {
+        earningsDeleted: expiredEarnings.count,
+        queued: queued.length,
+      };
     }
   }
 

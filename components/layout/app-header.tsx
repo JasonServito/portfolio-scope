@@ -13,6 +13,7 @@ const mobileNavItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/holdings", label: "Holdings" },
   { href: "/watchlist", label: "Watchlist" },
+  { href: "/earnings", label: "Earnings" },
   { href: "/alerts", label: "Alerts" },
 ];
 
@@ -20,6 +21,8 @@ const searchDestinations: Record<string, string> = {
   alert: "/alerts",
   alerts: "/alerts",
   dashboard: "/dashboard",
+  earning: "/earnings",
+  earnings: "/earnings",
   holding: "/holdings",
   holdings: "/holdings",
   portfolio: "/dashboard",

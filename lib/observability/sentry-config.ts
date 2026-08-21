@@ -1,4 +1,32 @@
-import type { Event } from "@sentry/nextjs";
+import type { Breadcrumb, Event } from "@sentry/nextjs";
+
+type TelemetrySpan = {
+  data: Record<string, unknown>;
+  description?: string;
+};
+
+const secretQueryParameter =
+  /((?:^|[?&])(?:api[-_]?key|token|secret|credential)=)[^&#\s]*/gi;
+
+function redactTelemetryString(value: string) {
+  return value.replace(secretQueryParameter, "$1[REDACTED]");
+}
+
+function scrubSpanAttribute(value: unknown): unknown {
+  if (typeof value === "string") return redactTelemetryString(value);
+  if (Array.isArray(value)) return value.map(scrubSpanAttribute);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        /api[-_]?key|token|secret|credential/i.test(key)
+          ? "[REDACTED]"
+          : scrubSpanAttribute(item),
+      ]),
+    );
+  }
+  return value;
+}
 
 function sampleRate(value: string | undefined) {
   const parsed = Number(value);
@@ -25,9 +53,7 @@ export function getSentryTracesSampleRate(
   );
 }
 
-export function scrubSentryEvent<TEvent extends Event>(
-  event: TEvent,
-): TEvent {
+export function scrubSentryEvent<TEvent extends Event>(event: TEvent): TEvent {
   if (event.user) {
     event.user =
       typeof event.user.id === "string" &&
@@ -48,7 +74,37 @@ export function scrubSentryEvent<TEvent extends Event>(
   if (event.request) {
     delete event.request.cookies;
     delete event.request.data;
+    if (event.request.url) {
+      event.request.url = redactTelemetryString(event.request.url);
+    }
+  }
+
+  if (event.breadcrumbs) {
+    event.breadcrumbs = event.breadcrumbs.map(scrubSentryBreadcrumb);
   }
 
   return event;
+}
+
+export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
+  if (breadcrumb.message) {
+    breadcrumb.message = redactTelemetryString(breadcrumb.message);
+  }
+  if (breadcrumb.data) {
+    breadcrumb.data = scrubSpanAttribute(breadcrumb.data) as Record<
+      string,
+      unknown
+    >;
+  }
+  return breadcrumb;
+}
+
+export function scrubSentrySpan<TSpan extends TelemetrySpan>(
+  span: TSpan,
+): TSpan {
+  if (span.description) {
+    span.description = redactTelemetryString(span.description);
+  }
+  span.data = scrubSpanAttribute(span.data) as TSpan["data"];
+  return span;
 }

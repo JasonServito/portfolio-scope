@@ -3,6 +3,7 @@ import {
   BarChart3,
   Bell,
   Binoculars,
+  CalendarDays,
   LayoutDashboard,
   LineChart,
   WalletCards,
@@ -27,6 +28,11 @@ const primaryNavItems = [
     href: "/watchlist",
     label: "Watchlist",
     icon: Binoculars,
+  },
+  {
+    href: "/earnings",
+    label: "Earnings",
+    icon: CalendarDays,
   },
   {
     href: "/alerts",
