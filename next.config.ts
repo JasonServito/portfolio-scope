@@ -9,7 +9,7 @@ const distDir =
 
 const nextConfig: NextConfig = {
   distDir,
-  output: "standalone",
+  output: process.env.VERCEL ? undefined : "standalone",
 };
 
 export default withSentryConfig(nextConfig, {
