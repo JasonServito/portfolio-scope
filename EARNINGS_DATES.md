@@ -222,6 +222,19 @@ clarification is not currently required. This completes Gate 6 only. Explicit
 Production activation remains pending at Gate 7, and
 `EARNINGS_SYNC_ENABLED=false` remains required.
 
+### Gate 7 deferred status
+
+**Gate 7: DEFERRED (2026-08-24).** A normal Production sweep succeeded with
+25/25 catalog coverage, 25 provider attempts, 0 retries, 0 failures, and outcome
+`AVAILABLE`; PostgreSQL and normal-sweep Redis verification passed, and provider
+daily and monthly usage each reconciled exactly from 25 to 50. The controlled
+Redis-unavailable fail-closed proof remains incomplete because currently safe
+execution approaches are blocked by tooling/environment constraints. This does
+not weaken the requirement: keep `EARNINGS_SYNC_ENABLED=false`, treat overall
+M26 Production earnings activation as incomplete, and resume Gate 7 before final
+Production enablement. No evidence currently indicates a Production earnings
+implementation defect.
+
 If these conditions are not satisfied, leave live sync disabled. The completed
 page will continue to show valid persisted observations or explicit unavailable
 states without making provider calls.

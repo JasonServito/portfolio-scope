@@ -792,6 +792,19 @@ guidance is sufficient under this runbook, so written provider clarification is
 not currently required. This record completes Gate 6 only;
 `EARNINGS_SYNC_ENABLED` remains `false`, and Gate 7 remains pending.
 
+### Gate 7 deferred status
+
+**Gate 7: DEFERRED (2026-08-24).** The normal Production sweep completed with
+25/25 catalog coverage, 25 provider attempts, 0 retries, 0 failures, and outcome
+`AVAILABLE`. PostgreSQL verification and normal-sweep Redis verification passed,
+and provider usage reconciled exactly from 25 to 50 for both daily and monthly
+counts. The remaining requirement is controlled Redis-unavailable fail-closed
+proof; safe approaches investigated so far are blocked by execution/tooling
+constraints, with no current evidence of a Production earnings implementation
+defect. Keep `EARNINGS_SYNC_ENABLED=false`. Gate 7 and overall M26 Production
+earnings activation remain incomplete, and Gate 7 must resume before final
+Production enablement.
+
 1. Keep `EARNINGS_SYNC_ENABLED=false`. Review the current official endpoint,
    terms, and free limits, and obtain any final confirmation required for
    deployed use and normalized storage for up to 72 hours.
@@ -1219,7 +1232,7 @@ Complete this table during the real deployment. Do not mark an item complete wit
 | EarningsAPI.com free quota confirmed                      | Verified 2026-08-24 | Owner dashboard: Free/$0; 60/minute, 100/day, 1,000/month; 0% usage; New York reset; no API request     |
 | EarningsAPI.com terms/cache permission confirmed          | Verified 2026-08-24 | Gate 6 complete: dated official terms, storage/database workflows, endpoint limits, bounded retention, and residual-risk review; written clarification not required |
 | Bounded 25-symbol earnings contract check passed          | Verified 2026-08-24 | `2026-08-24T17:59:10.474Z`: 25/25 ordered symbols; 25 requests; HTTP 200 and contract-valid nonempty result for every symbol; 0 retries/redirect/transient/contract failures; dashboard 25/100 daily used, 75 remaining, Free, 1,000/month, 60/minute, New York reset; no DB/Redis/sync/config writes; flag remained false; no secret exposed |
-| Earnings Redis fail-closed behavior verified              | Not verified | Controlled no-request proof and persisted-state result                                                        |
+| Earnings Redis fail-closed behavior verified              | Deferred 2026-08-24 | Normal Production sweep passed: 25/25 coverage, 25 attempts, 0 retries/failures, `AVAILABLE`; PostgreSQL and normal Redis verification passed; daily/monthly usage each reconciled 25 to 50. Controlled Redis-unavailable no-request and persisted-state proof remains blocked by execution/tooling constraints; sync remains disabled. |
 | Production earnings activation explicitly approved        | Not verified | Approval, flag change, quota review, and page smoke test                                                      |
 | Initial SEC backfill reviewed                             | Not verified | Per-ticker run IDs and filing comparison checklist                                                            |
 | TradingView attribution/failure state verified            | Not verified | Production stock-page smoke test                                                                              |
