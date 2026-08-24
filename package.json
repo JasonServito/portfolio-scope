@@ -71,5 +71,10 @@
     "typescript": "^5",
     "vite-node": "^3.2.4",
     "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2"
+    }
   }
 }
