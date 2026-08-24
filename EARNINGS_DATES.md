@@ -106,7 +106,10 @@ The provider does not publish a supported-symbol universe or completeness
 commitment. After service approval and before Production activation, a bounded
 live contract check must validate all 25 catalog symbols. A valid empty array is
 a cacheable unknown state, not a provider failure. This check is provider
-activation evidence, not an automated test dependency.
+activation evidence, not an automated test dependency. The dedicated
+`npm run earnings:contract-check:approved` harness pins this catalog, requires an
+explicit one-run Production approval, rejects redirects without following them,
+performs no retries, and imports no PostgreSQL or Redis boundary.
 
 ## Implemented M26 boundary
 
@@ -175,6 +178,49 @@ Production activation, create the account and record a bounded 25-symbol
 coverage/contract check; success means every
 symbol returns a schema-valid array or a valid empty unknown without exposing the
 key or depending on the live service in automated tests.
+
+Gate 5 completed on 2026-08-24. One approved validation-only run covered all 25
+ordered catalog symbols with exactly 25 requests, 0 retries, no followed
+redirects, and no transient or contract failures. Every symbol returned HTTP 200
+and a contract-valid nonempty upcoming result. The provider dashboard reconciled
+25/100 daily requests used and 75 remaining on the Free plan; PostgreSQL, Redis,
+normal synchronization, Production configuration, and the disabled feature flag
+were unchanged.
+
+### Gate 6 completion record
+
+**Gate 6: COMPLETE (2026-08-24).** The dated review covered the official
+[Terms & Conditions](https://www.earningsapi.com/terms), effective 2025-06-11;
+the official
+[watchlist monitor](https://www.earningsapi.com/docs/examples/watchlist-monitor),
+which instructs integrations to select the nearest future event and store it
+with the symbol; the official
+[database and daily-sync guide](https://www.earningsapi.com/docs/examples/calendar-backfill-sync),
+which describes building an earnings-calendar database, storing responses, and
+recurring forward refreshes; and the official
+[company earnings endpoint](https://www.earningsapi.com/docs/earnings), which
+documents Free access at 60 requests/minute, 100/day, and 1,000/month.
+
+The terms expressly permit retrieving and displaying earnings content in the
+operator's own application or website while prohibiting republication of the
+proprietary feed. PortfolioScope does not republish the feed: raw responses are
+validated and discarded, HTTP caching is disabled with `cache: "no-store"`, and
+PostgreSQL retains only the normalized nearest future date, normalized market
+session, source, and application timestamps. That record is fresh through 36
+hours, displayable as stale through 72 hours, and suppressed and pruned after 72
+hours. Redis retains only 48-hour sweep/attempt claims and coarse coordination
+outcomes; it stores no provider earnings content.
+
+No published maximum response-retention period, explicit attribution rule, or
+operative prohibition on deployed Free-tier use within its limits was found.
+Paid plans are marketed as built for Production; upstream provenance, accuracy,
+completeness, and availability are not guaranteed; and terms may change on
+posting. These remain accepted, non-blocking residual risks for this bounded
+implementation. The affirmative application-display and storage/database
+guidance is sufficient under the activation criteria, so written provider
+clarification is not currently required. This completes Gate 6 only. Explicit
+Production activation remains pending at Gate 7, and
+`EARNINGS_SYNC_ENABLED=false` remains required.
 
 If these conditions are not satisfied, leave live sync disabled. The completed
 page will continue to show valid persisted observations or explicit unavailable

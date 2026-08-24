@@ -19,6 +19,7 @@
     "demo:capture": "node scripts/capture-recruiter-assets.mjs",
     "demo:vitals": "node scripts/measure-m17-web-vitals.mjs",
     "demo:request-paths": "node scripts/measure-m22-request-paths.mjs",
+    "earnings:contract-check:approved": "vite-node scripts/run-earnings-api-contract-check.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "verify:db": "npm run db:generate && prisma validate && npm run db:deploy",
@@ -68,6 +69,7 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite-node": "^3.2.4",
     "vitest": "^3.2.6"
   }
 }

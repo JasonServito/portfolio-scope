@@ -1,27 +1,12 @@
-import { z } from "zod";
-
-import { parseDateOnly } from "@/lib/earnings/dates";
+import {
+  type UpcomingEarningsEvent,
+  validateEarningsResponse,
+} from "@/lib/earnings/provider-contract";
 
 const EARNINGS_API_URL = "https://api.earningsapi.com/v1/earnings";
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-const earningsRowSchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  symbol: z.string().trim().min(1).max(16),
-  name: z.string().nullable(),
-  time: z.string().nullable(),
-  epsEstimate: z.number().finite().nullable(),
-  eps: z.number().finite().nullable(),
-  revenue: z.number().finite().nullable(),
-  revenueEstimate: z.number().finite().nullable(),
-});
-
-const earningsResponseSchema = z.array(earningsRowSchema).max(100);
-
-export type UpcomingEarningsEvent = {
-  eventDate: Date;
-  marketSession: "AFTER_MARKET" | "BEFORE_MARKET" | null;
-};
+export type { UpcomingEarningsEvent } from "@/lib/earnings/provider-contract";
 
 export interface UpcomingEarningsProvider {
   getUpcomingEvent(
@@ -42,12 +27,6 @@ export class EarningsProviderError extends Error {
   ) {
     super(`Earnings provider request failed (${code}).`);
   }
-}
-
-function normalizeMarketSession(value: string | null) {
-  if (value === "time-pre-market") return "BEFORE_MARKET" as const;
-  if (value === "time-after-hours") return "AFTER_MARKET" as const;
-  return null;
 }
 
 export class EarningsApiClient implements UpcomingEarningsProvider {
@@ -89,43 +68,10 @@ export class EarningsApiClient implements UpcomingEarningsProvider {
       throw new EarningsProviderError("INVALID_RESPONSE");
     }
 
-    const parsed = earningsResponseSchema.safeParse(payload);
-    if (!parsed.success) {
+    const validated = validateEarningsResponse(payload, symbol, marketDate);
+    if (!validated.success) {
       throw new EarningsProviderError("INVALID_RESPONSE");
     }
-    if (parsed.data.some((row) => row.symbol.trim().toUpperCase() !== symbol)) {
-      throw new EarningsProviderError("INVALID_RESPONSE");
-    }
-
-    const candidates = parsed.data
-      .map((row) => ({ row, eventDate: parseDateOnly(row.date) }))
-      .filter(
-        (
-          item,
-        ): item is {
-          row: z.infer<typeof earningsRowSchema>;
-          eventDate: Date;
-        } => item.eventDate !== null,
-      );
-
-    if (candidates.length !== parsed.data.length) {
-      throw new EarningsProviderError("INVALID_RESPONSE");
-    }
-
-    const upcoming = candidates
-      .filter(
-        ({ row }) =>
-          row.date >= marketDate && row.eps === null && row.revenue === null,
-      )
-      .sort(({ row: left }, { row: right }) =>
-        left.date.localeCompare(right.date),
-      )[0];
-
-    return upcoming
-      ? {
-          eventDate: upcoming.eventDate,
-          marketSession: normalizeMarketSession(upcoming.row.time),
-        }
-      : null;
+    return validated.event;
   }
 }

@@ -758,6 +758,40 @@ provider request and must not prevent a valid observation inside the 72-hour
 fail-stale window from being displayed. Earnings reads and the existing
 maintenance workflow delete observations after that window.
 
+### Gate 6 caching/licensing evidence
+
+**Gate 6: COMPLETE (2026-08-24).** The operator reviewed the current official
+[EarningsAPI.com Terms & Conditions](https://www.earningsapi.com/terms),
+effective 2025-06-11; the official
+[watchlist monitor](https://www.earningsapi.com/docs/examples/watchlist-monitor),
+which selects the nearest future event and stores it with the symbol; the
+official
+[database and daily-sync guide](https://www.earningsapi.com/docs/examples/calendar-backfill-sync),
+which describes an earnings-calendar database, recurring refreshes, and stored
+responses; and the official
+[company earnings endpoint](https://www.earningsapi.com/docs/earnings), which
+records the Free limits of 60 requests/minute, 100/day, and 1,000/month.
+
+The terms permit retrieving and displaying earnings content in the operator's
+own application or website and prohibit republishing the proprietary data feed.
+M26 does not republish that feed: it validates each response, discards the raw
+payload, and stores only the normalized nearest future event date, normalized
+market session, source, and application fetch timestamps in PostgreSQL. That
+state is fresh through 36 hours, may be reused and labelled stale through 72
+hours, and is suppressed and pruned after 72 hours. Provider requests disable
+HTTP caching with `cache: "no-store"`. Redis stores only 48-hour sweep/attempt
+claims and coarse coordination outcomes, never provider earnings content.
+
+The review found no published maximum response-retention period, explicit
+attribution rule, or operative prohibition on deployed Free-tier use within its
+limits. Paid plans are marketed as built for Production; upstream provenance,
+accuracy, completeness, and availability are not guaranteed; and terms may
+change on posting. These are accepted as residual non-blocking risks for the
+bounded M26 behavior. The affirmative application-display and storage/database
+guidance is sufficient under this runbook, so written provider clarification is
+not currently required. This record completes Gate 6 only;
+`EARNINGS_SYNC_ENABLED` remains `false`, and Gate 7 remains pending.
+
 1. Keep `EARNINGS_SYNC_ENABLED=false`. Review the current official endpoint,
    terms, and free limits, and obtain any final confirmation required for
    deployed use and normalized storage for up to 72 hours.
@@ -770,7 +804,44 @@ maintenance workflow delete observations after that window.
    exactly the fixed 25-company registry. Record that every symbol returned a
    schema-valid array or valid empty array, request count was no more than 25,
    no secret appeared in output, and the published quota remained intact. Do
-   not turn this into an automated live test.
+   not turn this into an automated live test. The validation-only command is
+   `npm run earnings:contract-check:approved`; it imports no database, Redis,
+   synchronization, job, route, or telemetry module. Before network access it
+   requires `VERCEL_ENV=production`, `EARNINGS_SYNC_ENABLED=false`, the existing
+   server-only key, the exact approved catalog fingerprint, and the one-run
+   value
+   `M26_GATE5_LIVE_CHECK_APPROVAL=APPROVE_M26_GATE5_EXACTLY_25_REQUESTS`. It
+   executes sequentially with one attempt per symbol, no retry or fallback, a
+   10-second timeout, and manual redirect handling that never follows a 3xx.
+
+   Use the linked Vercel project and an authenticated Vercel CLI to select the
+   Production environment without writing an env file. Set the Production
+   assertion and approval only for this terminal process, run the command once,
+   then remove both temporary values:
+
+   ```powershell
+   $env:VERCEL_ENV = "production"
+   $env:M26_GATE5_LIVE_CHECK_APPROVAL = "APPROVE_M26_GATE5_EXACTLY_25_REQUESTS"
+   try {
+     vercel env run -e production -- npm run earnings:contract-check:approved
+   } finally {
+     Remove-Item Env:VERCEL_ENV -ErrorAction SilentlyContinue
+     Remove-Item Env:M26_GATE5_LIVE_CHECK_APPROVAL -ErrorAction SilentlyContinue
+   }
+   ```
+
+   The 2026-08-24 preflight established that Vercel omits the non-readable
+   Sensitive `EARNINGS_API_KEY` from `env run`. The operator subsequently used
+   approved process-memory-only injection for one execution and cleared the key
+   and approval variables afterward. The run started at
+   `2026-08-24T17:59:10.474Z`: all 25 ordered catalog symbols returned HTTP 200
+   and a contract-valid nonempty upcoming result; request count was 25, with 0
+   retries, redirect failures, transient failures, or contract failures. The
+   provider dashboard reconciled 25/100 daily requests used and 75 remaining on
+   the Free plan, with a 1,000/month limit, 60/minute rate limit, and New York
+   daily reset. No PostgreSQL, Redis, synchronization, feature-flag, deployment,
+   or secret-exposure side effect occurred. Do not use `vercel env pull`,
+   reclassify or copy the key into `.env`, or persist the approval value.
 5. Set `EARNINGS_SYNC_ENABLED=true` only in Production after steps 1-4 are
    recorded. Open `/earnings` and `/app/earnings`; verify source/fetched-at
    labels, owner scoping, deduplication, and explicit unknown/unavailable states.
@@ -1145,8 +1216,9 @@ Complete this table during the real deployment. Do not mark an item complete wit
 | Maintenance schedules configured                          | Not verified | Two named schedule IDs and reviewed UTC cadence                                                               |
 | M14 migration and supported registry seed applied         | Not verified | Migration log and 25-company count                                                                            |
 | M26 earnings migration applied with sync disabled         | Not verified | Migration log and default-off flag capture                                                                    |
-| EarningsAPI.com terms/cache permission confirmed          | Not verified | Dated official terms review or written clarification                                                          |
-| Bounded 25-symbol earnings contract check passed          | Not verified | Timestamp, schema/coverage result, and request count                                                          |
+| EarningsAPI.com free quota confirmed                      | Verified 2026-08-24 | Owner dashboard: Free/$0; 60/minute, 100/day, 1,000/month; 0% usage; New York reset; no API request     |
+| EarningsAPI.com terms/cache permission confirmed          | Verified 2026-08-24 | Gate 6 complete: dated official terms, storage/database workflows, endpoint limits, bounded retention, and residual-risk review; written clarification not required |
+| Bounded 25-symbol earnings contract check passed          | Verified 2026-08-24 | `2026-08-24T17:59:10.474Z`: 25/25 ordered symbols; 25 requests; HTTP 200 and contract-valid nonempty result for every symbol; 0 retries/redirect/transient/contract failures; dashboard 25/100 daily used, 75 remaining, Free, 1,000/month, 60/minute, New York reset; no DB/Redis/sync/config writes; flag remained false; no secret exposed |
 | Earnings Redis fail-closed behavior verified              | Not verified | Controlled no-request proof and persisted-state result                                                        |
 | Production earnings activation explicitly approved        | Not verified | Approval, flag change, quota review, and page smoke test                                                      |
 | Initial SEC backfill reviewed                             | Not verified | Per-ticker run IDs and filing comparison checklist                                                            |
