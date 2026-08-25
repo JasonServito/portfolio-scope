@@ -30,6 +30,7 @@ function formatTrendValue(value: number, unit: FinancialTrend["unit"]) {
     style: "currency",
     currency: "USD",
     notation: unit === "USD" ? "compact" : "standard",
+    minimumFractionDigits: unit === "USD" ? 0 : 2,
     maximumFractionDigits: 2,
   }).format(value);
 }
