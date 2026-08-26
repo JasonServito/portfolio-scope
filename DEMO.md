@@ -46,8 +46,9 @@ normalization metadata.
 ### 5. Inspect research - 20 seconds
 
 Open the research section or `/research`. Explain that the public sample is
-prebuilt and read-only. Show that findings, counterpoints, risks, missing data,
-and sources remain separate and visible.
+prebuilt and read-only. Walk through Summary, Strengths, Risks, and What to
+Watch. Expand **Evidence / Sources** and follow a claim citation to its source
+details to show that important claims remain reviewable.
 
 ### 6. Close with the repository - 10 seconds
 
@@ -80,7 +81,8 @@ Store approved images in `public/screenshots/` with descriptive kebab-case names
 - `holdings.png` — table headers and several complete rows
 - `alerts.png` — multiple severities and at least one ticker link
 - `stock-detail.png` — stock context, chart, position, and related risks
-- `research.png` — overview plus visible specialist navigation
+- `research.png` — summary, strengths, risks, what to watch, and the Evidence /
+  Sources disclosure
 - `watchlist.png` — followed companies with notes and target context
 - `ci.png` - optional; add only from a real passing workflow with no sensitive repository details
 

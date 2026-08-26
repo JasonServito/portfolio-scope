@@ -130,17 +130,22 @@ and QStash credentials, apply both M15 migrations, verify the signed callback,
 then enable workloads in the order documented in [`RUNBOOK.md`](RUNBOOK.md).
 
 M18 external research is separately opt-in and is not needed for the local
-demo. Keep `AI_RESEARCH_ENABLED=false` unless the additive M18 migration,
-public-evidence boundary, OpenAI credential, provider-side billing alerts, and
-the application quotas have been verified in that environment. See
-[`docs/ai-research.md`](docs/ai-research.md) for the activation and rollback
+demo. Keep `AI_RESEARCH_ENABLED=false` unless both additive M18 migrations, the
+M27 per-attempt provider-usage migration, the public-evidence boundary,
+environment-scoped OpenAI credential and billing control, and all application
+limits have been verified in that environment.
+M27 allows only Preview validation with the pinned model and one controlled
+AAPL report; it does not authorize Production. See
+[`docs/ai-research.md`](docs/ai-research.md) and
+[`AI_ACTIVATION.md`](AI_ACTIVATION.md) for the activation evidence and rollback
 sequence.
 
 Local verification has successfully applied migrations
 `20260811120000_m18_ai_research_foundation` and
-`20260811130000_m18_bind_ai_generation_config`; all eight dedicated M18
-database integration cases pass. Preview and Production must still apply and
-verify both migrations independently with external AI disabled.
+`20260811130000_m18_bind_ai_generation_config`, plus
+`20260824120000_m27_ai_usage_provider_tokens`; all fifteen dedicated AI database
+integration cases pass. Preview and Production must still apply and verify the
+required migrations independently with external AI disabled.
 
 ## Quality checks
 
@@ -189,7 +194,7 @@ The repository includes:
 - Explicit missing, ambiguous, stale, failed, and unsupported fundamentals states
 - Durable SEC, deterministic research, snapshot, and maintenance jobs with signed callbacks and admin diagnostics
 - A versioned evidence-retrieval and structured-generation layer with normalized claims/citations, bounded repair, report reuse/diff utilities, and offline evaluation
-- PostgreSQL-authoritative global, per-user, and per-job AI reservations with a checked-in `$5 USD` monthly application maximum and a default-off external-call kill switch
+- PostgreSQL-authoritative AI reservations with non-raisable `$5` global, `$1` user, `$0.25` job, and `50,000` token limits plus a default-off external-call kill switch
 - Redis cache/lock/rate-limit policies plus two bounded QStash maintenance schedules
 - Privacy-safe structured logs, request correlation, Sentry release/error context, and an admin-only dependency dashboard
 - Explicit PostHog event contracts with autocapture, replay, and person profiles disabled
@@ -215,6 +220,7 @@ No public demo URL is claimed here until a deployment is verified.
 - [`MARKET_PRICES.md`](MARKET_PRICES.md) — M23 source decision, licensing evidence, freshness, and target-crossing semantics
 - [`FINANCIAL_TRENDS.md`](FINANCIAL_TRENDS.md) — M25 trend semantics, missing-data behavior, and revenue-mix feasibility
 - [`EARNINGS_DATES.md`](EARNINGS_DATES.md) — M26 provider decision, implemented persistence/failure controls, and Production activation gate
+- [`AI_ACTIVATION.md`](AI_ACTIVATION.md) — M27 Preview evidence, reconciliation tolerance, blockers, and separate Production gate
 - [`docs/sec-data.md`](docs/sec-data.md) — SEC contracts, normalization, provenance, freshness, and operations
 - [`docs/ai-research.md`](docs/ai-research.md) and [`docs/ai-evaluation.md`](docs/ai-evaluation.md) — M18 safeguards and evaluation
 
@@ -223,10 +229,12 @@ No public demo URL is claimed here until a deployment is verified.
 - M19 portfolio risk and scenario analytics is cancelled after a deliberate scope reassessment.
 - M20-M23 product simplification, authenticated reliability, measured request-path work, cached demo watchlist prices, and target alerts are complete.
 - M24-M26 deliver simpler stock detail, three financial trend charts, and upcoming earnings.
-- M27 separates controlled live AI activation from the completed M18 repository architecture.
+- M27 validates the pinned M18 provider only in Preview, enforces conservative
+  daily generation, and simplifies report presentation while preserving evidence.
 - M28 is a low-priority, human-involved visual design pass after behavior is stable.
 
-M24-M26 are complete. M27-M28 remain `NOT_STARTED`. M26 selected and implemented
+M24-M26 are complete. M27 repository/local implementation is complete and its
+live Preview gates remain incomplete; M28 remains `NOT_STARTED`. M26 selected and implemented
 EarningsAPI.com behind default-off, Production-only controls; its bounded live
 contract check and final licensing/cache confirmation remain activation gates in
 [`EARNINGS_DATES.md`](EARNINGS_DATES.md). No licensed programmatic market-price

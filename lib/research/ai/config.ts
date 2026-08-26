@@ -1,13 +1,28 @@
 import { z } from "zod";
 
-export const AI_PRICING_VERSION = "openai-pricing-2026-08-11";
+export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
 export const AI_PROMPT_VERSION = "m18-research-v1";
 export const AI_RETRIEVAL_VERSION = "m18-lexical-v1";
 export const AI_OUTPUT_SCHEMA_VERSION = "m18-claims-v1";
 export const AI_REPORT_VERSION = "m18-report-v1";
 export const AI_CALCULATION_VERSION = "portfolio-v1";
+export const AI_HARD_MAX_COST_PER_JOB_USD = 0.25;
+export const AI_HARD_MAX_TOKENS_PER_JOB = 50_000;
 
-const supportedModels = {
+const LEGACY_AI_PRICING_VERSION = "openai-pricing-2026-08-11";
+const DEFAULT_RESEARCH_MODEL = "gpt-5.4-mini-2026-03-17";
+
+const activeSupportedModels = {
+  "gpt-5.4-mini-2026-03-17": {
+    inputUsdPerMillion: 0.75,
+    cachedInputUsdPerMillion: 0.075,
+    outputUsdPerMillion: 4.5,
+  },
+} as const;
+
+// Persisted jobs keep the immutable model/rate tuple they reserved when queued.
+// These entries are compatibility data, not models accepted from current env.
+const legacySupportedModels = {
   "gpt-5-mini-2025-08-07": {
     inputUsdPerMillion: 0.25,
     cachedInputUsdPerMillion: 0.025,
@@ -25,27 +40,48 @@ const supportedModels = {
   },
 } as const;
 
-export type SupportedResearchModel = keyof typeof supportedModels;
+type ActiveResearchModel = keyof typeof activeSupportedModels;
+type LegacyResearchModel = keyof typeof legacySupportedModels;
+export type SupportedResearchModel = ActiveResearchModel | LegacyResearchModel;
 
-export const queuedAiGenerationConfigSchema = z
-  .object({
-    provider: z.literal("openai"),
-    model: z.enum(
-      Object.keys(supportedModels) as [
-        SupportedResearchModel,
-        ...SupportedResearchModel[],
-      ],
-    ),
-    maxOutputTokensPerCall: z.number().int().positive().max(8_000),
-    providerTimeoutMs: z.number().int().min(1_000).max(25_000),
-    pricingVersion: z.literal(AI_PRICING_VERSION),
-    promptVersion: z.literal(AI_PROMPT_VERSION),
-    retrievalVersion: z.literal(AI_RETRIEVAL_VERSION),
-    outputSchemaVersion: z.literal(AI_OUTPUT_SCHEMA_VERSION),
-    reportVersion: z.literal(AI_REPORT_VERSION),
-    calculationVersion: z.literal(AI_CALCULATION_VERSION),
-  })
-  .strict();
+const activeModelNames = [DEFAULT_RESEARCH_MODEL] satisfies [
+  ActiveResearchModel,
+];
+const legacyModelNames = Object.keys(legacySupportedModels) as [
+  LegacyResearchModel,
+  ...LegacyResearchModel[],
+];
+
+const queuedAiGenerationConfigFields = {
+  provider: z.literal("openai"),
+  maxOutputTokensPerCall: z.number().int().positive().max(8_000),
+  providerTimeoutMs: z.number().int().min(1_000).max(25_000),
+  promptVersion: z.literal(AI_PROMPT_VERSION),
+  retrievalVersion: z.literal(AI_RETRIEVAL_VERSION),
+  outputSchemaVersion: z.literal(AI_OUTPUT_SCHEMA_VERSION),
+  reportVersion: z.literal(AI_REPORT_VERSION),
+  calculationVersion: z.literal(AI_CALCULATION_VERSION),
+};
+
+export const queuedAiGenerationConfigSchema = z.discriminatedUnion(
+  "pricingVersion",
+  [
+    z
+      .object({
+        ...queuedAiGenerationConfigFields,
+        model: z.enum(activeModelNames),
+        pricingVersion: z.literal(AI_PRICING_VERSION),
+      })
+      .strict(),
+    z
+      .object({
+        ...queuedAiGenerationConfigFields,
+        model: z.enum(legacyModelNames),
+        pricingVersion: z.literal(LEGACY_AI_PRICING_VERSION),
+      })
+      .strict(),
+  ],
+);
 
 export type QueuedAiGenerationConfig = z.infer<
   typeof queuedAiGenerationConfigSchema
@@ -61,18 +97,15 @@ const aiEnvironmentSchema = z
   .object({
     OPENAI_API_KEY: z.string().trim().min(1),
     OPENAI_RESEARCH_MODEL: z
-      .enum(
-        Object.keys(supportedModels) as [
-          SupportedResearchModel,
-          ...SupportedResearchModel[],
-        ],
-      )
-      .default("gpt-5-mini-2025-08-07"),
+      .enum(activeModelNames)
+      .default(DEFAULT_RESEARCH_MODEL),
     AI_MONTHLY_BUDGET_USD: optionalNumber(5).pipe(z.number().max(5)),
-    AI_USER_MONTHLY_BUDGET_USD: optionalNumber(1).pipe(z.number().max(5)),
-    AI_MAX_COST_PER_JOB_USD: optionalNumber(0.25).pipe(z.number().max(5)),
-    AI_MAX_TOKENS_PER_JOB: optionalNumber(50_000).pipe(
-      z.number().int().max(200_000),
+    AI_USER_MONTHLY_BUDGET_USD: optionalNumber(1).pipe(z.number().max(1)),
+    AI_MAX_COST_PER_JOB_USD: optionalNumber(AI_HARD_MAX_COST_PER_JOB_USD).pipe(
+      z.number().max(AI_HARD_MAX_COST_PER_JOB_USD),
+    ),
+    AI_MAX_TOKENS_PER_JOB: optionalNumber(AI_HARD_MAX_TOKENS_PER_JOB).pipe(
+      z.number().int().max(AI_HARD_MAX_TOKENS_PER_JOB),
     ),
     AI_MAX_OUTPUT_TOKENS_PER_CALL: optionalNumber(1_500).pipe(
       z.number().int().max(8_000),
@@ -110,8 +143,6 @@ export class AiConfigurationError extends Error {
   }
 }
 
-export type AiResearchConfig = ReturnType<typeof getAiResearchConfig>;
-
 export function getAiResearchConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
@@ -123,7 +154,7 @@ export function getAiResearchConfig(
     provider: "openai" as const,
     apiKey: parsed.data.OPENAI_API_KEY,
     model,
-    pricing: supportedModels[model],
+    pricing: activeSupportedModels[model],
     pricingVersion: AI_PRICING_VERSION,
     globalMonthlyBudgetUsd: parsed.data.AI_MONTHLY_BUDGET_USD,
     userMonthlyBudgetUsd: parsed.data.AI_USER_MONTHLY_BUDGET_USD,
@@ -135,15 +166,28 @@ export function getAiResearchConfig(
   };
 }
 
+type CurrentAiResearchConfig = ReturnType<typeof getAiResearchConfig>;
+
+export type AiResearchConfig = Omit<
+  CurrentAiResearchConfig,
+  "model" | "pricing" | "pricingVersion"
+> & {
+  model: SupportedResearchModel;
+  pricing:
+    | (typeof activeSupportedModels)[ActiveResearchModel]
+    | (typeof legacySupportedModels)[LegacyResearchModel];
+  pricingVersion: string;
+};
+
 export function getSupportedResearchModels() {
-  return Object.entries(supportedModels).map(([model, pricing]) => ({
-    model: model as SupportedResearchModel,
+  return Object.entries(activeSupportedModels).map(([model, pricing]) => ({
+    model: model as ActiveResearchModel,
     ...pricing,
   }));
 }
 
 export function createQueuedAiGenerationConfig(
-  config: AiResearchConfig,
+  config: CurrentAiResearchConfig,
 ): QueuedAiGenerationConfig {
   return {
     provider: config.provider,
@@ -166,12 +210,23 @@ export function getQueuedAiResearchConfig(
   const requested = queuedAiGenerationConfigSchema.safeParse(value);
   if (!requested.success) throw new AiConfigurationError();
 
-  return getAiResearchConfig({
+  const current = getAiResearchConfig({
     ...environment,
-    OPENAI_RESEARCH_MODEL: requested.data.model,
+    OPENAI_RESEARCH_MODEL: DEFAULT_RESEARCH_MODEL,
     AI_MAX_OUTPUT_TOKENS_PER_CALL: String(
       requested.data.maxOutputTokensPerCall,
     ),
     AI_PROVIDER_TIMEOUT_MS: String(requested.data.providerTimeoutMs),
   });
+  const pricing =
+    requested.data.pricingVersion === AI_PRICING_VERSION
+      ? activeSupportedModels[requested.data.model]
+      : legacySupportedModels[requested.data.model];
+
+  return {
+    ...current,
+    model: requested.data.model,
+    pricing,
+    pricingVersion: requested.data.pricingVersion,
+  } satisfies AiResearchConfig;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { specialistPrompt } from "./prompts";
+import { specialistPrompt, synthesisPrompt } from "./prompts";
 import type { ResearchEvidence } from "./schemas";
 
 const evidence: ResearchEvidence = {
@@ -35,9 +35,27 @@ describe("AI research prompts", () => {
     });
 
     expect(prompt.instructions).toContain("Use only the supplied evidence");
-    expect(prompt.instructions).toContain("never personalize");
+    expect(prompt.instructions).toContain("Never personalize an action");
+    expect(prompt.instructions).toContain("purchasing, acquiring");
+    expect(prompt.instructions).toContain("stock-price target");
+    expect(prompt.instructions).toContain("future price or direction");
     expect(prompt.input).toContain(evidence.id);
     expect(prompt.input).not.toMatch(/portfolioWeight|activeAlerts|userId/);
+  });
+
+  it("applies the explicit action and stock-price prohibitions to synthesis", () => {
+    const prompt = synthesisPrompt({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      asOfDate: "2026-01-02",
+      evidence: [evidence],
+      specialists: [],
+    });
+
+    expect(prompt.instructions).toContain("Never personalize an action");
+    expect(prompt.instructions).toContain("purchasing, acquiring");
+    expect(prompt.instructions).toContain("stock-price target");
+    expect(prompt.instructions).toContain("future price or direction");
   });
 
   it("uses the retrieval-bounded context instead of copying full excerpts", () => {

@@ -127,6 +127,12 @@ describe("public demo read-only components", () => {
     expect(markup).toContain("Read-only sample");
     expect(markup).toContain("Deterministic");
     expect(markup).toContain("Deterministic overview.");
+    expect(markup).toContain(">Summary<");
+    expect(markup).toContain(">Strengths<");
+    expect(markup).toContain(">Risks<");
+    expect(markup).toContain(">What to Watch<");
+    expect(markup).toContain("Evidence / Sources");
+    expect(markup).not.toContain('role="tablist"');
     expect(markup).toContain("Prepared");
     expect(markup).not.toContain("Provider and model");
     expect(markup).not.toContain("AI-generated");

@@ -88,6 +88,7 @@ export class OpenAIResponsesResearchModelProvider implements ResearchModelProvid
   async generate(request: ResearchModelRequest): Promise<ResearchModelResult> {
     const body = this.createRequestBody(request);
     const abort = createAbortContext(request.signal, this.timeoutMs);
+    let responseRequestId: string | null = null;
 
     try {
       const response = await this.fetchImplementation(OPENAI_RESPONSES_URL, {
@@ -100,6 +101,7 @@ export class OpenAIResponsesResearchModelProvider implements ResearchModelProvid
         body: JSON.stringify(body),
         signal: abort.signal,
       });
+      responseRequestId = providerRequestId(response.headers);
 
       return await this.parseResponse(response);
     } catch (error) {
@@ -108,15 +110,18 @@ export class OpenAIResponsesResearchModelProvider implements ResearchModelProvid
       if (abort.didTimeout()) {
         throw new ModelProviderError(ModelProviderErrorCode.TIMEOUT, {
           provider: this.provider,
+          providerRequestId: responseRequestId,
         });
       }
       if (request.signal?.aborted) {
         throw new ModelProviderError(ModelProviderErrorCode.ABORTED, {
           provider: this.provider,
+          providerRequestId: responseRequestId,
         });
       }
       throw new ModelProviderError(ModelProviderErrorCode.NETWORK_ERROR, {
         provider: this.provider,
+        providerRequestId: responseRequestId,
       });
     } finally {
       abort.cleanup();
@@ -245,16 +250,36 @@ export class OpenAIResponsesResearchModelProvider implements ResearchModelProvid
       usage,
       chargeUncertain: usage === undefined,
     };
-    if (payload.status === "incomplete") {
+    const responseModel = rawString(payload, "model");
+    if (responseModel !== this.model) {
+      throw new ModelProviderError(ModelProviderErrorCode.INVALID_RESPONSE, {
+        ...errorOptions,
+        chargeUncertain: true,
+      });
+    }
+    const responseStatus = rawString(payload, "status");
+    if (responseStatus === "incomplete") {
       throw new ModelProviderError(
         ModelProviderErrorCode.INCOMPLETE_RESPONSE,
         errorOptions,
       );
     }
-    if (payload.status === "failed" || payload.status === "cancelled") {
+    if (responseStatus === "failed" || responseStatus === "cancelled") {
       throw new ModelProviderError(
         ModelProviderErrorCode.REQUEST_REJECTED,
         errorOptions,
+      );
+    }
+    if (responseStatus !== "completed") {
+      throw new ModelProviderError(
+        responseStatus === "queued" || responseStatus === "in_progress"
+          ? ModelProviderErrorCode.INCOMPLETE_RESPONSE
+          : ModelProviderErrorCode.INVALID_RESPONSE,
+        {
+          ...errorOptions,
+          // A non-terminal or unknown response may continue accruing usage.
+          chargeUncertain: true,
+        },
       );
     }
 
@@ -283,7 +308,7 @@ export class OpenAIResponsesResearchModelProvider implements ResearchModelProvid
     return {
       output,
       provider: this.provider,
-      model: rawString(payload, "model") ?? this.model,
+      model: responseModel,
       providerRequestId: requestId,
       responseId: rawString(payload, "id"),
       usage,
@@ -373,17 +398,16 @@ function parseUsage(value: unknown): ResearchModelTokenUsage | undefined {
   const outputDetails = isRecord(value.output_tokens_details)
     ? value.output_tokens_details
     : undefined;
+  const cachedInputTokens = nonnegativeInteger(inputDetails?.cached_tokens);
+  const reasoningTokens = nonnegativeInteger(outputDetails?.reasoning_tokens);
+  if (cachedInputTokens === undefined || reasoningTokens === undefined) {
+    return undefined;
+  }
   return {
     inputTokens,
-    cachedInputTokens: Math.min(
-      inputTokens,
-      nonnegativeInteger(inputDetails?.cached_tokens) ?? 0,
-    ),
+    cachedInputTokens,
     outputTokens,
-    reasoningTokens: Math.min(
-      outputTokens,
-      nonnegativeInteger(outputDetails?.reasoning_tokens) ?? 0,
-    ),
+    reasoningTokens,
     totalTokens,
   };
 }

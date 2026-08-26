@@ -509,32 +509,52 @@ export async function runResearch(
     }
   }
 
-  if (config) {
-    const requestedThisMonth = await db.researchJob.count({
-      where: {
-        userId,
-        generationMode: ResearchGenerationMode.EXTERNAL,
-        createdAt: { gte: utcMonthStart(now) },
-        status: { not: ResearchStatus.CANCELLED },
-      },
-    });
-    if (requestedThisMonth >= config.userMonthlyReportLimit) {
-      throw new JobRequestError(
-        JobErrorCode.AI_REPORT_LIMIT_EXCEEDED,
-        429,
-        "Your monthly AI research report limit has been reached.",
-      );
-    }
-  }
-
   const correlationId = randomUUID();
   let job;
   try {
-    job = await db.$transaction(async (transaction) => {
+    const transactionResult = await db.$transaction(async (transaction) => {
       if (config) {
         await transaction.$queryRaw`
           SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE
         `;
+
+        const concurrent = await transaction.researchJob.findFirst({
+          where: {
+            userId,
+            stockId: stock.id,
+            status: {
+              in: [
+                ResearchStatus.PENDING,
+                ResearchStatus.RUNNING,
+                ResearchStatus.PARTIALLY_COMPLETED,
+              ],
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        });
+        if (concurrent) return { job: concurrent, reused: true } as const;
+
+        const dayStart = new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+        );
+        const nextDayStart = new Date(dayStart);
+        nextDayStart.setUTCDate(nextDayStart.getUTCDate() + 1);
+        const requestedForStockToday = await transaction.researchJob.count({
+          where: {
+            userId,
+            stockId: stock.id,
+            generationMode: ResearchGenerationMode.EXTERNAL,
+            createdAt: { gte: dayStart, lt: nextDayStart },
+          },
+        });
+        if (requestedForStockToday >= 1) {
+          throw new JobRequestError(
+            JobErrorCode.AI_DAILY_REPORT_LIMIT_EXCEEDED,
+            429,
+            "A fresh AI research report was already requested for this stock today.",
+          );
+        }
+
         const concurrentMonthlyRequests = await transaction.researchJob.count({
           where: {
             userId,
@@ -576,6 +596,7 @@ export async function runResearch(
           aiCostLimitUsd: config?.maxCostPerJobUsd ?? null,
           correlationId,
           requestedAgents: ALL_AGENT_NAMES.map((name) => AgentName[name]),
+          ...(config ? { createdAt: now } : {}),
         },
       });
       await transaction.agentRun.createMany({
@@ -590,8 +611,20 @@ export async function runResearch(
           agentVersion: config ? "m18-specialist-v1" : "deterministic-v1",
         })),
       });
-      return created;
+      return { job: created, reused: false } as const;
     });
+    if (transactionResult.reused) {
+      return {
+        jobId: transactionResult.job.id,
+        ticker: stock.ticker,
+        companyName: stock.companyName,
+        status: transactionResult.job.status,
+        generationMode: transactionResult.job.generationMode,
+        correlationId: transactionResult.job.correlationId,
+        reused: true,
+      };
+    }
+    job = transactionResult.job;
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

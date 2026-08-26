@@ -37,8 +37,8 @@ export default async function PrivateResearchDetailPage({
           </p>
           <h1 className="mt-2 text-3xl font-semibold">Research run</h1>
           <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-            Check the report&apos;s progress, then review its findings, risks,
-            missing information, and sources.
+            Check the report&apos;s progress, then review its summary,
+            strengths, risks, what to watch, and supporting evidence.
           </p>
         </div>
         <Link

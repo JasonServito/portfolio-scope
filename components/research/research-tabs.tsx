@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -10,31 +10,14 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { AgentResultCard } from "@/components/research/agent-result-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
-  ResearchAgentName,
   ResearchClaim,
   ResearchEvidenceRecord,
   StockResearch,
 } from "@/lib/research/types";
-
-const tabs: { value: string; label: string; agent?: ResearchAgentName }[] = [
-  { value: "overview", label: "Overview" },
-  { value: "news", label: "News", agent: "NEWS" },
-  { value: "financials", label: "Financials", agent: "FINANCIALS" },
-  { value: "competitors", label: "Competitors", agent: "COMPETITORS" },
-  {
-    value: "political",
-    label: "Political Activity",
-    agent: "POLITICAL_ACTIVITY",
-  },
-  { value: "risk", label: "Risk", agent: "RISK" },
-  { value: "sources", label: "Sources" },
-];
 
 function evidenceAnchor(id: string) {
   return `evidence-${id.replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -97,7 +80,7 @@ function ClaimCard({
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">{claim.category.toLowerCase()}</Badge>
         <Badge variant="secondary">
-          {Math.round(claim.confidence * 100)}% confidence
+          {Math.round(claim.confidence * 100)}% reported confidence
         </Badge>
         <span className="text-xs text-muted-foreground">
           As of {formatDate(claim.asOfDate) ?? claim.asOfDate}
@@ -167,32 +150,101 @@ function ClaimCard({
   );
 }
 
-function Overview({
-  onEvidenceSelect,
-  research,
+function ReportListSection({
+  emptyMessage,
+  items,
+  title,
 }: {
-  onEvidenceSelect: (evidenceId: string) => void;
-  research: StockResearch;
+  emptyMessage: string;
+  items: string[];
+  title: string;
 }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle aria-level={3} role="heading">
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {items.length ? (
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            {items.map((item, index) => (
+              <li className="flex gap-2" key={`${item}-${index}`}>
+                <span aria-hidden>•</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WhatToWatch({ research }: { research: StockResearch }) {
+  const groups = [
+    { label: "Counterpoints", items: research.report.bearCase },
+    { label: "Missing information", items: research.report.missingData },
+    {
+      label: "Areas of disagreement",
+      items: research.report.disagreements ?? [],
+    },
+  ].filter((group) => group.items.length);
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle aria-level={3} role="heading">
+          What to Watch
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {groups.length ? (
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {groups.map((group) => (
+              <section key={group.label}>
+                <h4 className="text-sm font-medium">{group.label}</h4>
+                <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+                  {group.items.map((item, index) => (
+                    <li className="flex gap-2" key={`${item}-${index}`}>
+                      <span aria-hidden>•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No additional items were identified from the available evidence.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReportSummary({ research }: { research: StockResearch }) {
   const report = research.report;
   const failedAgents = research.agents.filter(
     (agent) => agent.status === "FAILED",
   );
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-      <Card>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card className="lg:col-span-2">
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Research overview</CardTitle>
-            <div className="flex flex-wrap gap-2">
-              {report.rating ? (
-                <Badge variant="outline">{report.rating.toLowerCase()}</Badge>
-              ) : null}
-              <Badge variant="secondary">
-                {Math.round(report.confidence * 100)}% confidence
-              </Badge>
-            </div>
+            <CardTitle aria-level={3} role="heading">
+              Summary
+            </CardTitle>
+            <Badge variant="secondary">
+              {Math.round(report.confidence * 100)}% reported confidence
+            </Badge>
           </div>
         </CardHeader>
         <CardContent>
@@ -206,30 +258,6 @@ function Overview({
           </p>
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Evidence coverage</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {research.agents
-            .filter((agent) => agent.agentName !== "SYNTHESIS")
-            .map((agent) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                key={agent.agentName}
-              >
-                <span className="text-sm font-medium">
-                  {agent.agentName.toLowerCase().replaceAll("_", " ")}
-                </span>
-                <span className="text-right text-sm text-muted-foreground">
-                  {agent.status === "FAILED"
-                    ? "partial failure"
-                    : `${agent.sources.length} source${agent.sources.length === 1 ? "" : "s"}`}
-                </span>
-              </div>
-            ))}
-        </CardContent>
-      </Card>
 
       {failedAgents.length ? (
         <div
@@ -241,57 +269,22 @@ function Overview({
             className="mt-0.5 size-4 shrink-0"
           />
           This report is partial. {failedAgents.length} topic
-          {failedAgents.length === 1 ? "" : "s"} could not be completed, and
-          the overall confidence reflects the missing information.
+          {failedAgents.length === 1 ? "" : "s"} could not be completed, and the
+          overall reported confidence reflects the missing information.
         </div>
       ) : null}
 
-      {research.claims?.length ? (
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Claims and evidence</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {research.claims.map((claim) => (
-              <ClaimCard
-                claim={claim}
-                key={claim.id}
-                onEvidenceSelect={onEvidenceSelect}
-              />
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {[
-        { title: "Supportive context", items: report.bullCase },
-        { title: "Counterpoints", items: report.bearCase },
-        { title: "Risks", items: report.risks },
-        { title: "Missing data", items: report.missingData },
-        { title: "Disagreements", items: report.disagreements ?? [] },
-      ].map((section) => (
-        <Card key={section.title}>
-          <CardHeader>
-            <CardTitle className="text-base">{section.title}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {section.items.length ? (
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                {section.items.map((item) => (
-                  <li className="flex gap-2" key={item}>
-                    <span aria-hidden>•</span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No items identified.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+      <ReportListSection
+        emptyMessage="No strengths were identified from the available evidence."
+        items={report.bullCase}
+        title="Strengths"
+      />
+      <ReportListSection
+        emptyMessage="No specific risks were identified from the available evidence."
+        items={report.risks}
+        title="Risks"
+      />
+      <WhatToWatch research={research} />
     </div>
   );
 }
@@ -322,9 +315,9 @@ function ReadOnlyResearchTabs({
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center px-6 py-12 text-center">
           <Sparkles aria-hidden="true" className="size-8" />
-          <h3 className="mt-4 text-lg font-semibold">
+          <h2 className="mt-4 text-lg font-semibold">
             Sample research is unavailable
-          </h3>
+          </h2>
           <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
             The public demo is read-only and cannot start a research job. Try
             another company to inspect an available sample report.
@@ -396,9 +389,9 @@ function EditableResearchTabs({
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center px-6 py-12 text-center">
           <Sparkles className="size-8" />
-          <h3 className="mt-4 text-lg font-semibold">
+          <h2 className="mt-4 text-lg font-semibold">
             Research has not been generated
-          </h3>
+          </h2>
           <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
             Start a new research report using the available company information
             and sources.
@@ -536,16 +529,8 @@ function ResearchReportContent({
   error?: string | null;
   research: StockResearch;
 }) {
-  const [activeTab, setActiveTab] = useState("overview");
   const [evidenceTarget, setEvidenceTarget] = useState<string | null>(null);
-  const agentSources = research.agents
-    .filter((agent) => agent.agentName !== "SYNTHESIS")
-    .flatMap((agent) =>
-      agent.sources.map((source) => ({
-        ...source,
-        agentName: agent.agentName,
-      })),
-    );
+  const evidenceDisclosure = useRef<HTMLDetailsElement>(null);
   const evidenceById = new Map<string, ResearchEvidenceRecord>();
   for (const reference of research.evidenceRegistry ?? []) {
     evidenceById.set(reference.id, reference);
@@ -560,10 +545,29 @@ function ResearchReportContent({
     }
   }
   const evidence = [...evidenceById.values()];
+  const evidenceReferences = new Set(
+    evidence.map((reference) => reference.sourceReference),
+  );
+  const additionalSourcesByReference = new Map<
+    string,
+    StockResearch["agents"][number]["sources"][number]
+  >();
+  for (const agent of research.agents) {
+    if (agent.agentName === "SYNTHESIS") continue;
+    for (const source of agent.sources) {
+      if (
+        !evidenceReferences.has(source.reference) &&
+        !additionalSourcesByReference.has(source.reference)
+      ) {
+        additionalSourcesByReference.set(source.reference, source);
+      }
+    }
+  }
+  const additionalSources = [...additionalSourcesByReference.values()];
   const isAiGenerated = research.generationMode === "EXTERNAL";
 
   useEffect(() => {
-    if (activeTab !== "sources" || !evidenceTarget) return;
+    if (!evidenceTarget) return;
     const frame = window.requestAnimationFrame(() => {
       const target = document.getElementById(evidenceAnchor(evidenceTarget));
       target?.focus({ preventScroll: true });
@@ -571,11 +575,13 @@ function ResearchReportContent({
       setEvidenceTarget(null);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activeTab, evidenceTarget]);
+  }, [evidenceTarget]);
 
   function selectEvidence(evidenceId: string) {
+    if (evidenceDisclosure.current) {
+      evidenceDisclosure.current.open = true;
+    }
     setEvidenceTarget(evidenceId);
-    setActiveTab("sources");
   }
 
   return (
@@ -588,14 +594,14 @@ function ResearchReportContent({
             ) : (
               <ShieldCheck aria-hidden="true" className="size-4" />
             )}
-            <p className="font-medium">Stock research report</p>
+            <h2 className="font-medium">Stock research report</h2>
             <Badge variant={isAiGenerated ? "default" : "secondary"}>
               {generationLabel(research)}
             </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review findings, counterpoints, risks, missing information, and
-            supporting sources.
+            Review the summary, strengths, risks, what to watch, and supporting
+            sources.
           </p>
         </div>
         {action}
@@ -609,110 +615,90 @@ function ResearchReportContent({
           {error}
         </div>
       ) : null}
-      <Tabs onValueChange={setActiveTab} value={activeTab}>
-        <div className="overflow-x-auto pb-1">
-          <TabsList className="h-auto min-w-max" variant="line">
-            {tabs.map((tab) => (
-              <TabsTrigger
-                className="px-3 py-2"
-                key={tab.value}
-                value={tab.value}
-              >
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-        <TabsContent value="overview">
-          <Overview onEvidenceSelect={selectEvidence} research={research} />
-        </TabsContent>
-        {tabs
-          .filter((tab) => tab.agent)
-          .map((tab) => {
-            const result = research.agents.find(
-              (agent) => agent.agentName === tab.agent,
-            );
-            return (
-              <TabsContent key={tab.value} value={tab.value}>
-                {result ? (
-                  <AgentResultCard
-                    evidence={evidence}
+      <ReportSummary research={research} />
+      <details
+        className="rounded-xl bg-card ring-1 ring-foreground/10"
+        ref={evidenceDisclosure}
+      >
+        <summary className="cursor-pointer rounded-xl px-4 py-4 font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+          Evidence / Sources
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {evidence.length + additionalSources.length} source
+            {evidence.length + additionalSources.length === 1 ? "" : "s"}
+          </span>
+        </summary>
+        <div className="space-y-6 border-t p-4">
+          <p className="text-sm leading-6 text-muted-foreground">
+            Review the claims and original source details supporting this
+            report. Important claims should be checked against the linked source
+            before relying on them.
+          </p>
+          {research.claims?.length ? (
+            <section>
+              <h3 className="text-sm font-semibold">
+                Claims and supporting evidence
+              </h3>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {research.claims.map((claim) => (
+                  <ClaimCard
+                    claim={claim}
+                    key={claim.id}
                     onEvidenceSelect={selectEvidence}
-                    result={result}
                   />
-                ) : (
-                  <Card className="border-dashed">
-                    <CardContent className="p-8 text-center text-sm text-muted-foreground">
-                      This topic is missing from the report. The gap remains
-                      visible in the overall confidence.
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-            );
-          })}
-        <TabsContent value="sources">
-          <Card>
-            <CardHeader>
-              <CardTitle>Source registry</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {evidence.length ? (
-                <section>
-                  <h3 className="text-sm font-semibold">
-                    Claim-level evidence
-                  </h3>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {evidence.map((reference) => (
-                      <EvidenceReferenceCard
-                        key={reference.id}
-                        reference={reference}
-                        roles={[...(evidenceRoles.get(reference.id) ?? [])]}
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {evidence.length ? (
+            <section>
+              <h3 className="text-sm font-semibold">Source details</h3>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {evidence.map((reference) => (
+                  <EvidenceReferenceCard
+                    key={reference.id}
+                    reference={reference}
+                    roles={[...(evidenceRoles.get(reference.id) ?? [])]}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {additionalSources.length ? (
+            <section>
+              <h3 className="text-sm font-semibold">Additional sources</h3>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {additionalSources.map((source) => (
+                  <article
+                    className="rounded-lg border p-4"
+                    key={source.reference}
+                  >
+                    <div className="flex items-start gap-2">
+                      <BookOpen
+                        aria-hidden="true"
+                        className="mt-0.5 size-4 shrink-0"
                       />
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-              {agentSources.length ? (
-                <section>
-                  <h3 className="text-sm font-semibold">
-                    Additional source summaries
-                  </h3>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {agentSources.map((source, index) => (
-                      <div
-                        className="rounded-lg border p-4"
-                        key={`${source.reference}-${index}`}
-                      >
-                        <Badge variant="outline">
-                          {source.agentName.toLowerCase().replaceAll("_", " ")}
-                        </Badge>
-                        <div className="mt-3 flex items-start gap-2">
-                          <BookOpen className="mt-0.5 size-4 shrink-0" />
-                          <div>
-                            <p className="font-medium">{source.title}</p>
-                            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                              {source.reference}
-                            </p>
-                            <p className="mt-2 text-sm text-muted-foreground">
-                              {source.detail}
-                            </p>
-                          </div>
-                        </div>
+                      <div>
+                        <p className="font-medium">{source.title}</p>
+                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                          {source.reference}
+                        </p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {source.detail}
+                        </p>
                       </div>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-              {!evidence.length && !agentSources.length ? (
-                <p className="text-sm text-muted-foreground">
-                  No sources are available for this report.
-                </p>
-              ) : null}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {!evidence.length && !additionalSources.length ? (
+            <p className="text-sm text-muted-foreground">
+              No sources are available for this report.
+            </p>
+          ) : null}
+        </div>
+      </details>
     </div>
   );
 }

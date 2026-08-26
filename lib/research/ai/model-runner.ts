@@ -152,18 +152,26 @@ export async function runGroundedModelCall<T extends SpecialistModelOutput>(
       });
     } catch (error) {
       if (reservation) {
-        if (error instanceof ModelProviderError && error.usage) {
+        if (error instanceof ModelProviderError && error.chargeUncertain) {
+          await markUnconfirmed(reservation.usageId, error.code, {
+            ...(error.usage
+              ? {
+                  inputTokens: error.usage.inputTokens,
+                  cachedInputTokens: error.usage.cachedInputTokens,
+                  outputTokens: error.usage.outputTokens,
+                  reasoningTokens: error.usage.reasoningTokens,
+                  providerTotalTokens: error.usage.totalTokens,
+                }
+              : {}),
+            providerRequestId: error.providerRequestId ?? null,
+          });
+        } else if (error instanceof ModelProviderError && error.usage) {
           await settle(reservation.usageId, {
             inputTokens: error.usage.inputTokens,
             cachedInputTokens: error.usage.cachedInputTokens,
             outputTokens: error.usage.outputTokens,
-            providerRequestId: error.providerRequestId ?? null,
-          });
-        } else if (
-          error instanceof ModelProviderError &&
-          error.chargeUncertain
-        ) {
-          await markUnconfirmed(reservation.usageId, error.code, {
+            reasoningTokens: error.usage.reasoningTokens,
+            providerTotalTokens: error.usage.totalTokens,
             providerRequestId: error.providerRequestId ?? null,
           });
         } else {
@@ -172,6 +180,12 @@ export async function runGroundedModelCall<T extends SpecialistModelOutput>(
             error instanceof ModelProviderError
               ? error.code
               : "AI_MODEL_PROVIDER_UNKNOWN",
+            {
+              providerRequestId:
+                error instanceof ModelProviderError
+                  ? (error.providerRequestId ?? null)
+                  : null,
+            },
           );
         }
       }
@@ -207,6 +221,8 @@ export async function runGroundedModelCall<T extends SpecialistModelOutput>(
           inputTokens: generated.usage.inputTokens,
           cachedInputTokens: generated.usage.cachedInputTokens,
           outputTokens: generated.usage.outputTokens,
+          reasoningTokens: generated.usage.reasoningTokens,
+          providerTotalTokens: generated.usage.totalTokens,
           providerRequestId: generated.providerRequestId,
         });
       }

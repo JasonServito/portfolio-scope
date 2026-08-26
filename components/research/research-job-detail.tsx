@@ -128,8 +128,8 @@ function JobStatus({ job }: { job: ResearchJobDetailData }) {
         role="status"
       >
         <CheckCircle2 aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        The report is complete. Review its findings, counterpoints, missing
-        information, and sources below.
+        The report is complete. Review its summary, strengths, risks, what to
+        watch, and supporting evidence below.
       </div>
     );
   }

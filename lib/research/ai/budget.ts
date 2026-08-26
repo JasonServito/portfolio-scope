@@ -4,11 +4,16 @@ import {
   AiBudgetScope,
   AiUsageStatus,
   Prisma,
+  ResearchStatus,
   type PrismaClient,
 } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import type { AiResearchConfig } from "@/lib/research/ai/config";
+import {
+  AI_HARD_MAX_COST_PER_JOB_USD,
+  AI_HARD_MAX_TOKENS_PER_JOB,
+  type AiResearchConfig,
+} from "@/lib/research/ai/config";
 
 const USD_SCALE = 1_000_000;
 const GLOBAL_SCOPE_KEY = "GLOBAL";
@@ -45,8 +50,12 @@ export type ActualAiUsage = {
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
+  reasoningTokens: number;
+  providerTotalTokens: number;
   providerRequestId: string | null;
 };
+
+export type AiUsageProviderEvidence = Partial<ActualAiUsage>;
 
 export function utcMonthStart(now = new Date()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -87,6 +96,73 @@ export function calculateAiCostUsd(
 
 function number(value: Prisma.Decimal | number) {
   return typeof value === "number" ? value : value.toNumber();
+}
+
+function safeProviderTokenCount(value: number) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function providerUsageData(actual: ActualAiUsage) {
+  return {
+    inputTokens: safeProviderTokenCount(actual.inputTokens),
+    cachedInputTokens: safeProviderTokenCount(actual.cachedInputTokens),
+    outputTokens: safeProviderTokenCount(actual.outputTokens),
+    reasoningTokens: safeProviderTokenCount(actual.reasoningTokens),
+    providerTotalTokens: safeProviderTokenCount(actual.providerTotalTokens),
+    providerRequestId: actual.providerRequestId,
+  };
+}
+
+function providerUsageEvidenceData(evidence: AiUsageProviderEvidence) {
+  return {
+    ...(evidence.inputTokens === undefined
+      ? {}
+      : { inputTokens: safeProviderTokenCount(evidence.inputTokens) }),
+    ...(evidence.cachedInputTokens === undefined
+      ? {}
+      : {
+          cachedInputTokens: safeProviderTokenCount(evidence.cachedInputTokens),
+        }),
+    ...(evidence.outputTokens === undefined
+      ? {}
+      : { outputTokens: safeProviderTokenCount(evidence.outputTokens) }),
+    ...(evidence.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: safeProviderTokenCount(evidence.reasoningTokens) }),
+    ...(evidence.providerTotalTokens === undefined
+      ? {}
+      : {
+          providerTotalTokens: safeProviderTokenCount(
+            evidence.providerTotalTokens,
+          ),
+        }),
+    ...(evidence.providerRequestId === undefined
+      ? {}
+      : { providerRequestId: evidence.providerRequestId }),
+  };
+}
+
+function providerUsageValidationError(actual: ActualAiUsage) {
+  const counts = [
+    actual.inputTokens,
+    actual.cachedInputTokens,
+    actual.outputTokens,
+    actual.reasoningTokens,
+    actual.providerTotalTokens,
+  ];
+  if (counts.some((value) => safeProviderTokenCount(value) === null)) {
+    return "AI_USAGE_INVALID_PROVIDER_USAGE";
+  }
+  if (
+    actual.cachedInputTokens > actual.inputTokens ||
+    actual.reasoningTokens > actual.outputTokens
+  ) {
+    return "AI_USAGE_INVALID_PROVIDER_USAGE";
+  }
+  if (actual.providerTotalTokens !== actual.inputTokens + actual.outputTokens) {
+    return "AI_USAGE_PROVIDER_TOTAL_MISMATCH";
+  }
+  return null;
 }
 
 async function withSerializableRetry<T>(
@@ -211,6 +287,17 @@ export async function reserveAiUsage(
       );
     }
 
+    const unresolvedUsage = await transaction.aiUsage.findFirst({
+      where: { status: AiUsageStatus.UNCONFIRMED },
+      select: { id: true },
+    });
+    if (unresolvedUsage) {
+      throw new AiBudgetError(
+        "AI_USAGE_RECONCILIATION_REQUIRED",
+        "A prior provider attempt requires cost reconciliation.",
+      );
+    }
+
     const global = await ensureBudgetPeriod(transaction, {
       scope: AiBudgetScope.GLOBAL,
       scopeKey: GLOBAL_SCOPE_KEY,
@@ -243,22 +330,38 @@ export async function reserveAiUsage(
         "This research job does not have an approved AI budget.",
       );
     }
+    if (researchJob.status === ResearchStatus.FAILED) {
+      throw new AiBudgetError(
+        "AI_USAGE_RECONCILIATION_REQUIRED",
+        "The failed research job cannot start another provider attempt.",
+      );
+    }
     const reservedTokens =
       input.reservedInputTokens + input.reservedOutputTokens;
+    const effectiveTokenLimit = Math.min(
+      researchJob.aiTokenLimit,
+      input.config.maxTokensPerJob,
+      AI_HARD_MAX_TOKENS_PER_JOB,
+    );
     if (
       researchJob.aiReservedTokens + researchJob.aiUsedTokens + reservedTokens >
-      researchJob.aiTokenLimit
+      effectiveTokenLimit
     ) {
       throw new AiBudgetError(
         "AI_JOB_TOKEN_LIMIT_EXCEEDED",
         "This research job reached its token limit.",
       );
     }
+    const effectiveCostLimitUsd = Math.min(
+      number(researchJob.aiCostLimitUsd),
+      input.config.maxCostPerJobUsd,
+      AI_HARD_MAX_COST_PER_JOB_USD,
+    );
     if (
       number(researchJob.aiReservedCostUsd) +
         number(researchJob.aiUsedCostUsd) +
         reservedCostUsd >
-      number(researchJob.aiCostLimitUsd) + Number.EPSILON
+      effectiveCostLimitUsd + Number.EPSILON
     ) {
       throw new AiBudgetError(
         "AI_JOB_BUDGET_EXHAUSTED",
@@ -371,27 +474,42 @@ export async function settleAiUsageInTransaction(
 ) {
   const { usage, periods } = await lockUsageAndCounters(transaction, usageId);
   if (usage.status !== AiUsageStatus.RESERVED) return usage;
+  const validationError = providerUsageValidationError(actual);
   const pricing = {
     inputUsdPerMillion: number(usage.inputCostPerMillionUsd),
     cachedInputUsdPerMillion: number(usage.cachedInputCostPerMillionUsd),
     outputUsdPerMillion: number(usage.outputCostPerMillionUsd),
   };
-  const actualCostUsd = calculateAiCostUsd(actual, pricing);
+  const canEstimateCost =
+    safeProviderTokenCount(actual.inputTokens) !== null &&
+    safeProviderTokenCount(actual.cachedInputTokens) !== null &&
+    safeProviderTokenCount(actual.outputTokens) !== null;
+  const actualCostUsd = canEstimateCost
+    ? calculateAiCostUsd(actual, pricing)
+    : null;
+  if (validationError) {
+    return transaction.aiUsage.update({
+      where: { id: usage.id },
+      data: {
+        status: AiUsageStatus.UNCONFIRMED,
+        ...providerUsageData(actual),
+        estimatedCostUsd: actualCostUsd,
+        errorCode: validationError,
+      },
+    });
+  }
   const actualTokens = actual.inputTokens + actual.outputTokens;
   const reservedTokens = usage.reservedInputTokens + usage.reservedOutputTokens;
   if (
     actualTokens > reservedTokens ||
-    actualCostUsd > number(usage.reservedCostUsd) + Number.EPSILON
+    actualCostUsd! > number(usage.reservedCostUsd) + Number.EPSILON
   ) {
     return transaction.aiUsage.update({
       where: { id: usage.id },
       data: {
         status: AiUsageStatus.UNCONFIRMED,
-        inputTokens: actual.inputTokens,
-        cachedInputTokens: actual.cachedInputTokens,
-        outputTokens: actual.outputTokens,
-        estimatedCostUsd: actualCostUsd,
-        providerRequestId: actual.providerRequestId,
+        ...providerUsageData(actual),
+        estimatedCostUsd: actualCostUsd!,
         errorCode: "AI_USAGE_EXCEEDED_RESERVATION",
       },
     });
@@ -402,7 +520,7 @@ export async function settleAiUsageInTransaction(
       where: { id: period.id },
       data: {
         reservedUsd: { decrement: usage.reservedCostUsd },
-        usedUsd: { increment: actualCostUsd },
+        usedUsd: { increment: actualCostUsd! },
       },
     });
   }
@@ -413,7 +531,7 @@ export async function settleAiUsageInTransaction(
         aiReservedTokens: { decrement: reservedTokens },
         aiUsedTokens: { increment: actualTokens },
         aiReservedCostUsd: { decrement: usage.reservedCostUsd },
-        aiUsedCostUsd: { increment: actualCostUsd },
+        aiUsedCostUsd: { increment: actualCostUsd! },
       },
     });
   }
@@ -421,11 +539,8 @@ export async function settleAiUsageInTransaction(
     where: { id: usage.id },
     data: {
       status: AiUsageStatus.SETTLED,
-      inputTokens: actual.inputTokens,
-      cachedInputTokens: actual.cachedInputTokens,
-      outputTokens: actual.outputTokens,
-      estimatedCostUsd: actualCostUsd,
-      providerRequestId: actual.providerRequestId,
+      ...providerUsageData(actual),
+      estimatedCostUsd: actualCostUsd!,
       settledAt: new Date(),
     },
   });
@@ -439,13 +554,10 @@ export async function settleAiUsage(
   const usage = await withSerializableRetry(database, (transaction) =>
     settleAiUsageInTransaction(transaction, usageId, actual),
   );
-  if (
-    usage.status === AiUsageStatus.UNCONFIRMED &&
-    usage.errorCode === "AI_USAGE_EXCEEDED_RESERVATION"
-  ) {
+  if (usage.status === AiUsageStatus.UNCONFIRMED) {
     throw new AiBudgetError(
       "AI_USAGE_RECONCILIATION_REQUIRED",
-      "Provider usage exceeded its conservative reservation.",
+      "Provider usage requires reconciliation.",
     );
   }
   return usage;
@@ -454,6 +566,7 @@ export async function settleAiUsage(
 export async function releaseAiUsage(
   usageId: string,
   errorCode: string,
+  evidence: AiUsageProviderEvidence = {},
   database: BudgetDatabase = db,
 ) {
   return withSerializableRetry(database, async (transaction) => {
@@ -481,6 +594,7 @@ export async function releaseAiUsage(
       data: {
         status: AiUsageStatus.RELEASED,
         errorCode,
+        providerRequestId: evidence.providerRequestId,
         settledAt: new Date(),
       },
     });
@@ -490,19 +604,43 @@ export async function releaseAiUsage(
 export async function markAiUsageUnconfirmed(
   usageId: string,
   errorCode: string,
-  evidence: { providerRequestId?: string | null } = {},
+  evidence: AiUsageProviderEvidence = {},
   database: BudgetDatabase = db,
 ) {
-  return database.$transaction((transaction) =>
-    transaction.aiUsage.updateMany({
-      where: { id: usageId, status: AiUsageStatus.RESERVED },
+  return withSerializableRetry(database, async (transaction) => {
+    await transaction.$queryRaw`
+      SELECT "id" FROM "AiUsage" WHERE "id" = ${usageId} FOR UPDATE
+    `;
+    const usage = await transaction.aiUsage.findUnique({
+      where: { id: usageId },
+    });
+    if (!usage || usage.status !== AiUsageStatus.RESERVED) return usage;
+
+    const canEstimateCost =
+      evidence.inputTokens !== undefined &&
+      evidence.cachedInputTokens !== undefined &&
+      evidence.outputTokens !== undefined &&
+      safeProviderTokenCount(evidence.inputTokens) !== null &&
+      safeProviderTokenCount(evidence.cachedInputTokens) !== null &&
+      safeProviderTokenCount(evidence.outputTokens) !== null;
+    const estimatedCostUsd = canEstimateCost
+      ? calculateAiCostUsd(evidence as ActualAiUsage, {
+          inputUsdPerMillion: number(usage.inputCostPerMillionUsd),
+          cachedInputUsdPerMillion: number(usage.cachedInputCostPerMillionUsd),
+          outputUsdPerMillion: number(usage.outputCostPerMillionUsd),
+        })
+      : undefined;
+
+    return transaction.aiUsage.update({
+      where: { id: usage.id },
       data: {
         status: AiUsageStatus.UNCONFIRMED,
         errorCode,
-        providerRequestId: evidence.providerRequestId,
+        ...providerUsageEvidenceData(evidence),
+        ...(estimatedCostUsd === undefined ? {} : { estimatedCostUsd }),
       },
-    }),
-  );
+    });
+  });
 }
 
 export async function getUserAiUsageSummary(userId: string, now = new Date()) {

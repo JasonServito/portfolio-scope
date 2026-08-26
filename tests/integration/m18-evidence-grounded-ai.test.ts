@@ -2,12 +2,22 @@ import { randomUUID } from "node:crypto";
 
 import {
   AgentName,
+  AgentStatus,
   ResearchGenerationMode,
   ResearchStatus,
 } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { db } from "@/lib/db";
+import { JobErrorCode } from "@/lib/jobs/errors";
 import type { JobPublisher } from "@/lib/jobs/qstash";
 import {
   executeResearchAgent,
@@ -15,6 +25,7 @@ import {
 } from "@/lib/research/background";
 import {
   AiBudgetError,
+  markAiUsageUnconfirmed,
   releaseAiUsage,
   reserveAiUsage,
   settleAiUsage,
@@ -58,7 +69,11 @@ const ids = {
   otherUser: `${prefix}-other-user`,
   budgetUserA: `${prefix}-budget-user-a`,
   budgetUserB: `${prefix}-budget-user-b`,
+  dailyUser: `${prefix}-daily-user`,
   dedupeUser: `${prefix}-dedupe-user`,
+  faultReservedUser: `${prefix}-fault-reserved-user`,
+  faultSpecialistUser: `${prefix}-fault-specialist-user`,
+  faultSynthesisUser: `${prefix}-fault-synthesis-user`,
   meteredUser: `${prefix}-metered-user`,
   stock: `${prefix}-stock`,
   portfolio: `${prefix}-portfolio`,
@@ -68,13 +83,18 @@ const fixtureUserIds = [
   ids.otherUser,
   ids.budgetUserA,
   ids.budgetUserB,
+  ids.dailyUser,
   ids.dedupeUser,
+  ids.faultReservedUser,
+  ids.faultSpecialistUser,
+  ids.faultSynthesisUser,
   ids.meteredUser,
 ];
 const baseYear = 2100 + (Number.parseInt(runId.slice(0, 4), 16) % 6_000);
 const baseMonth = Number.parseInt(runId.slice(4, 6), 16) % 9;
-const budgetMonths = [0, 1, 2, 3, 4, 5].map(
-  (offset) => new Date(Date.UTC(baseYear, baseMonth + offset, 1)),
+const budgetMonths = Array.from(
+  { length: 19 },
+  (_, offset) => new Date(Date.UTC(baseYear, baseMonth + offset, 1)),
 );
 const meteredBudgetMonth = budgetMonths[3];
 
@@ -85,7 +105,7 @@ const environment = {
   RESEARCH_GENERATION_ENABLED: "true",
   AI_RESEARCH_ENABLED: "true",
   OPENAI_API_KEY: "recorded-provider-only-no-network",
-  OPENAI_RESEARCH_MODEL: "gpt-5-mini-2025-08-07",
+  OPENAI_RESEARCH_MODEL: "gpt-5.4-mini-2026-03-17",
   AI_MONTHLY_BUDGET_USD: "5",
   AI_USER_MONTHLY_BUDGET_USD: "1",
   AI_MAX_COST_PER_JOB_USD: "0.25",
@@ -356,6 +376,8 @@ function recordedProvider() {
 
 function zeroNetworkMeteredProvider(
   outputs: Array<SpecialistModelOutput | SynthesisModelOutput>,
+  afterGenerate?: () => void | Promise<void>,
+  requestNamespace = "metered",
 ) {
   let index = 0;
   const generate = vi.fn<ResearchModelProvider["generate"]>(async () => {
@@ -364,26 +386,96 @@ function zeroNetworkMeteredProvider(
     if (!output) {
       throw new Error("The zero-network metered fixture was exhausted.");
     }
+    await afterGenerate?.();
     return {
       output,
       provider: "openai",
-      model: "gpt-5-mini-2025-08-07",
-      providerRequestId: `${prefix}-metered-${index}`,
-      responseId: `${prefix}-response-${index}`,
+      model: "gpt-5.4-mini-2026-03-17",
+      providerRequestId: `${prefix}-${requestNamespace}-${index}`,
+      responseId: `${prefix}-${requestNamespace}-response-${index}`,
       usage: {
         inputTokens: 100,
         cachedInputTokens: 0,
         outputTokens: 50,
-        reasoningTokens: 0,
+        reasoningTokens: 10,
         totalTokens: 150,
       },
     };
   });
   return {
     provider: "openai",
-    model: "gpt-5-mini-2025-08-07",
+    model: "gpt-5.4-mini-2026-03-17",
     generate,
   } satisfies ResearchModelProvider;
+}
+
+const originalDbTransaction = db.$transaction.bind(db);
+
+function rejectNextDbTransactions(errors: Error[]) {
+  let nextError = 0;
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    Object.defineProperty(db, "$transaction", {
+      configurable: true,
+      writable: true,
+      value: originalDbTransaction,
+    });
+  };
+  const transaction = ((...args: unknown[]) => {
+    const error = errors[nextError];
+    if (error) {
+      nextError += 1;
+      if (nextError === errors.length) restore();
+      return Promise.reject(error);
+    }
+    return Reflect.apply(originalDbTransaction, undefined, args);
+  }) as typeof db.$transaction;
+
+  Object.defineProperty(db, "$transaction", {
+    configurable: true,
+    writable: true,
+    value: transaction,
+  });
+
+  return restore;
+}
+
+async function queueExternalResearch(userId: string, now: Date) {
+  const queued = await runResearch(userId, ticker, {
+    publisher,
+    environment,
+    now: () => now,
+    prepareSnapshot: async () => snapshot,
+  });
+  if (!queued || !("jobId" in queued)) {
+    throw new Error("The fault-injection research job was not queued.");
+  }
+  return queued;
+}
+
+async function completeSpecialistFixtures(
+  researchJobId: string,
+  except?: (typeof SPECIALIST_AGENT_NAMES)[number],
+) {
+  await db.agentRun.updateMany({
+    where: {
+      researchJobId,
+      agentName: {
+        in: SPECIALIST_AGENT_NAMES.filter((agentName) => agentName !== except),
+      },
+    },
+    data: {
+      status: AgentStatus.COMPLETED,
+      rating: "NEUTRAL",
+      confidence: financialOutput.confidence,
+      summary: financialOutput.summary,
+      claimsJson: financialOutput.claims,
+      missingDataJson: [],
+      completedAt: new Date(),
+    },
+  });
 }
 
 async function cleanup() {
@@ -482,6 +574,14 @@ beforeAll(async () => {
 });
 
 afterAll(cleanup);
+afterEach(async () => {
+  await db.aiUsage.deleteMany({
+    where: {
+      userId: { in: fixtureUserIds },
+      status: "UNCONFIRMED",
+    },
+  });
+});
 
 describe("M18 recorded evidence-grounded research", () => {
   it("persists an external specialist-to-synthesis run with immutable public citations and no private prompt data", async () => {
@@ -589,8 +689,7 @@ describe("M18 recorded evidence-grounded research", () => {
     expect(stored.report?.claims).toHaveLength(3);
     expect(
       stored.report?.claims.every(
-        (claim) =>
-          claim.asOfDate.toISOString().slice(0, 10) === stableAsOfDate,
+        (claim) => claim.asOfDate.toISOString().slice(0, 10) === stableAsOfDate,
       ),
     ).toBe(true);
 
@@ -813,17 +912,29 @@ describe("M18 recorded evidence-grounded research", () => {
     ]);
     expect(usages).toHaveLength(4);
     expect(usages.every((usage) => usage.status === "SETTLED")).toBe(true);
+    expect(
+      usages.every(
+        (usage) =>
+          usage.reasoningTokens === 10 && usage.providerTotalTokens === 150,
+      ),
+    ).toBe(true);
+    expect(usages.map((usage) => usage.providerRequestId)).toEqual([
+      `${prefix}-metered-1`,
+      `${prefix}-metered-2`,
+      `${prefix}-metered-3`,
+      `${prefix}-metered-4`,
+    ]);
     expect(job.aiReservedTokens).toBe(0);
     expect(job.aiReservedCostUsd.toNumber()).toBe(0);
     expect(job.aiUsedTokens).toBe(600);
-    expect(job.aiUsedCostUsd.toNumber()).toBe(0.0005);
+    expect(job.aiUsedCostUsd.toNumber()).toBe(0.0012);
     expect(report.inputTokens).toBe(400);
     expect(report.outputTokens).toBe(200);
-    expect(report.estimatedCostUsd?.toNumber()).toBe(0.0005);
+    expect(report.estimatedCostUsd?.toNumber()).toBe(0.0012);
     expect(userBudget.reservedUsd.toNumber()).toBe(0);
-    expect(userBudget.usedUsd.toNumber()).toBe(0.0005);
+    expect(userBudget.usedUsd.toNumber()).toBe(0.0012);
     expect(globalBudget.reservedUsd.toNumber()).toBe(0);
-    expect(globalBudget.usedUsd.toNumber()).toBeGreaterThanOrEqual(0.0005);
+    expect(globalBudget.usedUsd.toNumber()).toBeGreaterThanOrEqual(0.0012);
   });
 
   it("deduplicates concurrent active requests before specialist fan-out", async () => {
@@ -867,6 +978,405 @@ describe("M18 recorded evidence-grounded research", () => {
         },
       }),
     ).resolves.toBe(SPECIALIST_AGENT_NAMES.length);
+  });
+
+  it("allows only one fresh external report per user and stock per UTC day", async () => {
+    const firstDay = new Date(Date.UTC(baseYear, baseMonth, 10, 12));
+    const sameDay = new Date(Date.UTC(baseYear, baseMonth, 10, 20));
+    const nextDay = new Date(Date.UTC(baseYear, baseMonth, 11, 12));
+    const dayAfterNext = new Date(Date.UTC(baseYear, baseMonth, 12));
+    const changedSnapshot = withSnapshotIntegrity({
+      ...snapshot,
+      missingMetrics: [...snapshot.missingMetrics, "OPERATING_CASH_FLOW"],
+    });
+
+    const first = await runResearch(ids.dailyUser, ticker, {
+      publisher,
+      environment,
+      now: () => firstDay,
+      prepareSnapshot: async () => snapshot,
+    });
+    if (!first || !("jobId" in first)) {
+      throw new Error("The first daily-policy research job was not queued.");
+    }
+    await db.$transaction([
+      db.researchJob.update({
+        where: { id: first.jobId },
+        data: { status: ResearchStatus.COMPLETED, completedAt: firstDay },
+      }),
+      db.researchReport.create({
+        data: {
+          researchJobId: first.jobId,
+          stockId: ids.stock,
+          overview: "A reusable external research fixture.",
+          bullCaseJson: [],
+          bearCaseJson: [],
+          risksJson: [],
+          missingDataJson: [],
+          confidence: 0.5,
+          generatedAt: firstDay,
+          expiresAt: new Date(Date.UTC(baseYear, baseMonth + 1, 10, 12)),
+        },
+      }),
+    ]);
+
+    await expect(
+      runResearch(ids.dailyUser, ticker, {
+        publisher,
+        environment,
+        now: () => sameDay,
+        prepareSnapshot: async () => snapshot,
+      }),
+    ).resolves.toMatchObject({ jobId: first.jobId, reused: true });
+
+    await expect(
+      runResearch(ids.dailyUser, ticker, {
+        publisher,
+        environment,
+        now: () => sameDay,
+        regenerate: true,
+        prepareSnapshot: async () => snapshot,
+      }),
+    ).rejects.toMatchObject({
+      code: JobErrorCode.AI_DAILY_REPORT_LIMIT_EXCEEDED,
+      status: 429,
+    });
+    await expect(
+      runResearch(ids.dailyUser, ticker, {
+        publisher,
+        environment,
+        now: () => sameDay,
+        prepareSnapshot: async () => changedSnapshot,
+      }),
+    ).rejects.toMatchObject({
+      code: JobErrorCode.AI_DAILY_REPORT_LIMIT_EXCEEDED,
+      status: 429,
+    });
+
+    const nextDayResults = await Promise.all([
+      runResearch(ids.dailyUser, ticker, {
+        publisher,
+        environment,
+        now: () => nextDay,
+        regenerate: true,
+        prepareSnapshot: async () => snapshot,
+      }),
+      runResearch(ids.dailyUser, ticker, {
+        publisher,
+        environment,
+        now: () => nextDay,
+        regenerate: true,
+        prepareSnapshot: async () => snapshot,
+      }),
+    ]);
+    if (nextDayResults.some((result) => !result || !("jobId" in result))) {
+      throw new Error("The next-day research requests did not return job ids.");
+    }
+    const queuedNextDayResults = nextDayResults as Array<{
+      jobId: string;
+      reused: boolean;
+    }>;
+    const [firstNextDay, secondNextDay] = queuedNextDayResults;
+    expect(firstNextDay.jobId).toBe(secondNextDay.jobId);
+    expect(firstNextDay.jobId).not.toBe(first.jobId);
+    expect(queuedNextDayResults.filter((result) => result.reused)).toHaveLength(
+      1,
+    );
+    await expect(
+      db.researchJob.count({
+        where: {
+          userId: ids.dailyUser,
+          stockId: ids.stock,
+          generationMode: ResearchGenerationMode.EXTERNAL,
+          createdAt: { gte: nextDay, lt: dayAfterNext },
+          status: { not: ResearchStatus.CANCELLED },
+        },
+      }),
+    ).resolves.toBe(1);
+    await expect(
+      db.backgroundJob.count({
+        where: {
+          researchJobId: firstNextDay.jobId,
+          type: "RESEARCH_AGENT_RUN",
+        },
+      }),
+    ).resolves.toBe(SPECIALIST_AGENT_NAMES.length);
+
+    await db.researchJob.update({
+      where: { id: firstNextDay.jobId },
+      data: { status: ResearchStatus.CANCELLED },
+    });
+    await expect(
+      runResearch(ids.dailyUser, ticker, {
+        publisher,
+        environment,
+        now: () => new Date(Date.UTC(baseYear, baseMonth, 11, 20)),
+        regenerate: true,
+        prepareSnapshot: async () => snapshot,
+      }),
+    ).rejects.toMatchObject({
+      code: JobErrorCode.AI_DAILY_REPORT_LIMIT_EXCEEDED,
+      status: 429,
+    });
+  });
+
+  it("retains charged specialist usage when result persistence fails", async () => {
+    const now = budgetMonths[13];
+    const config = getAiResearchConfig(environment);
+    const queued = await queueExternalResearch(ids.faultSpecialistUser, now);
+    await completeSpecialistFixtures(queued.jobId, AgentName.FINANCIALS);
+
+    let restoreTransaction = () => {};
+    const provider = zeroNetworkMeteredProvider(
+      [financialOutput],
+      () => {
+        restoreTransaction = rejectNextDbTransactions([
+          new Error("Injected specialist persistence failure."),
+        ]);
+      },
+      "fault-specialist",
+    );
+    try {
+      await expect(
+        executeResearchAgent(
+          {
+            researchJobId: queued.jobId,
+            agentName: AgentName.FINANCIALS,
+            userId: ids.faultSpecialistUser,
+            correlationId: queued.correlationId!,
+            attemptNumber: 1,
+            maxAttempts: 3,
+          },
+          {
+            provider,
+            config,
+            environment,
+            publisher,
+            now: () => now,
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "AI_USAGE_RECONCILIATION_REQUIRED",
+        retryable: false,
+      });
+    } finally {
+      restoreTransaction();
+    }
+
+    const [usage, agentRun, researchJob] = await Promise.all([
+      db.aiUsage.findFirstOrThrow({
+        where: {
+          researchJobId: queued.jobId,
+          operation: "SPECIALIST_FINANCIALS",
+        },
+      }),
+      db.agentRun.findUniqueOrThrow({
+        where: {
+          researchJobId_agentName: {
+            researchJobId: queued.jobId,
+            agentName: AgentName.FINANCIALS,
+          },
+        },
+      }),
+      db.researchJob.findUniqueOrThrow({ where: { id: queued.jobId } }),
+    ]);
+    expect(usage).toMatchObject({
+      status: "UNCONFIRMED",
+      errorCode: "AI_USAGE_PERSISTENCE_FAILED",
+      inputTokens: 100,
+      cachedInputTokens: 0,
+      outputTokens: 50,
+      reasoningTokens: 10,
+      providerTotalTokens: 150,
+      providerRequestId: `${prefix}-fault-specialist-1`,
+    });
+    expect(usage.estimatedCostUsd?.toNumber()).toBe(0.0003);
+    expect(agentRun).toMatchObject({ status: AgentStatus.FAILED });
+    expect(agentRun.completedAt).toBeInstanceOf(Date);
+    expect(researchJob).toMatchObject({ status: ResearchStatus.FAILED });
+    expect(researchJob.completedAt).toBeInstanceOf(Date);
+
+    await expect(
+      executeResearchAgent(
+        {
+          researchJobId: queued.jobId,
+          agentName: AgentName.FINANCIALS,
+          userId: ids.faultSpecialistUser,
+          correlationId: queued.correlationId!,
+          attemptNumber: 2,
+          maxAttempts: 3,
+        },
+        { provider, config, environment, publisher, now: () => now },
+      ),
+    ).rejects.toMatchObject({ code: "RESEARCH_JOB_FAILED", retryable: false });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    await expect(
+      db.aiUsage.count({ where: { researchJobId: queued.jobId } }),
+    ).resolves.toBe(1);
+  });
+
+  it("blocks a specialist retry when charged-result reconciliation writes also fail", async () => {
+    const now = budgetMonths[17];
+    const config = getAiResearchConfig(environment);
+    const queued = await queueExternalResearch(ids.faultSpecialistUser, now);
+    await completeSpecialistFixtures(queued.jobId, AgentName.FINANCIALS);
+
+    let restoreTransaction = () => {};
+    const provider = zeroNetworkMeteredProvider(
+      [financialOutput],
+      () => {
+        restoreTransaction = rejectNextDbTransactions([
+          new Error("Injected specialist persistence failure."),
+          new Error("Injected reconciliation persistence failure."),
+          new Error("Injected terminal-state persistence failure."),
+        ]);
+      },
+      "fault-reserved",
+    );
+    try {
+      await expect(
+        executeResearchAgent(
+          {
+            researchJobId: queued.jobId,
+            agentName: AgentName.FINANCIALS,
+            userId: ids.faultSpecialistUser,
+            correlationId: queued.correlationId!,
+            attemptNumber: 1,
+            maxAttempts: 3,
+          },
+          { provider, config, environment, publisher, now: () => now },
+        ),
+      ).rejects.toMatchObject({
+        code: "AI_USAGE_RECONCILIATION_REQUIRED",
+        retryable: false,
+      });
+    } finally {
+      restoreTransaction();
+    }
+
+    await expect(
+      db.aiUsage.findFirstOrThrow({
+        where: {
+          researchJobId: queued.jobId,
+          operation: "SPECIALIST_FINANCIALS",
+        },
+      }),
+    ).resolves.toMatchObject({ status: "RESERVED" });
+
+    await expect(
+      executeResearchAgent(
+        {
+          researchJobId: queued.jobId,
+          agentName: AgentName.FINANCIALS,
+          userId: ids.faultSpecialistUser,
+          correlationId: queued.correlationId!,
+          attemptNumber: 2,
+          maxAttempts: 3,
+        },
+        { provider, config, environment, publisher, now: () => now },
+      ),
+    ).rejects.toMatchObject({
+      code: "AI_USAGE_RECONCILIATION_REQUIRED",
+      retryable: false,
+    });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    await expect(
+      db.agentRun.findUniqueOrThrow({
+        where: {
+          researchJobId_agentName: {
+            researchJobId: queued.jobId,
+            agentName: AgentName.FINANCIALS,
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ status: AgentStatus.FAILED });
+    await expect(
+      db.researchJob.findUniqueOrThrow({ where: { id: queued.jobId } }),
+    ).resolves.toMatchObject({ status: ResearchStatus.FAILED });
+  });
+
+  it("retains charged synthesis usage when report persistence fails", async () => {
+    const now = budgetMonths[14];
+    const config = getAiResearchConfig(environment);
+    const queued = await queueExternalResearch(ids.faultSynthesisUser, now);
+    await completeSpecialistFixtures(queued.jobId);
+
+    let restoreTransaction = () => {};
+    const provider = zeroNetworkMeteredProvider(
+      [synthesisOutput],
+      () => {
+        restoreTransaction = rejectNextDbTransactions([
+          new Error("Injected synthesis persistence failure."),
+        ]);
+      },
+      "fault-synthesis",
+    );
+    try {
+      await expect(
+        executeResearchSynthesis(
+          {
+            researchJobId: queued.jobId,
+            userId: ids.faultSynthesisUser,
+            attemptNumber: 1,
+            maxAttempts: 3,
+          },
+          { provider, config, environment, publisher, now: () => now },
+        ),
+      ).rejects.toMatchObject({
+        code: "AI_USAGE_RECONCILIATION_REQUIRED",
+        retryable: false,
+      });
+    } finally {
+      restoreTransaction();
+    }
+
+    const [usage, synthesisRun, researchJob, report] = await Promise.all([
+      db.aiUsage.findFirstOrThrow({
+        where: { researchJobId: queued.jobId, operation: "SYNTHESIS" },
+      }),
+      db.agentRun.findUniqueOrThrow({
+        where: {
+          researchJobId_agentName: {
+            researchJobId: queued.jobId,
+            agentName: AgentName.SYNTHESIS,
+          },
+        },
+      }),
+      db.researchJob.findUniqueOrThrow({ where: { id: queued.jobId } }),
+      db.researchReport.findUnique({ where: { researchJobId: queued.jobId } }),
+    ]);
+    expect(usage).toMatchObject({
+      status: "UNCONFIRMED",
+      errorCode: "AI_USAGE_PERSISTENCE_FAILED",
+      inputTokens: 100,
+      cachedInputTokens: 0,
+      outputTokens: 50,
+      reasoningTokens: 10,
+      providerTotalTokens: 150,
+      providerRequestId: `${prefix}-fault-synthesis-1`,
+    });
+    expect(usage.estimatedCostUsd?.toNumber()).toBe(0.0003);
+    expect(synthesisRun).toMatchObject({ status: AgentStatus.FAILED });
+    expect(synthesisRun.completedAt).toBeInstanceOf(Date);
+    expect(researchJob).toMatchObject({ status: ResearchStatus.FAILED });
+    expect(researchJob.completedAt).toBeInstanceOf(Date);
+    expect(report).toBeNull();
+
+    await expect(
+      executeResearchSynthesis(
+        {
+          researchJobId: queued.jobId,
+          userId: ids.faultSynthesisUser,
+          attemptNumber: 2,
+          maxAttempts: 3,
+        },
+        { provider, config, environment, publisher, now: () => now },
+      ),
+    ).rejects.toMatchObject({ code: "RESEARCH_JOB_FAILED", retryable: false });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    await expect(
+      db.aiUsage.count({ where: { researchJobId: queued.jobId } }),
+    ).resolves.toBe(1);
   });
 });
 
@@ -947,9 +1457,9 @@ function assertOneReservation(
 describe("M18 atomic AI budget enforcement", () => {
   it("allows only one concurrent reservation within a per-job cost cap", async () => {
     const now = budgetMonths[0];
-    const config = budgetConfig({ global: 0.01, user: 0.01, job: 0.000003 });
+    const config = budgetConfig({ global: 0.01, user: 0.01, job: 0.000006 });
     const job = await createBudgetJob(ids.budgetUserA, "job-cap", {
-      cost: 0.000003,
+      cost: 0.000006,
     });
     const results = await Promise.allSettled([
       reserve(ids.budgetUserA, job.id, "job-cap-a", now, config),
@@ -957,26 +1467,26 @@ describe("M18 atomic AI budget enforcement", () => {
     ]);
 
     const accepted = assertOneReservation(results, "AI_JOB_BUDGET_EXHAUSTED");
-    expect(accepted.reservedCostUsd).toBe(0.000003);
+    expect(accepted.reservedCostUsd).toBe(0.000006);
     await expect(
       db.researchJob.findUnique({ where: { id: job.id } }),
     ).resolves.toMatchObject({ aiReservedTokens: 2 });
     const stored = await db.researchJob.findUniqueOrThrow({
       where: { id: job.id },
     });
-    expect(stored.aiReservedCostUsd.toNumber()).toBe(0.000003);
+    expect(stored.aiReservedCostUsd.toNumber()).toBe(0.000006);
   });
 
   it("allows only one concurrent reservation across a user's jobs", async () => {
     const now = budgetMonths[1];
     const config = budgetConfig({
       global: 0.01,
-      user: 0.000003,
-      job: 0.000003,
+      user: 0.000006,
+      job: 0.000006,
     });
     const [jobA, jobB] = await Promise.all([
-      createBudgetJob(ids.budgetUserA, "user-cap-a", { cost: 0.000003 }),
-      createBudgetJob(ids.budgetUserA, "user-cap-b", { cost: 0.000003 }),
+      createBudgetJob(ids.budgetUserA, "user-cap-a", { cost: 0.000006 }),
+      createBudgetJob(ids.budgetUserA, "user-cap-b", { cost: 0.000006 }),
     ]);
     const results = await Promise.allSettled([
       reserve(ids.budgetUserA, jobA.id, "user-cap-a", now, config),
@@ -989,20 +1499,20 @@ describe("M18 atomic AI budget enforcement", () => {
         scopeKey_periodStart: { scopeKey: ids.budgetUserA, periodStart: now },
       },
     });
-    expect(period.reservedUsd.toNumber()).toBe(0.000003);
+    expect(period.reservedUsd.toNumber()).toBe(0.000006);
     expect(period.usedUsd.toNumber()).toBe(0);
   });
 
   it("allows only one concurrent reservation across users at the global cap", async () => {
     const now = budgetMonths[2];
     const config = budgetConfig({
-      global: 0.000003,
-      user: 0.000003,
-      job: 0.000003,
+      global: 0.000006,
+      user: 0.000006,
+      job: 0.000006,
     });
     const [jobA, jobB] = await Promise.all([
-      createBudgetJob(ids.budgetUserA, "global-cap-a", { cost: 0.000003 }),
-      createBudgetJob(ids.budgetUserB, "global-cap-b", { cost: 0.000003 }),
+      createBudgetJob(ids.budgetUserA, "global-cap-a", { cost: 0.000006 }),
+      createBudgetJob(ids.budgetUserB, "global-cap-b", { cost: 0.000006 }),
     ]);
     const results = await Promise.allSettled([
       reserve(ids.budgetUserA, jobA.id, "global-cap-a", now, config),
@@ -1015,7 +1525,7 @@ describe("M18 atomic AI budget enforcement", () => {
         scopeKey_periodStart: { scopeKey: "GLOBAL", periodStart: now },
       },
     });
-    expect(period.reservedUsd.toNumber()).toBe(0.000003);
+    expect(period.reservedUsd.toNumber()).toBe(0.000006);
     expect(period.usedUsd.toNumber()).toBe(0);
   });
 
@@ -1029,6 +1539,27 @@ describe("M18 atomic AI budget enforcement", () => {
       createBudgetJob(ids.budgetUserA, "overage", { cost: 0.01 }),
       createBudgetJob(ids.budgetUserB, "release", { cost: 0.01 }),
     ]);
+    const released = await reserve(
+      ids.budgetUserB,
+      releaseJob.id,
+      "release",
+      budgetMonths[5],
+      config,
+    );
+    await releaseAiUsage(released.usageId, "AI_MODEL_PROVIDER_CONFIGURATION", {
+      providerRequestId: `${prefix}-released-request`,
+    });
+    await expect(
+      db.aiUsage.findUniqueOrThrow({ where: { id: released.usageId } }),
+    ).resolves.toMatchObject({
+      status: "RELEASED",
+      errorCode: "AI_MODEL_PROVIDER_CONFIGURATION",
+      providerRequestId: `${prefix}-released-request`,
+    });
+    await expect(
+      db.researchJob.findUniqueOrThrow({ where: { id: releaseJob.id } }),
+    ).resolves.toMatchObject({ aiReservedTokens: 0 });
+
     const overage = await reserve(
       ids.budgetUserA,
       overageJob.id,
@@ -1041,6 +1572,8 @@ describe("M18 atomic AI budget enforcement", () => {
         inputTokens: 2,
         cachedInputTokens: 0,
         outputTokens: 1,
+        reasoningTokens: 1,
+        providerTotalTokens: 3,
         providerRequestId: `${prefix}-overage`,
       }),
     ).rejects.toMatchObject({ code: "AI_USAGE_RECONCILIATION_REQUIRED" });
@@ -1053,28 +1586,219 @@ describe("M18 atomic AI budget enforcement", () => {
       inputTokens: 2,
       cachedInputTokens: 0,
       outputTokens: 1,
+      reasoningTokens: 1,
+      providerTotalTokens: 3,
       providerRequestId: `${prefix}-overage`,
     });
-    expect(unconfirmed.estimatedCostUsd?.toNumber()).toBe(0.000003);
+    expect(unconfirmed.estimatedCostUsd?.toNumber()).toBe(0.000006);
+  });
 
-    const released = await reserve(
-      ids.budgetUserB,
-      releaseJob.id,
-      "release",
+  it("blocks every later reservation while any provider usage is unconfirmed", async () => {
+    const config = budgetConfig({ global: 0.01, user: 0.01, job: 0.01 });
+    const [unconfirmedJob, laterJob] = await Promise.all([
+      createBudgetJob(ids.faultReservedUser, "global-stop-unconfirmed", {
+        cost: 0.01,
+      }),
+      createBudgetJob(ids.budgetUserB, "global-stop-later", { cost: 0.01 }),
+    ]);
+    const reservation = await reserve(
+      ids.faultReservedUser,
+      unconfirmedJob.id,
+      "global-stop-unconfirmed",
+      budgetMonths[15],
+      config,
+    );
+    await markAiUsageUnconfirmed(
+      reservation.usageId,
+      "AI_USAGE_PERSISTENCE_FAILED",
+      {
+        inputTokens: 1,
+        cachedInputTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: 0,
+        providerTotalTokens: 2,
+        providerRequestId: `${prefix}-global-stop-unconfirmed`,
+      },
+    );
+
+    await expect(
+      reserve(
+        ids.budgetUserB,
+        laterJob.id,
+        "global-stop-later",
+        budgetMonths[16],
+        config,
+      ),
+    ).rejects.toMatchObject({ code: "AI_USAGE_RECONCILIATION_REQUIRED" });
+    await expect(
+      db.aiUsage.count({ where: { researchJobId: laterJob.id } }),
+    ).resolves.toBe(0);
+  });
+
+  it("retains inconsistent provider usage for reconciliation", async () => {
+    const config = budgetConfig({
+      global: 0.01,
+      user: 0.01,
+      job: 0.01,
+    });
+    const job = await createBudgetJob(ids.budgetUserA, "usage-mismatch", {
+      cost: 0.01,
+    });
+    const reservation = await reserve(
+      ids.budgetUserA,
+      job.id,
+      "usage-mismatch",
+      budgetMonths[4],
+      config,
+    );
+
+    await expect(
+      settleAiUsage(reservation.usageId, {
+        inputTokens: 1,
+        cachedInputTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: 1,
+        providerTotalTokens: 3,
+        providerRequestId: `${prefix}-usage-mismatch`,
+      }),
+    ).rejects.toMatchObject({ code: "AI_USAGE_RECONCILIATION_REQUIRED" });
+    await expect(
+      db.aiUsage.findUniqueOrThrow({ where: { id: reservation.usageId } }),
+    ).resolves.toMatchObject({
+      status: "UNCONFIRMED",
+      errorCode: "AI_USAGE_PROVIDER_TOTAL_MISMATCH",
+      inputTokens: 1,
+      cachedInputTokens: 0,
+      outputTokens: 1,
+      reasoningTokens: 1,
+      providerTotalTokens: 3,
+      providerRequestId: `${prefix}-usage-mismatch`,
+    });
+  });
+
+  it.each([
+    {
+      name: "a negative token count",
+      usage: {
+        inputTokens: 1,
+        cachedInputTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: -1,
+        providerTotalTokens: 2,
+      },
+    },
+    {
+      name: "a fractional token count",
+      usage: {
+        inputTokens: 1,
+        cachedInputTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: 0.5,
+        providerTotalTokens: 2,
+      },
+    },
+    {
+      name: "cached input above input tokens",
+      usage: {
+        inputTokens: 1,
+        cachedInputTokens: 2,
+        outputTokens: 1,
+        reasoningTokens: 0,
+        providerTotalTokens: 2,
+      },
+    },
+    {
+      name: "reasoning above output tokens",
+      usage: {
+        inputTokens: 1,
+        cachedInputTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: 2,
+        providerTotalTokens: 2,
+      },
+    },
+  ])("marks $name as unconfirmed", async ({ name, usage }) => {
+    const config = budgetConfig({
+      global: 0.01,
+      user: 0.01,
+      job: 0.01,
+    });
+    const label = `invalid-usage-${name.replaceAll(" ", "-")}`;
+    const job = await createBudgetJob(ids.budgetUserA, label, { cost: 0.01 });
+    const reservation = await reserve(
+      ids.budgetUserA,
+      job.id,
+      label,
       budgetMonths[5],
       config,
     );
-    await releaseAiUsage(released.usageId, "AI_MODEL_PROVIDER_CONFIGURATION");
+    const providerRequestId = `${prefix}-${label}`;
+
     await expect(
-      db.aiUsage.findUniqueOrThrow({ where: { id: released.usageId } }),
-    ).resolves.toMatchObject({
-      status: "RELEASED",
-      errorCode: "AI_MODEL_PROVIDER_CONFIGURATION",
-    });
+      settleAiUsage(reservation.usageId, {
+        ...usage,
+        providerRequestId,
+      }),
+    ).rejects.toMatchObject({ code: "AI_USAGE_RECONCILIATION_REQUIRED" });
     await expect(
-      db.researchJob.findUniqueOrThrow({ where: { id: releaseJob.id } }),
+      db.aiUsage.findUniqueOrThrow({ where: { id: reservation.usageId } }),
     ).resolves.toMatchObject({
-      aiReservedTokens: 0,
+      status: "UNCONFIRMED",
+      errorCode: "AI_USAGE_INVALID_PROVIDER_USAGE",
+      providerRequestId,
     });
+  });
+
+  it("enforces absolute job caps for legacy over-limit rows and config", async () => {
+    const current = budgetConfig({ global: 1, user: 1, job: 0.25 });
+    const legacyOverLimitConfig = {
+      ...current,
+      maxCostPerJobUsd: 1,
+      maxTokensPerJob: 200_000,
+    };
+    const [tokenJob, costJob] = await Promise.all([
+      createBudgetJob(ids.budgetUserA, "legacy-token-cap", {
+        cost: 1,
+        tokens: 200_000,
+      }),
+      createBudgetJob(ids.budgetUserB, "legacy-cost-cap", {
+        cost: 1,
+        tokens: 200_000,
+      }),
+    ]);
+    await Promise.all([
+      db.researchJob.update({
+        where: { id: tokenJob.id },
+        data: { aiUsedTokens: 49_999 },
+      }),
+      db.researchJob.update({
+        where: { id: costJob.id },
+        data: { aiUsedCostUsd: 0.249999 },
+      }),
+    ]);
+
+    await expect(
+      reserve(
+        ids.budgetUserA,
+        tokenJob.id,
+        "legacy-token-cap",
+        budgetMonths[6],
+        legacyOverLimitConfig,
+      ),
+    ).rejects.toMatchObject({ code: "AI_JOB_TOKEN_LIMIT_EXCEEDED" });
+    await expect(
+      reserve(
+        ids.budgetUserB,
+        costJob.id,
+        "legacy-cost-cap",
+        budgetMonths[7],
+        legacyOverLimitConfig,
+      ),
+    ).rejects.toMatchObject({ code: "AI_JOB_BUDGET_EXHAUSTED" });
+    await expect(
+      db.aiUsage.count({
+        where: { researchJobId: { in: [tokenJob.id, costJob.id] } },
+      }),
+    ).resolves.toBe(0);
   });
 });

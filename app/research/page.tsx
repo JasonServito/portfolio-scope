@@ -12,7 +12,7 @@ import { getLatestResearch } from "@/lib/research/orchestrator";
 export const metadata: Metadata = {
   title: "Sample research",
   description:
-    "Review a read-only sample report with findings, sources, counterpoints, risks, and missing information.",
+    "Review a read-only sample report with a summary, strengths, risks, what to watch, and expandable evidence.",
   alternates: { canonical: "/research" },
 };
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function SampleResearchPage() {
         />
       ) : null}
       <PublicContent
-        description="Review a prebuilt sample with findings, sources, warnings, and missing information. It is read-only and will not start or change research."
+        description="Review a prebuilt sample with a summary, strengths, risks, what to watch, and expandable evidence. It is read-only and will not start or change research."
         eyebrow="Read-only sample"
         title="Research that keeps the evidence visible."
       >

@@ -122,6 +122,111 @@ describe("grounded model runner", () => {
     expect(provider.remainingFixtures).toBe(0);
   });
 
+  it("stops before the first metered attempt when the kill switch is off", async () => {
+    const provider = {
+      provider: "openai",
+      model: config.model,
+      generate: vi.fn(),
+    } satisfies ResearchModelProvider;
+    const reserve = vi.fn();
+
+    await expect(
+      runGroundedModelCall(
+        {
+          provider,
+          config,
+          schema: specialistModelOutputSchema,
+          schemaName: "specialist_result",
+          evidence: [evidence],
+          prompt: () => ({ instructions: "Grounded only.", input: "{}" }),
+          userId: "user-a",
+          researchJobId: "job-a",
+          operation: "FINANCIALS",
+          idempotencyKey: "disabled",
+        },
+        {
+          environment: {
+            AI_RESEARCH_ENABLED: "false",
+          } as unknown as NodeJS.ProcessEnv,
+          reserve,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "AI_RESEARCH_DISABLED" });
+    expect(reserve).not.toHaveBeenCalled();
+    expect(provider.generate).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the kill switch before a charged repair attempt", async () => {
+    const environment = {
+      AI_RESEARCH_ENABLED: "true",
+    } as unknown as NodeJS.ProcessEnv;
+    const provider = {
+      provider: "openai",
+      model: config.model,
+      generate: vi.fn(async () => {
+        environment.AI_RESEARCH_ENABLED = "false";
+        return {
+          output: {
+            ...validOutput,
+            claims: [
+              {
+                ...validOutput.claims[0],
+                evidenceIds: ["ev_deadbeefdeadbeef"],
+              },
+            ],
+          },
+          provider: "openai" as const,
+          model: config.model,
+          providerRequestId: "request-invalid",
+          responseId: "response-invalid",
+          usage: {
+            inputTokens: 10,
+            cachedInputTokens: 0,
+            outputTokens: 5,
+            reasoningTokens: 0,
+            totalTokens: 15,
+          },
+        };
+      }),
+    } satisfies ResearchModelProvider;
+    const reserve = vi.fn(async () => ({
+      usageId: "usage-invalid",
+      idempotencyKey: "repair:model-attempt:1",
+      reservedInputTokens: 2_000,
+      reservedOutputTokens: config.maxOutputTokensPerCall,
+      reservedCostUsd: 0.01,
+    }));
+    const settle = vi.fn();
+
+    await expect(
+      runGroundedModelCall(
+        {
+          provider,
+          config,
+          schema: specialistModelOutputSchema,
+          schemaName: "specialist_result",
+          evidence: [evidence],
+          prompt: () => ({ instructions: "Grounded only.", input: "{}" }),
+          userId: "user-a",
+          researchJobId: "job-a",
+          operation: "FINANCIALS",
+          idempotencyKey: "repair",
+        },
+        { environment, reserve, settle },
+      ),
+    ).rejects.toMatchObject({ code: "AI_RESEARCH_DISABLED" });
+    expect(provider.generate).toHaveBeenCalledOnce();
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(settle).toHaveBeenCalledWith("usage-invalid", {
+      inputTokens: 10,
+      cachedInputTokens: 0,
+      outputTokens: 5,
+      reasoningTokens: 0,
+      providerTotalTokens: 15,
+      providerRequestId: "request-invalid",
+    });
+  });
+
   it("reserves the schema and provider envelope for a zero-network metered call", async () => {
     const provider = {
       provider: "openai",
@@ -185,6 +290,139 @@ describe("grounded model runner", () => {
     expect(reserve.mock.calls[0][0].reservedInputTokens).toBeGreaterThan(1_024);
   });
 
+  it("settles the complete provider usage tuple returned with a charge-certain error", async () => {
+    const provider = {
+      provider: "openai",
+      model: config.model,
+      generate: vi.fn(async () => {
+        throw new ModelProviderError(ModelProviderErrorCode.INVALID_RESPONSE, {
+          provider: "openai",
+          providerRequestId: "request-metered-error",
+          chargeUncertain: false,
+          usage: {
+            inputTokens: 80,
+            cachedInputTokens: 20,
+            outputTokens: 30,
+            reasoningTokens: 12,
+            totalTokens: 110,
+          },
+        });
+      }),
+    } satisfies ResearchModelProvider;
+    const reserve = vi.fn(async () => ({
+      usageId: "usage-metered-error",
+      idempotencyKey: "metered-error:model-attempt:1",
+      reservedInputTokens: 2_000,
+      reservedOutputTokens: config.maxOutputTokensPerCall,
+      reservedCostUsd: 0.01,
+    }));
+    const settle = vi.fn();
+
+    await expect(
+      runGroundedModelCall(
+        {
+          provider,
+          config,
+          schema: specialistModelOutputSchema,
+          schemaName: "specialist_result",
+          evidence: [evidence],
+          prompt: () => ({ instructions: "Grounded only.", input: "{}" }),
+          userId: "user-a",
+          researchJobId: "job-a",
+          operation: "FINANCIALS",
+          idempotencyKey: "metered-error",
+        },
+        {
+          environment: {
+            AI_RESEARCH_ENABLED: "true",
+          } as unknown as NodeJS.ProcessEnv,
+          reserve,
+          settle,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: ModelProviderErrorCode.INVALID_RESPONSE,
+    });
+    expect(settle).toHaveBeenCalledWith("usage-metered-error", {
+      inputTokens: 80,
+      cachedInputTokens: 20,
+      outputTokens: 30,
+      reasoningTokens: 12,
+      providerTotalTokens: 110,
+      providerRequestId: "request-metered-error",
+    });
+  });
+
+  it("retains the complete provider tuple as unconfirmed when cost is uncertain", async () => {
+    const provider = {
+      provider: "openai",
+      model: config.model,
+      generate: vi.fn(async () => {
+        throw new ModelProviderError(ModelProviderErrorCode.INVALID_RESPONSE, {
+          provider: "openai",
+          providerRequestId: "request-model-mismatch",
+          chargeUncertain: true,
+          usage: {
+            inputTokens: 80,
+            cachedInputTokens: 20,
+            outputTokens: 30,
+            reasoningTokens: 12,
+            totalTokens: 110,
+          },
+        });
+      }),
+    } satisfies ResearchModelProvider;
+    const reserve = vi.fn(async () => ({
+      usageId: "usage-model-mismatch",
+      idempotencyKey: "model-mismatch:model-attempt:1",
+      reservedInputTokens: 2_000,
+      reservedOutputTokens: config.maxOutputTokensPerCall,
+      reservedCostUsd: 0.01,
+    }));
+    const markUnconfirmed = vi.fn();
+    const settle = vi.fn();
+
+    await expect(
+      runGroundedModelCall(
+        {
+          provider,
+          config,
+          schema: specialistModelOutputSchema,
+          schemaName: "specialist_result",
+          evidence: [evidence],
+          prompt: () => ({ instructions: "Grounded only.", input: "{}" }),
+          userId: "user-a",
+          researchJobId: "job-a",
+          operation: "FINANCIALS",
+          idempotencyKey: "model-mismatch",
+        },
+        {
+          environment: {
+            AI_RESEARCH_ENABLED: "true",
+          } as unknown as NodeJS.ProcessEnv,
+          reserve,
+          settle,
+          markUnconfirmed,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: ModelProviderErrorCode.INVALID_RESPONSE,
+    });
+    expect(markUnconfirmed).toHaveBeenCalledWith(
+      "usage-model-mismatch",
+      ModelProviderErrorCode.INVALID_RESPONSE,
+      {
+        inputTokens: 80,
+        cachedInputTokens: 20,
+        outputTokens: 30,
+        reasoningTokens: 12,
+        providerTotalTokens: 110,
+        providerRequestId: "request-model-mismatch",
+      },
+    );
+    expect(settle).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       code: ModelProviderErrorCode.CONFIGURATION,
@@ -246,7 +484,9 @@ describe("grounded model runner", () => {
     ).rejects.toMatchObject({ code });
 
     if (expected === "release") {
-      expect(release).toHaveBeenCalledWith("usage-failure", code);
+      expect(release).toHaveBeenCalledWith("usage-failure", code, {
+        providerRequestId: "request-failure",
+      });
       expect(markUnconfirmed).not.toHaveBeenCalled();
     } else {
       expect(markUnconfirmed).toHaveBeenCalledWith("usage-failure", code, {

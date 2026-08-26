@@ -1,5 +1,6 @@
 import {
   claimKey,
+  getModelOutputSafetyIssue,
   researchEvidenceSchema,
   synthesisModelOutputSchema,
   validateGroundedOutput,
@@ -52,6 +53,7 @@ export type ResearchEvaluationMetrics = {
 
 export type ResearchEvaluationResult = {
   id: string;
+  humanReviewRequired: true;
   schemaValid: boolean;
   evidenceSchemaValid: boolean;
   noRecommendationValid: boolean;
@@ -70,6 +72,7 @@ export type ResearchEvaluationResult = {
 };
 
 export type ResearchEvaluationSummary = {
+  humanReviewRequired: true;
   cases: ResearchEvaluationResult[];
   aggregate: {
     caseCount: number;
@@ -92,7 +95,6 @@ export type ResearchEvaluationSummary = {
   };
 };
 
-const forbiddenRecommendation = /\b(?:buy|sell|hold)\b/i;
 const NUMBER_PATTERN =
   /[-+]?(?:[$€£])?\d[\d,]*(?:\.\d+)?(?:\s*(?:%|percent|thousand|million|billion|trillion|k|m|bn|b|tn))?/gi;
 
@@ -103,14 +105,6 @@ function round(value: number, places = 6) {
 
 function ratio(numerator: number, denominator: number) {
   return denominator === 0 ? null : round(numerator / denominator);
-}
-
-function safeSerialize(value: unknown) {
-  try {
-    return JSON.stringify(value) ?? "";
-  } catch {
-    return String(value);
-  }
 }
 
 function formatIssues(
@@ -364,12 +358,9 @@ export function evaluateResearchOutput(
     issues.push(...formatIssues("evidence", parsedEvidence.error.issues));
   }
 
-  const noRecommendationValid = !forbiddenRecommendation.test(
-    safeSerialize(input.output),
-  );
-  if (!noRecommendationValid) {
-    issues.push("output: prohibited buy, sell, or hold language was present.");
-  }
+  const safetyIssue = getModelOutputSafetyIssue(input.output);
+  const noRecommendationValid = safetyIssue === null;
+  if (safetyIssue) issues.push(`output: ${safetyIssue}`);
 
   let groundingValid = false;
   if (parsedOutput.success && parsedEvidence.success) {
@@ -407,6 +398,7 @@ export function evaluateResearchOutput(
 
   return {
     id: input.id,
+    humanReviewRequired: true,
     schemaValid: parsedOutput.success,
     evidenceSchemaValid: parsedEvidence.success,
     noRecommendationValid,
@@ -465,6 +457,7 @@ export function evaluateResearchDataset(
   );
 
   return {
+    humanReviewRequired: true,
     cases,
     aggregate: {
       caseCount: cases.length,

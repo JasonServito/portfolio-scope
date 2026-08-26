@@ -380,8 +380,8 @@ export default async function StockPage({ params }: StockPageProps) {
               Explainable stock research
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Review the available findings, risks, counterpoints, missing
-              information, and supporting sources for this company.
+              Review the summary, strengths, risks, what to watch, and
+              supporting evidence available for this company.
             </p>
           </div>
           <ResearchTabs

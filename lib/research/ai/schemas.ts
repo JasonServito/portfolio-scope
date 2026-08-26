@@ -90,7 +90,32 @@ export const synthesisModelOutputSchema = z
 export type SpecialistModelOutput = z.infer<typeof specialistModelOutputSchema>;
 export type SynthesisModelOutput = z.infer<typeof synthesisModelOutputSchema>;
 
-const forbiddenRecommendation = /\b(?:buy|sell|hold)\b/i;
+const forbiddenRecommendations = [
+  /(?:^|[.!?]\s+|")\s*(?:buy|sell|hold)\s+/i,
+  /\b(?:a|an)\s+(?:buy|sell|hold)\b|\b(?:buy|sell|hold)\s+(?:rating|recommendation|signal|opportunity)\b/i,
+  /\b(?:you|investors?|shareholders?|readers?)\s+(?:should|must|can|could|need(?:s)?\s+to|ought\s+to|may\s+want\s+to)\s+(?:consider\s+)?(?:buy(?:ing)?|purchase|purchasing|acquire|acquiring|sell(?:ing)?|dispose|disposing|exit|exiting|add|adding|trim|trimming|hold(?:ing)?)\b/i,
+  /(?:^|[.!?]\s+|")\s*(?:consider\s+(?:buying|purchasing|acquiring|selling|disposing\s+of|exiting|adding\s+to|trimming|holding)\s+(?:(?:the|this|these|more|some|your)\s+)?(?:stock|shares?|position|holding|exposure|allocation)|avoid\s+(?:(?:the|this|these|your)\s+)?(?:stock|shares?|position|holding|exposure|allocation))\b/i,
+  /\b(?:it\s+)?(?:may|would|could)\s+be\s+(?:wise|prudent|advisable|appropriate)\s+to\s+(?:buy|purchase|acquire|sell|dispose\s+of|exit|add\s+to|trim|hold)\s+(?:(?:the|this|these|more|some|your)\s+)?(?:stock|shares?|position|holding|exposure|allocation)\b/i,
+  /(?:^|[.!?]\s+|")\s*place\s+(?:a|an|the|your)\s+(?:(?:limit|market)\s+)?order\s+to\s+(?:buy|purchase|acquire|sell|dispose\s+of|exit|add\s+to|trim)\s+(?:(?:the|this|these|more|some|your)\s+)?(?:stock|shares?|position|holding|exposure|allocation)\b/i,
+  /(?:^|[.!?]\s+|")\s*(?:(?:purchase|acquire)\s+|(?:dispose\s+of|exit|add\s+to|trim)\s+)(?:(?:the|this|these|more|some|your)\s+)?(?:stock|shares?|position|holding|exposure|allocation)\b/i,
+  /\b(?:buying|purchasing|acquiring|selling|disposing\s+of|exiting|adding\s+to|trimming)\s+(?:(?:the|this|these|more|some|your)\s+)?(?:stock|shares?|position|holding|exposure|allocation)\b[^.!?]{0,60}\b(?:attractive|advisable|recommended|wise|prudent|compelling|appropriate|suitable|opportune)\b/i,
+];
+const forbiddenPersonalContext =
+  /\b(?:given|based\s+on)\s+your\s+(?:portfolio|position|holdings?|risk\s+tolerance|financial\s+goals?|time\s+horizon)\b|\b(?:suitable|appropriate|right)\s+for\s+your\s+(?:portfolio|risk\s+tolerance|financial\s+goals?|time\s+horizon)\b/i;
+const forbiddenPersonalAllocation =
+  /\b(?:allocate|allocating|invest|investing|put)\b[^.!?]{0,80}\byour\s+(?:portfolio|capital|money|savings)\b|\b(?:increase|increasing|reduce|reducing|trim|trimming|exit|exiting|close|closing|add|adding)(?:\s+to)?\s+your\s+(?:position|holding|allocation|exposure)\b/i;
+const forbiddenStockPriceTarget =
+  /\b(?:price\s+target|target\s+price)\b|\bfair\s+value\s+(?:is|would\s+be|could\s+be|of)\s+[$€£]?\s*\d[\d,.]*\s+per\s+share\b/i;
+const forbiddenStockPricePredictions = [
+  /\b(?:stocks?|(?<!per\s)shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
+  /\b(?:stock|share)\s+price\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|increase|decrease|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
+  /\b(?:stocks?|shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:increase|decrease)\s+(?:in\s+(?:price|value)|to\s+[$€£]?\d)\b/i,
+  /(?:^|[.!?]\s+|")\s*(?:the\s+)?price\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|increase|decrease|reach|hit|trade(?:\s+at)?|be\s+worth)\b/i,
+  /\b(?!(?:EPS|GAAP|EBIT|EBITDA|FCF)\b)[A-Z]{1,5}\s+price\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|increase|decrease|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/,
+  /\b(?!(?:EPS|GAAP|EBIT|EBITDA|FCF)\b)[A-Z]{1,5}\b\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:(?:rise|fall|outperform|underperform)\b|(?:reach|hit|trade(?:\s+at)?|be\s+worth)\s+(?:(?:[$€£]\s*)\d[\d,.]*\b(?!\s*(?:thousand|million|billion|trillion|in\s+(?:revenue|sales|earnings|EPS|cash\s+flow))\b)|\d[\d,.]*\s*(?:dollars?|USD)\b))/,
+  /\b(?:predict|predicts|predicted|predicting|prediction|forecast|forecasts|forecasted|forecasting|project|projects|projected|projecting|projection|expected)\b[^.!?]{0,80}\b(?:stock|share)\s+price\b/i,
+  /\b(?:stock|share)\s+price\b[^.!?]{0,80}\b(?:prediction|projection|forecast)\b/i,
+];
 
 export class ModelOutputSafetyError extends Error {
   readonly code = "AI_UNSAFE_OUTPUT";
@@ -101,17 +126,76 @@ export class ModelOutputSafetyError extends Error {
   }
 }
 
+function collectStringLeaves(value: unknown) {
+  const leaves: string[] = [];
+  const pending = [value];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === "string") {
+      leaves.push(current);
+      continue;
+    }
+    if (current === null || typeof current !== "object" || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    try {
+      for (const descriptor of Object.values(
+        Object.getOwnPropertyDescriptors(current),
+      )) {
+        if (descriptor.enumerable && "value" in descriptor) {
+          pending.push(descriptor.value);
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return leaves;
+}
+
+export function getModelOutputSafetyIssue(output: unknown) {
+  const leaves = collectStringLeaves(output);
+
+  if (
+    leaves.some((value) =>
+      forbiddenRecommendations.some((pattern) => pattern.test(value)),
+    )
+  ) {
+    return "The generated output contained a prohibited investment action.";
+  }
+  if (
+    leaves.some(
+      (value) =>
+        forbiddenPersonalContext.test(value) ||
+        forbiddenPersonalAllocation.test(value),
+    )
+  ) {
+    return "The generated output contained prohibited personalized investment instructions.";
+  }
+  if (
+    leaves.some(
+      (value) =>
+        forbiddenStockPriceTarget.test(value) ||
+        forbiddenStockPricePredictions.some((pattern) => pattern.test(value)),
+    )
+  ) {
+    return "The generated output contained a prohibited stock-price target or prediction.";
+  }
+  return null;
+}
+
 export function validateGroundedOutput<T extends SpecialistModelOutput>(
   output: T,
   evidence: ResearchEvidence[],
 ) {
   const allowed = new Set(evidence.map((item) => item.id));
-  const serialized = JSON.stringify(output);
-  if (forbiddenRecommendation.test(serialized)) {
-    throw new ModelOutputSafetyError(
-      "The generated output contained a prohibited investment action.",
-    );
-  }
+  const safetyIssue = getModelOutputSafetyIssue(output);
+  if (safetyIssue) throw new ModelOutputSafetyError(safetyIssue);
 
   const claimKeys = new Set<string>();
   for (const claim of output.claims) {

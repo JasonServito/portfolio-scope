@@ -2,7 +2,6 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentResultCard } from "@/components/research/agent-result-card";
 import { PrivateResearch } from "@/components/research/private-research";
 import { ResearchJobDetail } from "@/components/research/research-job-detail";
 import { ResearchTabs } from "@/components/research/research-tabs";
@@ -50,7 +49,18 @@ const failedAgent: AgentResult = {
   confidence: 0.55,
   summary: "Revenue improved while margin evidence was incomplete.",
   findings: [],
-  sources: [],
+  sources: [
+    {
+      title: supportingEvidence.title,
+      reference: supportingEvidence.sourceReference,
+      detail: supportingEvidence.excerpt,
+    },
+    {
+      title: counterEvidence.title,
+      reference: counterEvidence.sourceReference,
+      detail: counterEvidence.excerpt,
+    },
+  ],
   warnings: ["The latest cash-flow fact was unavailable."],
   missingData: ["Current cash-flow statement"],
   provider: "openai",
@@ -117,7 +127,7 @@ const externalResearch: StockResearch = {
   },
 };
 
-describe("M18 research UI", () => {
+describe("research UI", () => {
   beforeEach(() => {
     push.mockReset();
     refresh.mockReset();
@@ -230,7 +240,7 @@ describe("M18 research UI", () => {
     expect(markup).toContain("Regenerate report");
   });
 
-  it("labels public external reports without exposing technical generation details", () => {
+  it("presents the concise report hierarchy with secondary evidence", () => {
     const markup = renderToStaticMarkup(
       <ResearchTabs
         initialResearch={externalResearch}
@@ -240,27 +250,41 @@ describe("M18 research UI", () => {
     );
 
     expect(markup).toContain("AI-assisted");
-    expect(markup).toContain("Claims and evidence");
+    expect(markup).toContain(
+      '<h2 class="font-medium">Stock research report</h2>',
+    );
+    expect(markup).toContain(">Summary<");
+    expect(markup).toContain(">Strengths<");
+    expect(markup).toContain(">Risks<");
+    expect(markup).toContain(">What to Watch<");
+    expect(markup).toContain("61% reported confidence");
+    expect(markup).toContain("Evidence-grounded overview.");
+    expect(markup).toContain("Revenue increased.");
+    expect(markup).toContain("Evidence remains incomplete.");
+    expect(markup).toContain("Counterpoints");
+    expect(markup).toContain("Margins decreased.");
+    expect(markup).toContain("Missing information");
+    expect(markup).toContain("Current cash-flow statement");
+    expect(markup).toContain("Areas of disagreement");
+    expect(markup).toContain("Revenue and margin trends diverged.");
+    expect(markup).toContain("<details");
+    expect(markup).not.toMatch(/<details[^>]*\sopen(?:=|\s|>)/);
+    expect(markup).toContain("<summary");
+    expect(markup).toContain("Evidence / Sources");
+    expect(markup).toContain("2 sources");
+    expect(markup).toContain("Claims and supporting evidence");
     expect(markup).toContain("Counter-evidence");
     expect(markup).toContain("Margin fact");
+    expect(markup).not.toContain("Additional sources");
+    expect(markup.match(/sec-fact:revenue/g)).toHaveLength(1);
+    expect(markup.match(/sec-fact:margin/g)).toHaveLength(1);
+    expect(markup).not.toContain('role="tablist"');
+    expect(markup).not.toContain("Evidence coverage");
+    expect(markup).not.toContain("Political Activity");
     expect(markup).not.toContain("Report: report-v2");
     expect(markup).not.toContain("$0.0023");
+    expect(markup).not.toContain(">mixed<");
     expect(markup).toContain("This report is partial");
     expect(markup).not.toContain("Regenerate report");
-  });
-
-  it("shows specialist claims, citations, missing information, and partial failure", () => {
-    const markup = renderToStaticMarkup(
-      <AgentResultCard
-        evidence={[supportingEvidence, counterEvidence]}
-        result={failedAgent}
-      />,
-    );
-
-    expect(markup).toContain("Evidence-grounded claims");
-    expect(markup).toContain("Revenue fact");
-    expect(markup).toContain("Counter: Margin fact");
-    expect(markup).toContain("Missing information");
-    expect(markup).toContain("partial failure");
   });
 });

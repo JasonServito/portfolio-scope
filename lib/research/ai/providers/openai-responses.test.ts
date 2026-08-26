@@ -31,7 +31,7 @@ function successfulResponse(
       id: options.responseId ?? "resp_body_123",
       object: "response",
       status: "completed",
-      model: "gpt-5-mini-2025-08-07",
+      model: "gpt-5.4-mini-2026-03-17",
       output: [
         {
           type: "message",
@@ -62,7 +62,7 @@ function createProvider(
 ) {
   return new OpenAIResponsesResearchModelProvider({
     apiKey: "test-api-key",
-    model: "gpt-5-mini-2025-08-07",
+    model: "gpt-5.4-mini-2026-03-17",
     maxOutputTokens: options.maxOutputTokens ?? 1_500,
     timeoutMs: options.timeoutMs ?? 1_000,
     fetch: fetchImplementation,
@@ -113,7 +113,7 @@ describe("OpenAI Responses research model provider", () => {
     });
     const body = JSON.parse(String(init?.body));
     expect(body).toMatchObject({
-      model: "gpt-5-mini-2025-08-07",
+      model: "gpt-5.4-mini-2026-03-17",
       store: false,
       instructions: "Return grounded research JSON.",
       input: [
@@ -182,7 +182,7 @@ describe("OpenAI Responses research model provider", () => {
     await expect(provider.generate(request())).resolves.toEqual({
       output: { summary: "Revenue rose with cited evidence." },
       provider: "openai",
-      model: "gpt-5-mini-2025-08-07",
+      model: "gpt-5.4-mini-2026-03-17",
       providerRequestId: "req_abc",
       responseId: "resp_xyz",
       usage: {
@@ -192,6 +192,175 @@ describe("OpenAI Responses research model provider", () => {
         reasoningTokens: 5,
         totalTokens: 155,
       },
+    });
+  });
+
+  it.each([
+    { name: "different", model: "gpt-5-mini-2025-08-07" },
+    { name: "missing", model: undefined },
+  ])(
+    "fails closed when the successful response identifies a $name model",
+    async ({ model }) => {
+      const raw = successfulResponse();
+      const payload = JSON.parse(await raw.text());
+      if (model === undefined) delete payload.model;
+      else payload.model = model;
+      const provider = createProvider(
+        vi.fn(
+          async () =>
+            new Response(JSON.stringify(payload), {
+              headers: { "x-request-id": "req_model_mismatch" },
+            }),
+        ) as unknown as typeof fetch,
+      );
+
+      const error = await capturedError(provider.generate(request()));
+
+      expect(error).toMatchObject({
+        code: ModelProviderErrorCode.INVALID_RESPONSE,
+        chargeUncertain: true,
+        providerRequestId: "req_model_mismatch",
+        usage: {
+          inputTokens: 120,
+          cachedInputTokens: 20,
+          outputTokens: 35,
+          reasoningTokens: 5,
+          totalTokens: 155,
+        },
+      });
+    },
+  );
+
+  it("rejects an incomplete response from a different model before cost settlement", async () => {
+    const raw = successfulResponse();
+    const payload = JSON.parse(await raw.text());
+    payload.status = "incomplete";
+    payload.model = "gpt-5-mini-2025-08-07";
+    const provider = createProvider(
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(payload), {
+            headers: { "x-request-id": "req_incomplete_model_mismatch" },
+          }),
+      ) as unknown as typeof fetch,
+    );
+
+    const error = await capturedError(provider.generate(request()));
+
+    expect(error).toMatchObject({
+      code: ModelProviderErrorCode.INVALID_RESPONSE,
+      chargeUncertain: true,
+      providerRequestId: "req_incomplete_model_mismatch",
+      usage: {
+        inputTokens: 120,
+        cachedInputTokens: 20,
+        outputTokens: 35,
+        reasoningTokens: 5,
+        totalTokens: 155,
+      },
+    });
+  });
+
+  it.each([
+    {
+      name: "queued",
+      status: "queued",
+      expectedCode: ModelProviderErrorCode.INCOMPLETE_RESPONSE,
+    },
+    {
+      name: "in-progress",
+      status: "in_progress",
+      expectedCode: ModelProviderErrorCode.INCOMPLETE_RESPONSE,
+    },
+    {
+      name: "missing",
+      status: undefined,
+      expectedCode: ModelProviderErrorCode.INVALID_RESPONSE,
+    },
+    {
+      name: "unknown",
+      status: "unexpected_status",
+      expectedCode: ModelProviderErrorCode.INVALID_RESPONSE,
+    },
+  ])(
+    "fails closed for a $name response status while preserving reconciliation evidence",
+    async ({ status, expectedCode }) => {
+      const raw = successfulResponse();
+      const payload = JSON.parse(await raw.text());
+      if (status === undefined) delete payload.status;
+      else payload.status = status;
+      const provider = createProvider(
+        vi.fn(
+          async () =>
+            new Response(JSON.stringify(payload), {
+              headers: { "x-request-id": "req_non_completed_status" },
+            }),
+        ) as unknown as typeof fetch,
+      );
+
+      const error = await capturedError(provider.generate(request()));
+
+      expect(error).toMatchObject({
+        code: expectedCode,
+        chargeUncertain: true,
+        providerRequestId: "req_non_completed_status",
+        usage: {
+          inputTokens: 120,
+          cachedInputTokens: 20,
+          outputTokens: 35,
+          reasoningTokens: 5,
+          totalTokens: 155,
+        },
+      });
+    },
+  );
+
+  it("preserves anomalous cached and reasoning counts for reconciliation", async () => {
+    const raw = successfulResponse();
+    const payload = JSON.parse(await raw.text());
+    payload.usage.input_tokens_details.cached_tokens = 121;
+    payload.usage.output_tokens_details.reasoning_tokens = 36;
+    const provider = createProvider(
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(payload), {
+            headers: { "x-request-id": "req_usage_anomaly" },
+          }),
+      ) as unknown as typeof fetch,
+    );
+
+    await expect(provider.generate(request())).resolves.toMatchObject({
+      providerRequestId: "req_usage_anomaly",
+      usage: {
+        inputTokens: 120,
+        cachedInputTokens: 121,
+        outputTokens: 35,
+        reasoningTokens: 36,
+        totalTokens: 155,
+      },
+    });
+  });
+
+  it("fails safely when exact provider token details are absent", async () => {
+    const raw = successfulResponse();
+    const payload = JSON.parse(await raw.text());
+    delete payload.usage.output_tokens_details;
+    const provider = createProvider(
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(payload), {
+            headers: { "x-request-id": "req_missing_usage_details" },
+          }),
+      ) as unknown as typeof fetch,
+    );
+
+    const error = await capturedError(provider.generate(request()));
+
+    expect(error).toMatchObject({
+      code: ModelProviderErrorCode.INVALID_RESPONSE,
+      chargeUncertain: true,
+      providerRequestId: "req_missing_usage_details",
+      usage: undefined,
     });
   });
 
@@ -215,6 +384,7 @@ describe("OpenAI Responses research model provider", () => {
       JSON.stringify({
         id: "resp_refusal",
         status: "completed",
+        model: "gpt-5.4-mini-2026-03-17",
         output: [
           {
             type: "message",
@@ -228,7 +398,9 @@ describe("OpenAI Responses research model provider", () => {
         ],
         usage: {
           input_tokens: 10,
+          input_tokens_details: { cached_tokens: 0 },
           output_tokens: 2,
+          output_tokens_details: { reasoning_tokens: 0 },
           total_tokens: 12,
         },
       }),
@@ -365,6 +537,34 @@ describe("OpenAI Responses research model provider", () => {
       chargeUncertain: true,
     });
     expect(error.message).not.toContain("sensitive diagnostics");
+  });
+
+  it("preserves the response request id when body reading fails", async () => {
+    const provider = createProvider(
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.error(
+                  new TypeError("sensitive response stream failure"),
+                );
+              },
+            }),
+            { headers: { "x-request-id": "req_body_read_failure" } },
+          ),
+      ) as unknown as typeof fetch,
+    );
+
+    const error = await capturedError(provider.generate(request()));
+
+    expect(error).toMatchObject({
+      code: ModelProviderErrorCode.NETWORK_ERROR,
+      retryable: true,
+      chargeUncertain: true,
+      providerRequestId: "req_body_read_failure",
+    });
+    expect(error.message).not.toContain("sensitive response stream failure");
   });
 
   it("combines a parent AbortSignal with the provider request", async () => {

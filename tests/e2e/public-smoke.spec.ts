@@ -39,6 +39,7 @@ test.describe("public production smoke @smoke", () => {
   test("sample research remains public and explicitly read-only", async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/research");
 
     await expect(
@@ -53,6 +54,40 @@ test.describe("public production smoke @smoke", () => {
     await expect(
       page.getByRole("link", { name: /open full stock detail/i }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Stock research report", level: 2 }),
+    ).toBeVisible();
+    for (const section of ["Summary", "Strengths", "Risks", "What to Watch"]) {
+      await expect(
+        page.getByRole("heading", { name: section, level: 3 }),
+      ).toBeVisible();
+    }
+    await expect(
+      page.getByRole("button", { name: /run research|regenerate report/i }),
+    ).toHaveCount(0);
+
+    const evidenceDisclosure = page.locator("details", {
+      has: page.getByText("Evidence / Sources", { exact: false }),
+    });
+    const evidenceSummary = evidenceDisclosure.locator("summary");
+    await expect(evidenceDisclosure).not.toHaveAttribute("open", "");
+    await expect(
+      page.getByRole("heading", { name: "Additional sources" }),
+    ).toBeHidden();
+    await evidenceSummary.focus();
+    await expect(evidenceSummary).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(evidenceDisclosure).toHaveAttribute("open", "");
+    await expect(
+      page.getByRole("heading", { name: "Additional sources" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 
   test("public stock page presents accessible key metrics and secondary filing evidence", async ({

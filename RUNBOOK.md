@@ -39,9 +39,12 @@ Expected non-AI monthly infrastructure total: approximately `$1-2 USD`,
 primarily the annualized domain cost while the reviewed free allowances hold.
 The M18 application hard maximum is `$5 USD` per UTC month, so the estimated
 configured maximum total is approximately `$6-7 USD`, below the `$30 USD`
-project limit. OpenAI is a new usage-based service; verify current pricing and
-the actual provider invoice. The backup retention policy is 7 daily, 4 weekly,
-and 3 monthly objects. Do not enable an uncapped paid tier.
+project limit. The M27 Preview candidate is pinned to
+`gpt-5.4-mini-2026-03-17`; official rates reviewed 2026-08-25 were `$0.75`
+input, `$0.075` cached input, and `$4.50` output per million tokens. Recheck
+current pricing and deprecation status immediately before a live call and
+reconcile the actual provider invoice. The backup retention policy is 7 daily,
+4 weekly, and 3 monthly objects. Do not enable an uncapped paid tier.
 
 ## Environment matrix
 
@@ -81,11 +84,11 @@ Configure each environment independently. Never copy production database credent
 | `EARNINGS_SYNC_ENABLED`                                               | `false`                                                         | Always `false`                               | `false` until the M26 activation record is complete |                             No |
 | `EARNINGS_API_KEY`                                                    | Blank                                                           | Blank                                        | Server-only key after approval                      |                            Yes |
 | `OPENAI_API_KEY`                                                      | Blank by default                                                | Environment-scoped key only for proof        | Separate Production key only after approval         |                            Yes |
-| `OPENAI_RESEARCH_MODEL`                                               | Checked-in allowlisted default                                  | Reviewed allowlisted model                   | Same reviewed model/version                         |                             No |
+| `OPENAI_RESEARCH_MODEL`                                               | Pinned `gpt-5.4-mini-2026-03-17`                                | Pinned `gpt-5.4-mini-2026-03-17`             | Same pin only after separate approval               |                             No |
 | `AI_MONTHLY_BUDGET_USD`                                               | `5` maximum                                                     | `5` maximum, preferably lower for proof      | `5` maximum                                         |                             No |
-| `AI_USER_MONTHLY_BUDGET_USD`                                          | `1`                                                             | At most global limit                         | At most global limit                                |                             No |
-| `AI_MAX_COST_PER_JOB_USD`                                             | `0.25`                                                          | At most user limit                           | At most user limit                                  |                             No |
-| `AI_MAX_TOKENS_PER_JOB`                                               | `50000`                                                         | Reviewed bound                               | Reviewed bound                                      |                             No |
+| `AI_USER_MONTHLY_BUDGET_USD`                                          | `1` maximum                                                     | `1` maximum                                  | `1` maximum                                         |                             No |
+| `AI_MAX_COST_PER_JOB_USD`                                             | `0.25` maximum                                                  | `0.25` maximum                               | `0.25` maximum                                      |                             No |
+| `AI_MAX_TOKENS_PER_JOB`                                               | `50000` maximum                                                 | `50000` maximum                              | `50000` maximum                                     |                             No |
 | `AI_MAX_OUTPUT_TOKENS_PER_CALL`                                       | `1500`                                                          | Reviewed bound                               | Reviewed bound                                      |                             No |
 | `AI_PROVIDER_TIMEOUT_MS`                                              | `20000`                                                         | At most `25000`                              | At most `25000`                                     |                             No |
 | `AI_USER_MONTHLY_REPORT_LIMIT`                                        | `5`                                                             | Reviewed quota                               | Reviewed quota                                      |                             No |
@@ -219,12 +222,19 @@ and new budget, usage, claim, and evidence tables. It requires no seed or data
 backfill, and it leaves historical reports classified as deterministic. Preserve
 these additive records during rollback so usage can be reconciled.
 
-Repository/local verification (2026-08-11): `npm run db:deploy` successfully
-applied both M18 migrations, and all eight dedicated M18 database integration
-cases pass. They cover JSONB snapshot integrity, recorded and zero-network
+M27 migration `20260824120000_m27_ai_usage_provider_tokens` follows M18 and is
+also additive. It retains reasoning and provider-declared total tokens for each
+new metered attempt without inventing values for historical rows. Apply it with
+external AI disabled and preserve it during rollback for reconciliation.
+
+Historical M18 repository/local verification (2026-08-11) successfully applied
+both M18 migrations. Current M27 local verification (2026-08-25) found all 11
+repository migrations applied with none pending and passed all 15 dedicated AI
+database cases. They cover JSONB snapshot integrity, recorded and zero-network
 metered end-to-end persistence/privacy, citation-safe partial fallback, fresh
-reuse, explicit regeneration, active-run deduplication, usage reconciliation,
-and concurrent global/user/job budget enforcement. This does not verify the Preview or
+reuse, the UTC-day boundary, explicit regeneration, active-run deduplication,
+complete provider-usage reconciliation, legacy hard caps, and concurrent
+global/user/job budget enforcement. This does not verify the Preview or
 Production migration state or any live external provider.
 
 ### 4. Deploy and promote
@@ -664,14 +674,16 @@ before any usage can exceed the free allowances.
   pause the two named schedules; preserve job rows; and forward-fix the
   additive schema.
 
-## M18 external-AI activation
+## M27 Preview-only validation of M18 external AI
 
 M18 is a default-off interpretation layer over public evidence. SEC EDGAR fact
 excerpts and filing metadata, application catalog data, and deterministic signals
 remain the sources. OpenAI is not a financial-data source and the provider does
 not browse. Unsupported news and political-activity inputs remain explicit
 missing states. Generated output is educational and may not include buy, sell,
-or hold advice.
+or hold actions, stock-price targets/predictions, personalized instructions, or
+automated trading actions. Automated checks never replace mandatory human
+citation and financial-advice safety review.
 
 ### 1. Satisfy prerequisites
 
@@ -682,35 +694,45 @@ or hold advice.
   and deterministic specialist/synthesis completion are verified.
 - M16 monitoring, a backup, non-production restore, and a rollback target are
   evidenced. Deployed M17 research/citation states are usable.
-- The `$5 USD` maximum and current OpenAI pricing are approved.
+- The `$5` global, `$1` user, `$0.25` job, and `50,000` token maximums and
+  current pinned-model pricing/deprecation status are approved.
 
 Repository implementation can be reviewed before those external prerequisites;
 external calls cannot be called active until they pass.
 
 ### 2. Apply and verify the foundation
 
-1. Back up the isolated Preview database.
-2. Keep `AI_RESEARCH_ENABLED=false` and run the approved Preview migration:
+1. Keep `AI_RESEARCH_ENABLED=false` and inspect migration status using the
+   isolated Preview direct URL. If both additive M18 migrations and the M27
+   provider-usage migration are already applied, do not redeploy them.
+2. Only if a required AI migration is absent, create and verify a Preview backup
+   and rollback target, then run the approved Preview migration:
    `MIGRATION_TARGET=preview MIGRATION_CONFIRMATION=APPLY_PREVIEW_MIGRATIONS npm run db:deploy:approved`.
-3. Confirm both M18 migrations applied in order.
-4. Run schema, type, unit, provider-contract, grounding, budget, reuse/diff, and
+3. Confirm all three AI migrations are applied in order and no Production
+   database was targeted.
+4. Using deterministic or recorded zero-network providers only, exercise
+   timeout, malformed-output, and kill-switch-before-repair behavior. These
+   failure drills must finish before live activation and must not consume the
+   single charged AAPL allowance.
+5. Run schema, type, unit, provider-contract, grounding, budget, reuse/diff, and
    offline evaluation checks with deterministic/recorded providers.
-5. Verify old reports remain deterministic and do not gain invented provider or
+6. Verify old reports remain deterministic and do not gain invented provider or
    version metadata.
 
 ### 3. Configure the provider and limits
 
-Create separate Preview and Production OpenAI projects or keys. Set the complete
-M18 variable set from `.env.example` in the server environment. The checked-in
-defaults are `$5` global/month, `$1` user/month, `$0.25` per job, 50,000 tokens
-per job, 1,500 output tokens per call, a 20-second call timeout, and five user
-reports per UTC month. Runtime and database constraints reject a global value
-above `$5`.
+Create only a separately scoped Preview OpenAI project/key during M27. Set the
+complete M18 variable set from `.env.example` in Preview. New work accepts only
+`gpt-5.4-mini-2026-03-17`. The hard maximums are `$5` global/month, `$1`
+user/month, `$0.25` per job, and 50,000 tokens per job; the checked-in defaults
+also use 1,500 output tokens per call, a 20-second timeout, and five user reports
+per UTC month. Runtime configuration may lower but cannot raise any hard
+maximum. Do not create or configure a Production key/project during M27.
 
-Open the provider console and record the reviewed pricing date/version. Configure
-a provider-side alert or spending stop at or below the approved allowance. The
-application's versioned cost estimate and provider accounting are independent
-controls; neither should be treated as the other.
+Open the provider console and record the reviewed pricing date/version and model
+deprecation status. Configure a provider-side alert or spending stop at or below
+the approved allowance. The application's versioned cost estimate and provider
+accounting are independent controls; neither should be treated as the other.
 
 ### 4. Prove privacy, grounding, and accounting in Preview
 
@@ -724,28 +746,37 @@ controls; neither should be treated as the other.
 3. Confirm provider prompts/evidence and secrets do not appear in logs, Sentry,
    PostHog, diagnostics, readiness, or browser payloads.
 4. Enable `AI_RESEARCH_ENABLED=true` only in Preview after base background and
-   research flags are already proven. Request one report for one supported
-   company and controlled user.
+   research flags are already proven. Request exactly one AAPL report for one
+   controlled user. No second charged report is permitted during M27.
 5. Review every material claim against its cited excerpt/source. Confirm
    counter-evidence, disagreements, missing data, model/report versions, and the
    source snapshot are visible and persisted.
-6. Match token counts, estimated cost, reservation settlement, and provider
-   request ID to the actual OpenAI console charge. Investigate `UNCONFIRMED`
-   usage before more calls.
-7. Confirm a repeat reuses eligible work; explicit regeneration still consumes
-   quotas; a changed source/version fingerprint produces history/diff metadata.
-8. Exercise timeout and malformed-output behavior, then set the AI flag false
-   during a controlled attempt. The runner rechecks before each call/repair and
-   ordinary stock pages remain usable.
+6. Match every provider request ID and response token count to the stored usage.
+   Recompute cost from the pinned rate tuple and require exact agreement after
+   the application's upward `$0.000001` rounding. In the isolated Preview
+   project/window, require the provider-console charge delta to be at most
+   `$0.01`. Any `UNCONFIRMED` usage or unrelated traffic fails the gate.
+7. Confirm a repeat reuses eligible work. Same-day regeneration and a changed
+   source/version fingerprint must return the daily-limit rejection without a
+   second external job or charged provider report. Active duplicates fan out
+   only once. These checks must not invoke the provider again.
+8. Immediately restore `AI_RESEARCH_ENABLED=false` after the report reaches a
+   terminal state and before any further attempt. Confirm the flag-off state,
+   ordinary stock/history usability, and the recorded zero-network proof that
+   the runner blocks the next initial or repair call. Do not perform another
+   metered attempt for timeout, malformed-output, or rollback evidence.
 
-### 5. Production decision
+### 5. Stop and record the separate Production decision gate
 
 Record the Preview job/report IDs, source-review notes, privacy evidence,
 version tuple, provider usage/charge, kill-switch result, reviewer, and rollback
-target. Only then repeat one bounded Production proof. Do not call the service
-live merely because the key and flag exist. Review global/user/job reservations,
-actual cost, unconfirmed usage, provider pricing, and report quality at least
-monthly. The detailed methodology and rubric are in
+target, desktop/mobile review, and monitor results. Restore
+`AI_RESEARCH_ENABLED=false` and stop M27. Preview success does not authorize or
+establish Production readiness. The exact later Production steps require a new
+explicit approval and are recorded in [`AI_ACTIVATION.md`](AI_ACTIVATION.md).
+Do not create Production credentials, configure billing, migrate, deploy,
+enable a flag, or call the provider merely because Preview passes. The detailed
+methodology and rubric are in
 [`docs/ai-research.md`](docs/ai-research.md) and
 [`docs/ai-evaluation.md`](docs/ai-evaluation.md).
 
@@ -855,6 +886,7 @@ Production enablement.
    daily reset. No PostgreSQL, Redis, synchronization, feature-flag, deployment,
    or secret-exposure side effect occurred. Do not use `vercel env pull`,
    reclassify or copy the key into `.env`, or persist the approval value.
+
 5. Set `EARNINGS_SYNC_ENABLED=true` only in Production after steps 1-4 are
    recorded. Open `/earnings` and `/app/earnings`; verify source/fetched-at
    labels, owner scoping, deduplication, and explicit unknown/unavailable states.
@@ -1095,14 +1127,22 @@ credentials merely to automate this low-frequency review.
 - [ ] Redis limits return controlled `429` responses, recover after their window, and do not leak identifiers in keys.
 - [ ] Admin job details, retry/cancel authorization, correlation IDs, and ticker freshness render correctly.
 - [ ] Both named schedules exist once with the reviewed HTTPS destination and UTC cadence.
-- [ ] M18 migration is applied with AI disabled; historical reports remain deterministic.
+- [ ] Required M18 and M27 AI migrations are applied with AI disabled; historical reports remain deterministic.
 - [ ] Offline AI evaluation and recorded-provider cases pass with no private inputs.
-- [ ] One bounded external Preview report is source-reviewed; citations,
-      counter-evidence, missing data, versions, history/diff, and partial failures render.
-- [ ] AI reservation/settlement and provider request usage match the OpenAI console;
-      no unresolved `UNCONFIRMED` charge remains before further activation.
+- [ ] The single allowed AAPL external Preview report is human-reviewed for
+      citations and advice safety; counter-evidence, missing data, versions,
+      history/diff, and partial failures render.
+- [ ] Every AI request ID and response token count matches stored usage, cost
+      matches the pinned formula after upward micro-dollar rounding, provider
+      console delta is at most `$0.01`, and no `UNCONFIRMED` charge remains.
+- [ ] Eligible same-day work is reused; regeneration, source changes, and a
+      cancelled attempt cannot create a second daily external job; active
+      duplicates fan out only once.
 - [ ] Toggling `AI_RESEARCH_ENABLED=false` stops the next provider/repair attempt
       without breaking stock pages or deterministic history.
+- [ ] Desktop and 390-pixel mobile browser review of the actual report verifies
+      Summary, Strengths, Risks, What to Watch, collapsed Evidence / Sources,
+      citation focus/link usability, and no horizontal overflow.
 - [ ] Playwright public and authenticated journeys pass against the isolated Preview database.
 - [ ] CSP, HSTS, frame, referrer, permissions, and content-type headers match policy; TradingView remains usable.
 - [ ] Preview Sentry client/server/job errors carry the reviewed release and correlation context without private payloads.
@@ -1199,7 +1239,10 @@ Sentry and Better Stack are optional application dependencies. A monitoring outa
 
 ## External activation record
 
-Complete this table during the real deployment. Do not mark an item complete without direct evidence.
+Complete this table during the real deployment. Do not mark an item complete
+without direct evidence. M27's Preview-only call allowance, reconciliation
+tolerance, current blockers, and later Production gate are also recorded in
+[`AI_ACTIVATION.md`](AI_ACTIVATION.md).
 
 | Item                                                      | Status       | Evidence                                                                                                      |
 | --------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
@@ -1215,13 +1258,15 @@ Complete this table during the real deployment. Do not mark an item complete wit
 | Private R2 bucket and least-privilege token verified      | Not verified | Bucket policy and test object metadata                                                                        |
 | SEC user-agent/contact verified                           | Not verified | Controlled request and operator review                                                                        |
 | M15 migrations applied                                    | Not verified | Deployment log showing both ordered migration names                                                           |
-| Preview/Production M18 migration applied with AI disabled | Not verified | Environment-specific migration log and historical deterministic-report check; local deployment already passes |
-| OpenAI Preview project/key and billing control configured | Not verified | Non-secret project reference, pricing review, and alert/spending-stop evidence                                |
-| Offline AI evaluation and manual rubric passed            | Not verified | Versioned regression result and reviewer record                                                               |
+| Preview required AI migrations applied with AI disabled | Blocked      | 2026-08-24 value check found placeholder Preview database URLs; 2026-08-25 inventory recheck found no isolated service configuration; no backup/migration attempted; 11 local migrations pass |
+| Production AI migrations applied with AI disabled       | Not verified | Production untouched; separate approval, backup, migration log, and deterministic-history check required |
+| OpenAI pinned-model pricing/deprecation reviewed        | Verified     | 2026-08-25 official model page: `$0.75`/`$0.075`/`$4.50` per 1M input/cached/output; prior snapshot deprecated |
+| OpenAI Preview project/key and billing control configured | Blocked    | 2026-08-25: no scoped Preview project/key or billing control in the Preview inventory; no provider call made |
+| Offline AI evaluation and manual rubric passed          | Partial      | 2026-08-25: automated gates passed; named human reviewer and disposition pending |
 | External-AI private-data exclusion reviewed               | Not verified | Outbound-contract/log/browser/analytics inspection record                                                     |
-| Bounded Preview AI report source-reviewed                 | Not verified | Job/report IDs, version tuple, cited-source checklist, and reviewer                                           |
-| Preview AI usage reconciled                               | Not verified | Reservation/settlement, provider request ID, and console charge                                               |
-| AI kill switch and degradation verified                   | Not verified | Controlled test time and stock-page/deterministic-history result                                              |
+| Bounded Preview AAPL AI report source/advice-reviewed   | Not verified | Single report/job, request IDs, version tuple, claim checklist, and mandatory human reviewer |
+| Preview AI usage reconciled                             | Not verified | Exact tokens and formula; provider-console delta at most `$0.01`; zero `UNCONFIRMED` usage |
+| AI kill switch and degradation verified                | Partial      | Offline next-call proof passed; live flag-off, page, rollback, and monitor evidence pending |
 | Production AI explicitly approved and bounded             | Not verified | Approval, one report ID, source/privacy/usage proof; leave disabled otherwise                                 |
 | Preview Redis/QStash isolated                             | Not verified | Resource identifiers recorded outside source control                                                          |
 | Signed QStash delivery verified                           | Not verified | Preview job ID, attempt, and terminal status                                                                  |
@@ -1244,6 +1289,6 @@ Complete this table during the real deployment. Do not mark an item complete wit
 | PostHog privacy review complete                           | Not verified | Event/property export reviewed in Preview                                                                     |
 | First automated R2 backup complete                        | Not verified | Object key prefix, timestamp, size, and checksum metadata                                                     |
 | Non-production restore drill complete                     | Not verified | Timestamp and non-secret evidence reference                                                                   |
-| Security headers and TradingView CSP verified             | Not verified | Header capture and widget smoke-test timestamp                                                                |
-| Security automation and branch protection active          | Not verified | Required-check names and repository settings review                                                           |
-| Previous Vercel deployment restored/tested                | Not verified | Rollback drill date and deployment ID                                                                         |
+| Security headers and TradingView CSP verified             | Not verified        | Header capture and widget smoke-test timestamp                                                                                                                                                                                                                                                                                                |
+| Security automation and branch protection active          | Not verified        | Required-check names and repository settings review                                                                                                                                                                                                                                                                                           |
+| Previous Vercel deployment restored/tested                | Not verified        | Rollback drill date and deployment ID                                                                                                                                                                                                                                                                                                         |

@@ -51,7 +51,9 @@ export function specialistPrompt(input: {
     "Every claim must cite at least one supplied evidence id, and counterEvidenceIds may only identify supplied evidence that weakens the claim.",
     "Keep missing information explicit and preserve contradictory evidence.",
     "State a number only when that exact value and period appear in cited evidence; do not calculate new ratios.",
-    "Never recommend or instruct a buy, sell, or hold action and never personalize the analysis.",
+    "Never recommend or instruct an investment action, including buying, purchasing, acquiring, selling, disposing of, exiting, adding to, trimming, or holding a stock or position.",
+    "Never personalize an action using the user's portfolio, holdings, goals, risk tolerance, or time horizon.",
+    "Never provide a stock-price target or predict a stock's future price or direction.",
     agentPurpose[input.agentName],
   ].join(" ");
   const body = JSON.stringify({
@@ -84,7 +86,9 @@ export function synthesisPrompt(input: {
     "Use only the supplied evidence and specialist outputs. Specialist prose is interpretation, not a new source.",
     "Every final claim must cite supplied evidence ids directly, surface counter-evidence and disagreements, and preserve missing information.",
     "State a number only when that exact value and period appear in cited evidence; do not calculate new ratios.",
-    "Never recommend or instruct a buy, sell, or hold action and never personalize the analysis.",
+    "Never recommend or instruct an investment action, including buying, purchasing, acquiring, selling, disposing of, exiting, adding to, trimming, or holding a stock or position.",
+    "Never personalize an action using the user's portfolio, holdings, goals, risk tolerance, or time horizon.",
+    "Never provide a stock-price target or predict a stock's future price or direction.",
   ].join(" ");
   const body = JSON.stringify({
     task: "SYNTHESIS",

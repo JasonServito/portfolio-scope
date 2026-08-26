@@ -63,7 +63,7 @@ async function createResearchFixture(input: {
       claimsJson: [],
       missingDataJson: ["Licensed current news"],
       provider: "openai",
-      model: "gpt-5-mini-2025-08-07",
+      model: "gpt-5.4-mini-2026-03-17",
       promptVersion: "m18-research-e2e",
       outputSchemaVersion: "m18-claims-e2e",
       agentVersion: "m18-synthesis-e2e",
@@ -83,7 +83,7 @@ async function createResearchFixture(input: {
       disagreementsJson: ["Revenue and liability context diverge."],
       confidence: 0.72,
       provider: "openai",
-      model: "gpt-5-mini-2025-08-07",
+      model: "gpt-5.4-mini-2026-03-17",
       modelConfigJson: { maxOutputTokens: 1_500 },
       promptVersion: "m18-research-e2e",
       retrievalVersion: "m18-lexical-e2e",
@@ -511,14 +511,31 @@ test.describe("authenticated production boundaries", () => {
         .getByText("Current revenue evidence supports a bounded claim.")
         .first(),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Stock research report", level: 2 }),
+    ).toBeVisible();
+    for (const section of ["Summary", "Strengths", "Risks", "What to Watch"]) {
+      await expect(
+        page.getByRole("heading", { name: section, level: 3 }),
+      ).toBeVisible();
+    }
     await expect(page.getByText("Report: m18-report-e2e")).toHaveCount(0);
 
+    const evidenceDisclosure = page.locator("details", {
+      has: page.getByText("Evidence / Sources", { exact: false }),
+    });
+    await expect(evidenceDisclosure).not.toHaveAttribute("open", "");
+    await expect(
+      page.getByRole("heading", { name: "Source details" }),
+    ).toBeHidden();
+    await evidenceDisclosure.locator("summary").click();
+    await expect(evidenceDisclosure).toHaveAttribute("open", "");
+    await expect(
+      page.getByRole("heading", { name: "Source details" }),
+    ).toBeVisible();
     await page
       .getByRole("button", { name: "AAPL revenue filing evidence" })
       .click();
-    await expect(
-      page.getByText("Source registry", { exact: true }),
-    ).toBeVisible();
     const evidence = page.locator("[id^='evidence-ev_current_revenue']");
     await expect(evidence).toBeVisible();
     await expect(evidence).toBeFocused();
