@@ -2,7 +2,6 @@ import * as Sentry from "@sentry/nextjs";
 import posthog from "posthog-js";
 
 import {
-  getSentryRelease,
   getSentryTracesSampleRate,
   scrubSentryBreadcrumb,
   scrubSentryEvent,
@@ -16,7 +15,7 @@ Sentry.init({
   enabled: Boolean(dsn),
   environment: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
   sendDefaultPii: false,
-  release: getSentryRelease(),
+  release: process.env.NEXT_PUBLIC_SENTRY_RELEASE?.trim() || undefined,
   tracesSampleRate: getSentryTracesSampleRate(),
   beforeBreadcrumb: scrubSentryBreadcrumb,
   beforeSend: scrubSentryEvent,
