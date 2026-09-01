@@ -8,8 +8,10 @@ import {
   prepareM27QstashReplayCapture,
 } from "@/lib/jobs/m27-qstash-replay-proof";
 
-const origin = "https://m27-preview.example.test";
-const workerUrl = `${origin}/api/internal/jobs/worker`;
+const stableOrigin = "https://stable-staging.example.test";
+const disposableOrigin =
+  "https://portfolio-scope-git-c-31d069-jasonservito000-gmailcoms-projects.vercel.app";
+const workerUrl = `${disposableOrigin}/api/internal/jobs/worker`;
 const canonicalBody = JSON.stringify({
   jobId: M27_QSTASH_REPLAY_PROOF_JOB_ID,
 });
@@ -22,9 +24,10 @@ function previewEnvironment(
   return {
     NODE_ENV: "production",
     VERCEL_ENV: "preview",
-    NEXT_PUBLIC_APP_URL: origin,
+    NEXT_PUBLIC_APP_URL: stableOrigin,
     M27_QSTASH_REPLAY_CAPTURE_JOB_ID: M27_QSTASH_REPLAY_PROOF_JOB_ID,
     M27_QSTASH_REPLAY_CAPTURE_KEY: captureKey,
+    M27_QSTASH_REPLAY_CAPTURE_WORKER_URL: workerUrl,
     ...overrides,
   };
 }
@@ -98,6 +101,7 @@ describe("temporary M27 QStash replay capture", () => {
     ["wrong proof job", { M27_QSTASH_REPLAY_CAPTURE_JOB_ID: "wrong-job" }],
     ["missing key", { M27_QSTASH_REPLAY_CAPTURE_KEY: undefined }],
     ["non-base64 key", { M27_QSTASH_REPLAY_CAPTURE_KEY: "not-base64" }],
+    ["missing worker URL", { M27_QSTASH_REPLAY_CAPTURE_WORKER_URL: undefined }],
     [
       "wrong key length",
       { M27_QSTASH_REPLAY_CAPTURE_KEY: Buffer.alloc(31).toString("base64") },
@@ -122,16 +126,54 @@ describe("temporary M27 QStash replay capture", () => {
 
     expect(prepared).toBeInstanceOf(Request);
     expect(prepared).not.toBe(incoming);
-    expect(
-      prepareM27QstashReplayCapture(
-        request({ url: `${origin}/api/internal/jobs/worker/` }),
-        previewEnvironment(),
-      ),
-    ).toBeNull();
   });
 
   it.each([
-    ["wrong URL", request({ url: `${origin}/api/internal/jobs/worker/` }), {}],
+    ["wrong host", { requestUrl: `${stableOrigin}/api/internal/jobs/worker` }],
+    [
+      "wrong path",
+      {
+        configuredUrl: `${disposableOrigin}/api/internal/jobs/worker/`,
+      },
+    ],
+    [
+      "HTTP URL",
+      {
+        configuredUrl: workerUrl.replace("https://", "http://"),
+      },
+    ],
+    [
+      "credentials",
+      {
+        configuredUrl: workerUrl.replace("https://", "https://user:password@"),
+      },
+    ],
+    ["query", { configuredUrl: `${workerUrl}?proof=true` }],
+    ["fragment", { configuredUrl: `${workerUrl}#proof` }],
+  ])("rejects a worker URL with %s", async (_label, input) => {
+    const redis = new FakeCaptureRedis();
+    const configuredUrl =
+      "configuredUrl" in input ? input.configuredUrl : workerUrl;
+    const requestUrl = "requestUrl" in input ? input.requestUrl : workerUrl;
+    const environment = previewEnvironment({
+      M27_QSTASH_REPLAY_CAPTURE_WORKER_URL: configuredUrl,
+    });
+    const incoming = request({ url: requestUrl });
+
+    expect(prepareM27QstashReplayCapture(incoming, environment)).toBeNull();
+    await captureM27QstashReplayRequest(incoming, completedDuplicate(), {
+      environment,
+      redis,
+    });
+    expect(redis.calls).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      "wrong URL",
+      request({ url: `${disposableOrigin}/api/internal/jobs/worker/` }),
+      {},
+    ],
     ["wrong body", request({ body: `${canonicalBody}\n` }), {}],
     ["missing signature", request({ signature: null }), {}],
     ["wrong job", request(), { jobId: "another-job" }],

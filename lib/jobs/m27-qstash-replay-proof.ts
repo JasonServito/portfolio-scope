@@ -1,7 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 
 import { buildRedisKey, getRedis, type RedisCommands } from "@/lib/cache/redis";
-import { getApplicationOrigin } from "@/lib/jobs/config";
 
 export const M27_QSTASH_REPLAY_PROOF_JOB_ID =
   "m27-qstash-replay-proof-20260901T160500Z";
@@ -38,6 +37,28 @@ function decodeCaptureKey(value: string | undefined) {
   return key;
 }
 
+function captureWorkerUrl(value: string | undefined) {
+  const configured = value?.trim();
+  if (!configured) return null;
+
+  try {
+    const url = new URL(configured);
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      configured.includes("?") ||
+      configured.includes("#") ||
+      url.pathname !== WORKER_PATH
+    ) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function captureConfiguration(environment: NodeJS.ProcessEnv) {
   if (environment.VERCEL_ENV?.trim().toLowerCase() !== "preview") {
     return null;
@@ -54,15 +75,17 @@ function captureConfiguration(environment: NodeJS.ProcessEnv) {
   );
   if (!encryptionKey) return null;
 
-  const origin = getApplicationOrigin(environment);
-  if (!origin) {
+  const workerUrl = captureWorkerUrl(
+    environment.M27_QSTASH_REPLAY_CAPTURE_WORKER_URL,
+  );
+  if (!workerUrl) {
     encryptionKey.fill(0);
     return null;
   }
 
   return {
     encryptionKey,
-    workerUrl: `${origin}${WORKER_PATH}`,
+    workerUrl,
   };
 }
 
