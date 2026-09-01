@@ -64,8 +64,14 @@ export function scrubSentryEvent<TEvent extends Event>(event: TEvent): TEvent {
 
   const headers = event.request?.headers;
   if (headers) {
+    const redactPreviewQstashSignature =
+      process.env.VERCEL_ENV?.trim().toLowerCase() === "preview";
     for (const key of Object.keys(headers)) {
-      if (/authorization|cookie|token|secret|key/i.test(key)) {
+      if (
+        /authorization|cookie|token|secret|key/i.test(key) ||
+        (redactPreviewQstashSignature &&
+          key.toLowerCase() === "upstash-signature")
+      ) {
         delete headers[key];
       }
     }
