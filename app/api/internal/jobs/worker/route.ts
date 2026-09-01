@@ -1,9 +1,5 @@
 import { apiErrorResponse } from "@/lib/api/errors";
 import { JobRequestError } from "@/lib/jobs/errors";
-import {
-  captureM27QstashReplayRequest,
-  prepareM27QstashReplayCapture,
-} from "@/lib/jobs/m27-qstash-replay-proof";
 import { verifyQstashRequest } from "@/lib/jobs/qstash";
 import { executeBackgroundJob } from "@/lib/jobs/service";
 import { calculateRetryDelaySeconds } from "@/lib/jobs/types";
@@ -15,29 +11,21 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  return observeApiRequest(request, "/api/internal/jobs/worker", async () =>
-    handleWorkerRequest(request),
+  return observeApiRequest(
+    request,
+    "/api/internal/jobs/worker",
+    async () => handleWorkerRequest(request),
   );
 }
 
 async function handleWorkerRequest(request: Request) {
   try {
-    const replayCaptureRequest = prepareM27QstashReplayCapture(request);
     const { jobId } = await verifyQstashRequest(request);
     await enforceRateLimit({
       category: "workerCallback",
       identifier: `ip:${getRequestIp(request)}`,
     });
     const result = await executeBackgroundJob(jobId);
-    if (
-      replayCaptureRequest &&
-      result.status === "COMPLETED" &&
-      result.duplicate === true
-    ) {
-      await captureM27QstashReplayRequest(replayCaptureRequest, result).catch(
-        () => undefined,
-      );
-    }
     if (result.retrying) {
       return Response.json(
         { jobId: result.jobId, status: result.status },

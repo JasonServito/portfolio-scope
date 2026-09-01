@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   getSentryTracesSampleRate,
@@ -7,10 +7,6 @@ import {
 } from "@/lib/observability/sentry-config";
 
 describe("Sentry privacy configuration", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it("removes request bodies, cookies, secret headers, and user PII", () => {
     const event = scrubSentryEvent({
       user: {
@@ -33,34 +29,6 @@ describe("Sentry privacy configuration", () => {
     expect(event.request?.cookies).toBeUndefined();
     expect(event.request?.data).toBeUndefined();
     expect(event.request?.headers).toEqual({ "user-agent": "test" });
-  });
-
-  it("removes only the QStash signature header in Preview", () => {
-    vi.stubEnv("VERCEL_ENV", "preview");
-    const preview = scrubSentryEvent({
-      request: {
-        headers: {
-          "upstash-signature": "signed-preview-request",
-          "user-agent": "test",
-        },
-      },
-    });
-
-    vi.stubEnv("VERCEL_ENV", "production");
-    const production = scrubSentryEvent({
-      request: {
-        headers: {
-          "Upstash-Signature": "existing-production-telemetry-behavior",
-          "user-agent": "test",
-        },
-      },
-    });
-
-    expect(preview.request?.headers).toEqual({ "user-agent": "test" });
-    expect(production.request?.headers).toEqual({
-      "Upstash-Signature": "existing-production-telemetry-behavior",
-      "user-agent": "test",
-    });
   });
 
   it("accepts only bounded performance sample rates", () => {

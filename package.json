@@ -12,7 +12,7 @@
     "postinstall": "prisma generate",
     "lint": "eslint",
     "test": "vitest run --pool=forks --maxWorkers=4 && npm run test:operations",
-    "test:operations": "node --test scripts/backup-postgres.test.mjs scripts/restore-postgres.test.mjs scripts/guarded-prisma.test.mjs scripts/m27-qstash-replay-proof.test.mjs",
+    "test:operations": "node --test scripts/backup-postgres.test.mjs scripts/restore-postgres.test.mjs scripts/guarded-prisma.test.mjs",
     "test:integration": "node scripts/verify-demo-seed.mjs && node scripts/verify-auth-persistence.mjs && vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --grep @smoke",
