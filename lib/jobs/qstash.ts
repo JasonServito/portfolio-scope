@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Client, Receiver } from "@upstash/qstash";
 import { z } from "zod";
 
@@ -7,6 +9,7 @@ import { jobDeliverySchema } from "@/lib/jobs/types";
 
 const defaultQstashHost = "qstash.upstash.io";
 const maximumDiagnosticMessageLength = 240;
+const qstashDeduplicationIdMaximumLength = 64;
 
 const qstashApiBaseUrlSchema = z
   .string()
@@ -86,6 +89,13 @@ export type QstashPublishFailureDiagnostic = {
 
 let sharedClient: Client | undefined;
 let sharedReceiver: Receiver | undefined;
+
+export function createQstashDeduplicationId(value: string) {
+  return createHash("sha256")
+    .update(value, "utf8")
+    .digest("hex")
+    .slice(0, qstashDeduplicationIdMaximumLength);
+}
 
 function readErrorField(error: unknown, field: string) {
   if ((typeof error !== "object" && typeof error !== "function") || !error) {
@@ -285,7 +295,9 @@ export async function publishJobMessage(input: {
     retries: Math.max(0, input.maxAttempts - 1),
     retryDelay: "min(300000, 15000 * pow(2, retried))",
     timeout: Math.max(1, Math.ceil(input.timeoutMs / 1000)),
-    deduplicationId: input.deduplicationId ?? input.jobId,
+    deduplicationId: createQstashDeduplicationId(
+      input.deduplicationId ?? input.jobId,
+    ),
     label: ["portfolioscope", input.type.toLowerCase()],
     headers: { "x-correlation-id": input.correlationId },
     redact: { body: true },

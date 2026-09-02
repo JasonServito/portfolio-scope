@@ -2,7 +2,10 @@ import { BackgroundJobStatus, BackgroundJobType } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { JobExecutionError } from "@/lib/jobs/errors";
-import { type JobPublisher } from "@/lib/jobs/qstash";
+import {
+  createQstashDeduplicationId,
+  type JobPublisher,
+} from "@/lib/jobs/qstash";
 import { PrismaBackgroundJobRepository } from "@/lib/jobs/repository";
 import {
   enqueueBackgroundJob,
@@ -76,7 +79,13 @@ describe("background job service", () => {
       enqueueBackgroundJob(input, { repository, publisher, environment }),
     ).resolves.toMatchObject({ jobId: "job-a", reused: true });
     expect(repository.createOrReuse).toHaveBeenCalledTimes(2);
+    expect(repository.createOrReuse).toHaveBeenNthCalledWith(1, input);
     expect(publisher.publishJSON).toHaveBeenCalledOnce();
+    expect(publisher.publishJSON).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deduplicationId: createQstashDeduplicationId(input.idempotencyKey),
+      }),
+    );
     expect(repository.recordPublished).toHaveBeenCalledWith(
       "job-a",
       "message-a",
@@ -150,6 +159,60 @@ describe("background job service", () => {
       "job-a",
       "JOB_PUBLISH_FAILED",
       "QStash publish failed: host=qstash-us-east-1.upstash.io; error=QstashError; status=401; message=invalid token [REDACTED]",
+    );
+  });
+
+  it("publishes a QStash-safe deduplication ID for a NEWS manual retry", async () => {
+    const applicationIdempotencyKey =
+      "research:cmtjd3d8d0001ju04sxjp4plb:agent:NEWS";
+    const repository = {
+      prepareManualRetry: vi.fn().mockResolvedValue(
+        job({
+          id: "cmtjd3da10008ju04e2v34ev2",
+          type: BackgroundJobType.RESEARCH_AGENT_RUN,
+          idempotencyKey: applicationIdempotencyKey,
+          researchJobId: "cmtjd3d8d0001ju04sxjp4plb",
+          agentName: "NEWS",
+        }),
+      ),
+      recordPublished: vi.fn(),
+      recordPublishFailure: vi.fn(),
+    } as unknown as PrismaBackgroundJobRepository;
+    const publishJSON = vi
+      .fn()
+      .mockResolvedValue({ messageId: "message-news" });
+    const publisher = { publishJSON } satisfies JobPublisher;
+
+    const retry = () =>
+      retryBackgroundJob("cmtjd3da10008ju04e2v34ev2", "admin-a", {
+        repository,
+        publisher,
+        environment,
+      });
+
+    await expect(retry()).resolves.toMatchObject({
+      jobId: "cmtjd3da10008ju04e2v34ev2",
+      status: BackgroundJobStatus.QUEUED,
+    });
+    await expect(retry()).resolves.toMatchObject({
+      jobId: "cmtjd3da10008ju04e2v34ev2",
+      status: BackgroundJobStatus.QUEUED,
+    });
+    expect(publishJSON).toHaveBeenCalledTimes(2);
+    const providerIds = publishJSON.mock.calls.map(
+      ([request]) => request.deduplicationId,
+    );
+    expect(providerIds).toEqual([
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+    ]);
+    expect(providerIds[0]).not.toBe(providerIds[1]);
+    expect(providerIds.join("")).not.toContain(":");
+    expect(providerIds.join("")).not.toContain(applicationIdempotencyKey);
+    expect(repository.recordPublished).toHaveBeenCalledTimes(2);
+    expect(repository.recordPublished).toHaveBeenLastCalledWith(
+      "cmtjd3da10008ju04e2v34ev2",
+      "message-news",
     );
   });
 

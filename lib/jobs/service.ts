@@ -129,6 +129,7 @@ export async function enqueueBackgroundJob<T extends BackgroundJobType>(
         maxAttempts: job.maxAttempts,
         timeoutMs: job.timeoutMs,
         correlationId: job.correlationId,
+        deduplicationId: job.idempotencyKey,
         publisher: dependencies.publisher,
         environment,
       });
@@ -341,7 +342,7 @@ export async function retryBackgroundJob(
       maxAttempts: Math.max(1, job.maxAttempts - job.attemptCount),
       timeoutMs: job.timeoutMs,
       correlationId: job.correlationId,
-      deduplicationId: `${job.id}:manual:${randomUUID()}`,
+      deduplicationId: `${job.idempotencyKey}:manual:${randomUUID()}`,
       publisher: dependencies.publisher,
       environment,
     });

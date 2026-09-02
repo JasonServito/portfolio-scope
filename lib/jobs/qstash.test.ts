@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { JobErrorCode } from "@/lib/jobs/errors";
 import {
+  createQstashDeduplicationId,
   formatQstashPublishFailureDiagnostic,
   getQstashClient,
   getPreviewQstashPublishFailureDiagnostic,
@@ -100,11 +101,47 @@ describe("QStash transport", () => {
         body: { jobId: "job-a" },
         retries: 2,
         timeout: 30,
-        deduplicationId: "job-a",
+        deduplicationId:
+          "ba724b9dde76059df442e1a584d01ebc768895734ec4573a56384d8e05721292",
         headers: { "x-correlation-id": "correlation-a" },
         redact: { body: true },
       }),
     );
+  });
+
+  it.each([
+    [
+      "research:cmtjd3d8d0001ju04sxjp4plb:agent:NEWS",
+      "3b6f814cf21656f44411660030cbb5c41b27103179542ce37dc7a148cb8b2c51",
+    ],
+    [
+      "maintenance:RECOVER_STALE_JOBS:2026-09-02T15:00:00.000Z",
+      "b56f0c8a7c0078adebbfa2085ddbc78b80c044d754b023beee33d9d4489f5c7c",
+    ],
+  ])(
+    "creates a stable QStash-safe deduplication ID for %s",
+    (applicationKey, expectedProviderId) => {
+      const first = createQstashDeduplicationId(applicationKey);
+      const second = createQstashDeduplicationId(applicationKey);
+
+      expect(first).toBe(expectedProviderId);
+      expect(second).toBe(first);
+      expect(first).toMatch(/^[a-f0-9]+$/);
+      expect(first.length).toBeLessThanOrEqual(64);
+      expect(first).not.toContain(":");
+      expect(first).not.toContain(applicationKey);
+    },
+  );
+
+  it("keeps distinct application keys distinct at the provider boundary", () => {
+    const news = createQstashDeduplicationId(
+      "research:cmtjd3d8d0001ju04sxjp4plb:agent:NEWS",
+    );
+    const financials = createQstashDeduplicationId(
+      "research:cmtjd3d8d0001ju04sxjp4plb:agent:FINANCIALS",
+    );
+
+    expect(news).not.toBe(financials);
   });
 
   it("extracts only redacted Preview publish diagnostics", () => {
