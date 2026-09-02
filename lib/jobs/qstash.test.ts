@@ -2,13 +2,78 @@ import { describe, expect, it, vi } from "vitest";
 
 import { JobErrorCode } from "@/lib/jobs/errors";
 import {
+  getQstashClient,
   publishJobMessage,
   verifyQstashRequest,
   type JobPublisher,
   type SignatureReceiver,
 } from "@/lib/jobs/qstash";
 
+const qstashMocks = vi.hoisted(() => ({
+  client: vi.fn(function QstashClient() {
+    return { publishJSON: vi.fn() };
+  }),
+  receiver: vi.fn(function QstashReceiver() {
+    return { verify: vi.fn() };
+  }),
+}));
+
+vi.mock("@upstash/qstash", () => ({
+  Client: qstashMocks.client,
+  Receiver: qstashMocks.receiver,
+}));
+
 describe("QStash transport", () => {
+  it("passes the configured regional API origin to the QStash client", () => {
+    getQstashClient({
+      NODE_ENV: "test",
+      QSTASH_TOKEN: "preview-token",
+      QSTASH_URL: "https://qstash-us-east-1.upstash.io/",
+    } as NodeJS.ProcessEnv);
+
+    expect(qstashMocks.client).toHaveBeenCalledWith({
+      token: "preview-token",
+      baseUrl: "https://qstash-us-east-1.upstash.io",
+    });
+  });
+
+  it("preserves the SDK default when no QStash API origin is configured", async () => {
+    vi.resetModules();
+    qstashMocks.client.mockClear();
+    const { getQstashClient: getFreshQstashClient } = await import(
+      "@/lib/jobs/qstash"
+    );
+
+    getFreshQstashClient({
+      NODE_ENV: "test",
+      QSTASH_TOKEN: "production-token",
+    } as NodeJS.ProcessEnv);
+
+    expect(qstashMocks.client).toHaveBeenCalledWith({
+      token: "production-token",
+    });
+  });
+
+  it.each([
+    "not-a-url",
+    "http://qstash-us-east-1.upstash.io",
+    "https://token@qstash-us-east-1.upstash.io",
+    "https://qstash-us-east-1.upstash.io/v2/publish",
+  ])("fails closed for malformed QStash API origin %s", (baseUrl) => {
+    expect(() =>
+      getQstashClient({
+        NODE_ENV: "test",
+        QSTASH_TOKEN: "preview-token",
+        QSTASH_URL: baseUrl,
+      } as NodeJS.ProcessEnv),
+    ).toThrow(
+      expect.objectContaining({
+        code: JobErrorCode.CONFIGURATION_ERROR,
+        status: 503,
+      }),
+    );
+  });
+
   it("publishes a redacted, deduplicated message with bounded delivery retries", async () => {
     const publisher = {
       publishJSON: vi.fn().mockResolvedValue({ messageId: "message-a" }),

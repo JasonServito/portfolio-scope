@@ -74,6 +74,7 @@ Configure each environment independently. Never copy production database credent
 | `UPSTASH_REDIS_REST_URL`                                              | Blank unless testing jobs                                       | Non-production Redis REST URL                | Production Redis REST URL                           |  Treat as server configuration |
 | `UPSTASH_REDIS_REST_TOKEN`                                            | Blank unless testing jobs                                       | Non-production Redis token                   | Production Redis token                              |                            Yes |
 | `QSTASH_TOKEN`                                                        | Blank unless testing jobs                                       | Non-production QStash token                  | Production QStash token                             |                            Yes |
+| `QSTASH_URL`                                                          | Blank unless a regional API origin is required                   | Regional QStash HTTPS API origin when needed | Regional QStash HTTPS API origin when needed        |                             No |
 | `QSTASH_CURRENT_SIGNING_KEY`                                          | Blank unless testing jobs                                       | Non-production current key                   | Production current key                              |                            Yes |
 | `QSTASH_NEXT_SIGNING_KEY`                                             | Blank unless testing jobs                                       | Non-production next key                      | Production next key                                 |                            Yes |
 | `BACKGROUND_JOBS_ENABLED`                                             | `false` until configured                                        | `false` until callback proof                 | `false` until callback proof                        |                             No |
@@ -588,10 +589,12 @@ indexes. No seed or data backfill is required.
 ### 2. Configure isolated Upstash resources
 
 Create separate Preview and Production Redis databases and QStash credentials.
-Set all five Upstash secrets from `.env.example` in the matching server
-environment. Set `NEXT_PUBLIC_APP_URL` to that environment's stable HTTPS
-origin; QStash signs the full callback URL, so a mismatched host causes a
-controlled `401`.
+Set the five Upstash secrets from `.env.example` in the matching server
+environment. If an account uses a regional QStash API endpoint, also set
+`QSTASH_URL` to its credential-free HTTPS origin; leave it blank to preserve the
+SDK default. Set `NEXT_PUBLIC_APP_URL` to that environment's stable HTTPS origin;
+QStash signs the full callback URL, so a mismatched host causes a controlled
+`401`.
 
 The Redis keys are prefixed by environment and private identifiers are hashed.
 Cache failure degrades to the provider or PostgreSQL where safe. Ordinary

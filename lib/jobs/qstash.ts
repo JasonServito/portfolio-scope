@@ -5,8 +5,44 @@ import { JobErrorCode, JobRequestError } from "@/lib/jobs/errors";
 import { getApplicationOrigin } from "@/lib/jobs/config";
 import { jobDeliverySchema } from "@/lib/jobs/types";
 
+const qstashApiBaseUrlSchema = z
+  .string()
+  .trim()
+  .transform((value, context) => {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      context.addIssue({
+        code: "custom",
+        message: "QSTASH_URL must be a credential-free HTTPS origin.",
+      });
+      return z.NEVER;
+    }
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "QSTASH_URL must be a credential-free HTTPS origin.",
+      });
+      return z.NEVER;
+    }
+    return url.origin;
+  });
+
 const qstashClientEnvironmentSchema = z.object({
   QSTASH_TOKEN: z.string().trim().min(1),
+  QSTASH_URL: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    qstashApiBaseUrlSchema.optional(),
+  ),
 });
 
 const qstashReceiverEnvironmentSchema = z.object({
@@ -51,7 +87,12 @@ export function getQstashClient(environment: NodeJS.ProcessEnv = process.env) {
     );
   }
 
-  sharedClient ??= new Client({ token: parsed.data.QSTASH_TOKEN });
+  sharedClient ??= new Client({
+    token: parsed.data.QSTASH_TOKEN,
+    ...(parsed.data.QSTASH_URL
+      ? { baseUrl: parsed.data.QSTASH_URL }
+      : {}),
+  });
   return sharedClient;
 }
 
