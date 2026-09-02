@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   expectedConfirmation,
+  operationCommand,
   validateDatabaseTarget,
 } from "./guarded-prisma.mjs";
 
@@ -107,5 +109,39 @@ test("approved remote seeds use a distinct explicit confirmation", () => {
   assert.throws(
     () => expectedConfirmation("migrate-dev", "preview"),
     /not supported/,
+  );
+});
+
+test("seed invokes the deterministic entry point without Prisma's nullable seed hook", () => {
+  const repositoryRoot = join("test", "portfolio-scope");
+
+  assert.deepEqual(
+    operationCommand("seed", {
+      cwd: repositoryRoot,
+      nodeExecutable: "node",
+    }),
+    {
+      command: "node",
+      arguments: [join(repositoryRoot, "prisma", "seed.mjs")],
+    },
+  );
+});
+
+test("migration operations continue to use the Prisma CLI", () => {
+  const repositoryRoot = join("test", "portfolio-scope");
+
+  assert.deepEqual(
+    operationCommand("migrate-deploy", {
+      cwd: repositoryRoot,
+      nodeExecutable: "node",
+    }),
+    {
+      command: "node",
+      arguments: [
+        join(repositoryRoot, "node_modules", "prisma", "build", "index.js"),
+        "migrate",
+        "deploy",
+      ],
+    },
   );
 });

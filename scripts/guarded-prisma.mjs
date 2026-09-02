@@ -16,8 +16,11 @@ const REMOTE_TARGETS = new Set(["preview", "production", "restore-drill"]);
 const PRISMA_ARGUMENTS = {
   "migrate-dev": ["migrate", "dev"],
   "migrate-deploy": ["migrate", "deploy"],
-  seed: ["db", "seed"],
 };
+const SUPPORTED_OPERATIONS = new Set([
+  ...Object.keys(PRISMA_ARGUMENTS),
+  "seed",
+]);
 
 function parseDatabaseUrl(label, value) {
   if (!value) {
@@ -60,7 +63,7 @@ export function validateDatabaseTarget({
   nodeEnvironment,
   vercelEnvironment,
 }) {
-  if (!Object.hasOwn(PRISMA_ARGUMENTS, operation)) {
+  if (!SUPPORTED_OPERATIONS.has(operation)) {
     throw new Error("Unknown guarded Prisma operation.");
   }
 
@@ -110,6 +113,30 @@ export function validateDatabaseTarget({
   return { scope: target };
 }
 
+export function operationCommand(
+  operation,
+  { cwd = process.cwd(), nodeExecutable = process.execPath } = {},
+) {
+  if (operation === "seed") {
+    return {
+      command: nodeExecutable,
+      arguments: [join(cwd, "prisma", "seed.mjs")],
+    };
+  }
+
+  if (!Object.hasOwn(PRISMA_ARGUMENTS, operation)) {
+    throw new Error("Unknown guarded Prisma operation.");
+  }
+
+  return {
+    command: nodeExecutable,
+    arguments: [
+      join(cwd, "node_modules", "prisma", "build", "index.js"),
+      ...PRISMA_ARGUMENTS[operation],
+    ],
+  };
+}
+
 function loadRepositoryEnvironment() {
   if (process.env.DATABASE_URL && process.env.DIRECT_URL) {
     return;
@@ -140,23 +167,13 @@ function run() {
     vercelEnvironment: process.env.VERCEL_ENV,
   });
 
-  const prismaCli = join(
-    process.cwd(),
-    "node_modules",
-    "prisma",
-    "build",
-    "index.js",
-  );
+  const childCommand = operationCommand(operation);
 
   console.log(`Running guarded Prisma operation for ${result.scope}.`);
-  const child = spawnSync(
-    process.execPath,
-    [prismaCli, ...PRISMA_ARGUMENTS[operation]],
-    {
-      env: process.env,
-      stdio: "inherit",
-    },
-  );
+  const child = spawnSync(childCommand.command, childCommand.arguments, {
+    env: process.env,
+    stdio: "inherit",
+  });
 
   if (child.error) {
     throw child.error;
