@@ -7,6 +7,7 @@ import { PrismaBackgroundJobRepository } from "@/lib/jobs/repository";
 import {
   enqueueBackgroundJob,
   executeBackgroundJob,
+  retryBackgroundJob,
 } from "@/lib/jobs/service";
 
 const environment = {
@@ -103,7 +104,80 @@ describe("background job service", () => {
         { repository, publisher, environment },
       ),
     ).rejects.toMatchObject({ code: "JOB_PUBLISH_FAILED", status: 503 });
-    expect(repository.recordPublishFailure).toHaveBeenCalledOnce();
+    expect(repository.recordPublishFailure).toHaveBeenCalledWith(
+      "job-a",
+      "JOB_PUBLISH_FAILED",
+      "QStash did not accept the background job.",
+    );
+  });
+
+  it("persists a redacted provider diagnostic for Preview manual retries", async () => {
+    const repository = {
+      prepareManualRetry: vi.fn().mockResolvedValue(job()),
+      recordPublished: vi.fn(),
+      recordPublishFailure: vi.fn(),
+    } as unknown as PrismaBackgroundJobRepository;
+    const publisherError = Object.assign(
+      new Error("invalid token preview-token"),
+      { name: "QstashError", status: 401 },
+    );
+    const publisher = {
+      publishJSON: vi.fn().mockRejectedValue(publisherError),
+    } as JobPublisher;
+
+    const failure = await retryBackgroundJob("job-a", "admin-a", {
+      repository,
+      publisher,
+      environment: {
+        ...environment,
+        VERCEL_ENV: "preview",
+        QSTASH_URL: "https://qstash-us-east-1.upstash.io",
+        QSTASH_TOKEN: "preview-token",
+      } as NodeJS.ProcessEnv,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      code: "JOB_PUBLISH_FAILED",
+      status: 503,
+      cause: {
+        name: "QstashPublishDiagnosticError",
+        message:
+          "QStash publish failed: host=qstash-us-east-1.upstash.io; error=QstashError; status=401; message=invalid token [REDACTED]",
+      },
+    });
+    expect(JSON.stringify(failure)).not.toContain("preview-token");
+    expect(repository.recordPublishFailure).toHaveBeenCalledWith(
+      "job-a",
+      "JOB_PUBLISH_FAILED",
+      "QStash publish failed: host=qstash-us-east-1.upstash.io; error=QstashError; status=401; message=invalid token [REDACTED]",
+    );
+  });
+
+  it("preserves the original publish error as the Production cause", async () => {
+    const repository = {
+      prepareManualRetry: vi.fn().mockResolvedValue(job()),
+      recordPublished: vi.fn(),
+      recordPublishFailure: vi.fn(),
+    } as unknown as PrismaBackgroundJobRepository;
+    const publisherError = new Error("production provider detail");
+    const publisher = {
+      publishJSON: vi.fn().mockRejectedValue(publisherError),
+    } as JobPublisher;
+
+    const failure = await retryBackgroundJob("job-a", "admin-a", {
+      repository,
+      publisher,
+      environment: {
+        ...environment,
+        VERCEL_ENV: "production",
+      } as NodeJS.ProcessEnv,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      code: "JOB_PUBLISH_FAILED",
+      status: 503,
+      cause: publisherError,
+    });
   });
 
   it("keeps an accepted delivery queued when message metadata cannot be recorded", async () => {
@@ -146,13 +220,15 @@ describe("background job service", () => {
     await expect(
       executeBackgroundJob("job-a", {
         repository,
-        handler: vi.fn().mockRejectedValue(
-          new JobExecutionError(
-            "SEC_PROVIDER_UNAVAILABLE",
-            true,
-            "SEC is temporarily unavailable.",
+        handler: vi
+          .fn()
+          .mockRejectedValue(
+            new JobExecutionError(
+              "SEC_PROVIDER_UNAVAILABLE",
+              true,
+              "SEC is temporarily unavailable.",
+            ),
           ),
-        ),
       }),
     ).resolves.toMatchObject({
       status: BackgroundJobStatus.RETRYING,

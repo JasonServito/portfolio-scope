@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { JobErrorCode } from "@/lib/jobs/errors";
 import {
+  formatQstashPublishFailureDiagnostic,
   getQstashClient,
+  getPreviewQstashPublishFailureDiagnostic,
   publishJobMessage,
   verifyQstashRequest,
   type JobPublisher,
@@ -40,9 +42,8 @@ describe("QStash transport", () => {
   it("preserves the SDK default when no QStash API origin is configured", async () => {
     vi.resetModules();
     qstashMocks.client.mockClear();
-    const { getQstashClient: getFreshQstashClient } = await import(
-      "@/lib/jobs/qstash"
-    );
+    const { getQstashClient: getFreshQstashClient } =
+      await import("@/lib/jobs/qstash");
 
     getFreshQstashClient({
       NODE_ENV: "test",
@@ -106,6 +107,98 @@ describe("QStash transport", () => {
     );
   });
 
+  it("extracts only redacted Preview publish diagnostics", () => {
+    const error = Object.assign(
+      new Error(
+        '{"error":"unauthorized Bearer leaked-bearer QSTASH_TOKEN=preview-token signing_key=current-signing-key raw=next-signing-key"}',
+      ),
+      { name: "QstashError", status: 401, code: "AUTH_FAILED" },
+    );
+    const environment = {
+      NODE_ENV: "test",
+      VERCEL_ENV: "preview",
+      QSTASH_URL: "https://qstash-us-east-1.upstash.io",
+      QSTASH_TOKEN: "preview-token",
+      QSTASH_CURRENT_SIGNING_KEY: "current-signing-key",
+      QSTASH_NEXT_SIGNING_KEY: "next-signing-key",
+    } as NodeJS.ProcessEnv;
+
+    const diagnostic = getPreviewQstashPublishFailureDiagnostic(
+      error,
+      environment,
+    );
+    const serialized = JSON.stringify(diagnostic);
+
+    expect(diagnostic).toEqual({
+      qstashHost: "qstash-us-east-1.upstash.io",
+      errorName: "QstashError",
+      httpStatus: 401,
+      errorCode: "AUTH_FAILED",
+      providerMessage:
+        "unauthorized Bearer [REDACTED] QSTASH_TOKEN=[REDACTED] signing_key=[REDACTED] raw=[REDACTED]",
+    });
+    expect(serialized).not.toContain("preview-token");
+    expect(serialized).not.toContain("current-signing-key");
+    expect(serialized).not.toContain("next-signing-key");
+    expect(formatQstashPublishFailureDiagnostic(diagnostic!)).toContain(
+      "status=401",
+    );
+  });
+
+  it.each([
+    'Invalid request body was {"private":"value"}',
+    '{"error":"Invalid payload: [private-value]"}',
+    '{"error":{"message":"private-value"}}',
+    '[{"error":"private-value"}]',
+  ])(
+    "omits body-bearing provider details from Preview diagnostics",
+    (message) => {
+      const diagnostic = getPreviewQstashPublishFailureDiagnostic(
+        Object.assign(new Error(message), {
+          name: "QstashError",
+          status: 400,
+        }),
+        {
+          NODE_ENV: "test",
+          VERCEL_ENV: "preview",
+        } as NodeJS.ProcessEnv,
+      );
+
+      expect(diagnostic).toEqual({
+        qstashHost: "qstash.upstash.io",
+        errorName: "QstashError",
+        httpStatus: 400,
+      });
+      expect(JSON.stringify(diagnostic)).not.toContain("private-value");
+    },
+  );
+
+  it("captures a nested network code only in Preview", () => {
+    const cause = Object.assign(new Error("DNS lookup failed"), {
+      code: "ENOTFOUND",
+    });
+    const error = new TypeError("fetch failed", { cause });
+    const previewEnvironment = {
+      NODE_ENV: "test",
+      VERCEL_ENV: "preview",
+    } as NodeJS.ProcessEnv;
+
+    expect(
+      getPreviewQstashPublishFailureDiagnostic(error, previewEnvironment),
+    ).toEqual({
+      qstashHost: "qstash.upstash.io",
+      errorName: "TypeError",
+      errorCode: "ENOTFOUND",
+      providerMessage: "fetch failed",
+    });
+    expect(
+      getPreviewQstashPublishFailureDiagnostic(error, {
+        NODE_ENV: "test",
+        VERCEL_ENV: "production",
+      } as NodeJS.ProcessEnv),
+    ).toBeNull();
+  });
+
   it("rejects unsigned requests before parsing the body", async () => {
     const request = new Request(
       "https://portfolioscope.dev/api/internal/jobs/worker",
@@ -132,9 +225,9 @@ describe("QStash transport", () => {
       },
     );
 
-    await expect(
-      verifyQstashRequest(request, { receiver }),
-    ).resolves.toEqual({ jobId: "job-a" });
+    await expect(verifyQstashRequest(request, { receiver })).resolves.toEqual({
+      jobId: "job-a",
+    });
     expect(receiver.verify).toHaveBeenCalledWith({
       signature: "signed",
       body,

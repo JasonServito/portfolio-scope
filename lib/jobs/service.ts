@@ -14,6 +14,8 @@ import {
   classifyJobError,
 } from "@/lib/jobs/errors";
 import {
+  formatQstashPublishFailureDiagnostic,
+  getPreviewQstashPublishFailureDiagnostic,
   publishJobMessage,
   type JobPublisher,
 } from "@/lib/jobs/qstash";
@@ -43,12 +45,32 @@ type ServiceDependencies = {
   now?: () => Date;
 };
 
-async function defaultHandler(
-  job: ClaimedBackgroundJob,
-  signal: AbortSignal,
-) {
+async function defaultHandler(job: ClaimedBackgroundJob, signal: AbortSignal) {
   const { executeBackgroundJobHandler } = await import("@/lib/jobs/handlers");
   return executeBackgroundJobHandler(job, signal);
+}
+
+function describePublishFailure(
+  error: unknown,
+  environment: NodeJS.ProcessEnv,
+  productionMessage: string,
+) {
+  const diagnostic = getPreviewQstashPublishFailureDiagnostic(
+    error,
+    environment,
+  );
+  if (!diagnostic) {
+    return {
+      persistedMessage: productionMessage,
+      observableError: error,
+      diagnostic: undefined,
+    };
+  }
+
+  const persistedMessage = formatQstashPublishFailureDiagnostic(diagnostic);
+  const observableError = new Error(persistedMessage);
+  observableError.name = "QstashPublishDiagnosticError";
+  return { persistedMessage, observableError, diagnostic };
 }
 
 async function withJobTimeout<T>(
@@ -112,20 +134,28 @@ export async function enqueueBackgroundJob<T extends BackgroundJobType>(
       });
       messageId = published.messageId;
     } catch (error) {
+      const failure = describePublishFailure(
+        error,
+        environment,
+        "QStash did not accept the background job.",
+      );
       const context = {
         correlationId: job.correlationId,
         jobId: job.id,
         userId: job.userId ?? undefined,
         errorCode: JobErrorCode.PUBLISH_FAILED,
-        details: { type: job.type },
+        details: {
+          type: job.type,
+          ...(failure.diagnostic ? { qstash: failure.diagnostic } : {}),
+        },
       };
-      logger.error("job.publish.failed", context, error);
-      reportOperationalError(error, context);
+      logger.error("job.publish.failed", context, failure.observableError);
+      reportOperationalError(failure.observableError, context);
       try {
         await repository.recordPublishFailure(
           job.id,
           JobErrorCode.PUBLISH_FAILED,
-          "QStash did not accept the background job.",
+          failure.persistedMessage,
         );
       } catch {
         // The queued row is reconciled by maintenance after the database
@@ -135,7 +165,7 @@ export async function enqueueBackgroundJob<T extends BackgroundJobType>(
         JobErrorCode.PUBLISH_FAILED,
         503,
         "The job was recorded but could not be dispatched.",
-        { cause: error },
+        { cause: failure.observableError },
       );
     }
 
@@ -321,20 +351,29 @@ export async function retryBackgroundJob(
       // Accepted delivery remains safe to execute from the durable queued row.
     }
   } catch (error) {
+    const failure = describePublishFailure(
+      error,
+      environment,
+      "QStash did not accept the retried job.",
+    );
     const context = {
       correlationId: job.correlationId,
       jobId: job.id,
       userId: job.userId ?? undefined,
       errorCode: JobErrorCode.PUBLISH_FAILED,
-      details: { type: job.type, action: "manual-retry" },
+      details: {
+        type: job.type,
+        action: "manual-retry",
+        ...(failure.diagnostic ? { qstash: failure.diagnostic } : {}),
+      },
     };
-    logger.error("job.retry.publish_failed", context, error);
-    reportOperationalError(error, context);
+    logger.error("job.retry.publish_failed", context, failure.observableError);
+    reportOperationalError(failure.observableError, context);
     try {
       await repository.recordPublishFailure(
         job.id,
         JobErrorCode.PUBLISH_FAILED,
-        "QStash did not accept the retried job.",
+        failure.persistedMessage,
       );
     } catch {
       // The maintenance reconciliation covers a stranded queued retry.
@@ -343,7 +382,7 @@ export async function retryBackgroundJob(
       JobErrorCode.PUBLISH_FAILED,
       503,
       "The retry was recorded but could not be dispatched.",
-      { cause: error },
+      { cause: failure.observableError },
     );
   }
 

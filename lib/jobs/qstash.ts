@@ -5,6 +5,9 @@ import { JobErrorCode, JobRequestError } from "@/lib/jobs/errors";
 import { getApplicationOrigin } from "@/lib/jobs/config";
 import { jobDeliverySchema } from "@/lib/jobs/types";
 
+const defaultQstashHost = "qstash.upstash.io";
+const maximumDiagnosticMessageLength = 240;
+
 const qstashApiBaseUrlSchema = z
   .string()
   .trim()
@@ -73,8 +76,149 @@ export interface SignatureReceiver {
   }): Promise<boolean>;
 }
 
+export type QstashPublishFailureDiagnostic = {
+  qstashHost: string;
+  errorName: string;
+  httpStatus?: number;
+  errorCode?: string;
+  providerMessage?: string;
+};
+
 let sharedClient: Client | undefined;
 let sharedReceiver: Receiver | undefined;
+
+function readErrorField(error: unknown, field: string) {
+  if ((typeof error !== "object" && typeof error !== "function") || !error) {
+    return undefined;
+  }
+  return (error as Record<string, unknown>)[field];
+}
+
+function sanitizeDiagnosticIdentifier(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(normalized) ? normalized : undefined;
+}
+
+function sanitizeProviderMessage(
+  value: unknown,
+  environment: NodeJS.ProcessEnv,
+) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+
+  let providerMessage = value.trim();
+  if (providerMessage.startsWith("{") || providerMessage.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(providerMessage) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return undefined;
+      }
+      const candidate =
+        typeof (parsed as Record<string, unknown>).error === "string"
+          ? (parsed as Record<string, unknown>).error
+          : (parsed as Record<string, unknown>).message;
+      if (typeof candidate !== "string") return undefined;
+      providerMessage = candidate;
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (
+    /\b(?:request\s+)?(?:body|payload)\b/i.test(providerMessage) ||
+    /[{}\[\]]/.test(providerMessage)
+  ) {
+    return undefined;
+  }
+
+  let sanitized = providerMessage
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^@\s/]+@/gi, "$1[REDACTED]@")
+    .replace(
+      /\b(authorization|qstash[_-]?token|token|signing[_-]?key)\b\s*[:=]\s*["']?[^"'\s,;}]+["']?/gi,
+      "$1=[REDACTED]",
+    );
+
+  for (const secret of [
+    environment.QSTASH_TOKEN,
+    environment.QSTASH_CURRENT_SIGNING_KEY,
+    environment.QSTASH_NEXT_SIGNING_KEY,
+  ]) {
+    const normalizedSecret = secret?.trim();
+    if (normalizedSecret) {
+      sanitized = sanitized.replaceAll(normalizedSecret, "[REDACTED]");
+    }
+  }
+
+  sanitized = sanitized.trim().replace(/\s{2,}/g, " ");
+  if (!sanitized) return undefined;
+  return sanitized.slice(0, maximumDiagnosticMessageLength);
+}
+
+function getConfiguredQstashHost(environment: NodeJS.ProcessEnv) {
+  const configuredUrl = environment.QSTASH_URL?.trim();
+  if (!configuredUrl) return defaultQstashHost;
+  try {
+    return new URL(configuredUrl).host;
+  } catch {
+    return "invalid";
+  }
+}
+
+export function getPreviewQstashPublishFailureDiagnostic(
+  error: unknown,
+  environment: NodeJS.ProcessEnv = process.env,
+): QstashPublishFailureDiagnostic | null {
+  if (environment.VERCEL_ENV?.trim().toLowerCase() !== "preview") {
+    return null;
+  }
+
+  const status = readErrorField(error, "status");
+  const cause = readErrorField(error, "cause");
+  const directCode = sanitizeDiagnosticIdentifier(
+    readErrorField(error, "code"),
+  );
+  const causeCode = sanitizeDiagnosticIdentifier(readErrorField(cause, "code"));
+  const errorName =
+    sanitizeDiagnosticIdentifier(readErrorField(error, "name")) ??
+    (error instanceof Error
+      ? sanitizeDiagnosticIdentifier(error.name)
+      : undefined) ??
+    "UnknownError";
+  const message =
+    readErrorField(error, "message") ??
+    (error instanceof Error ? error.message : undefined);
+  const providerMessage = sanitizeProviderMessage(message, environment);
+
+  return {
+    qstashHost: getConfiguredQstashHost(environment),
+    errorName,
+    ...(typeof status === "number" && Number.isInteger(status)
+      ? { httpStatus: status }
+      : {}),
+    ...((directCode ?? causeCode)
+      ? { errorCode: directCode ?? causeCode }
+      : {}),
+    ...(providerMessage ? { providerMessage } : {}),
+  };
+}
+
+export function formatQstashPublishFailureDiagnostic(
+  diagnostic: QstashPublishFailureDiagnostic,
+) {
+  return [
+    `QStash publish failed: host=${diagnostic.qstashHost}`,
+    `error=${diagnostic.errorName}`,
+    ...(diagnostic.httpStatus === undefined
+      ? []
+      : [`status=${diagnostic.httpStatus}`]),
+    ...(diagnostic.errorCode ? [`code=${diagnostic.errorCode}`] : []),
+    ...(diagnostic.providerMessage
+      ? [`message=${diagnostic.providerMessage}`]
+      : []),
+  ].join("; ");
+}
 
 export function getQstashClient(environment: NodeJS.ProcessEnv = process.env) {
   const parsed = qstashClientEnvironmentSchema.safeParse(environment);
@@ -89,9 +233,7 @@ export function getQstashClient(environment: NodeJS.ProcessEnv = process.env) {
 
   sharedClient ??= new Client({
     token: parsed.data.QSTASH_TOKEN,
-    ...(parsed.data.QSTASH_URL
-      ? { baseUrl: parsed.data.QSTASH_URL }
-      : {}),
+    ...(parsed.data.QSTASH_URL ? { baseUrl: parsed.data.QSTASH_URL } : {}),
   });
   return sharedClient;
 }
