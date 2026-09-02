@@ -10,6 +10,7 @@ import { jobDeliverySchema } from "@/lib/jobs/types";
 const defaultQstashHost = "qstash.upstash.io";
 const maximumDiagnosticMessageLength = 240;
 const qstashDeduplicationIdMaximumLength = 64;
+const vercelProtectionBypassHeader = "x-vercel-protection-bypass";
 
 const qstashApiBaseUrlSchema = z
   .string()
@@ -56,6 +57,13 @@ const qstashReceiverEnvironmentSchema = z.object({
   QSTASH_NEXT_SIGNING_KEY: z.string().trim().min(1),
 });
 
+const vercelAutomationBypassSecretSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(512)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value));
+
 export interface JobPublisher {
   publishJSON(input: {
     url: string;
@@ -65,8 +73,14 @@ export interface JobPublisher {
     timeout: number;
     deduplicationId: string;
     label: string[];
-    headers: { "x-correlation-id": string };
-    redact: { body: true };
+    headers: {
+      "x-correlation-id": string;
+      "x-vercel-protection-bypass"?: string;
+    };
+    redact: {
+      body: true;
+      header?: [typeof vercelProtectionBypassHeader];
+    };
   }): Promise<{ messageId: string }>;
 }
 
@@ -95,6 +109,35 @@ export function createQstashDeduplicationId(value: string) {
     .update(value, "utf8")
     .digest("hex")
     .slice(0, qstashDeduplicationIdMaximumLength);
+}
+
+function getQstashDeliveryOptions(
+  correlationId: string,
+  environment: NodeJS.ProcessEnv,
+): Pick<Parameters<JobPublisher["publishJSON"]>[0], "headers" | "redact"> {
+  const headers = { "x-correlation-id": correlationId };
+  if (environment.VERCEL_ENV?.trim().toLowerCase() !== "preview") {
+    return { headers, redact: { body: true } };
+  }
+
+  const parsedSecret = vercelAutomationBypassSecretSchema.safeParse(
+    environment.VERCEL_AUTOMATION_BYPASS_SECRET,
+  );
+  if (!parsedSecret.success) {
+    throw new JobRequestError(
+      JobErrorCode.CONFIGURATION_ERROR,
+      503,
+      "Protected Preview job delivery is not configured.",
+    );
+  }
+
+  return {
+    headers: {
+      ...headers,
+      [vercelProtectionBypassHeader]: parsedSecret.data,
+    },
+    redact: { body: true, header: [vercelProtectionBypassHeader] },
+  };
 }
 
 function readErrorField(error: unknown, field: string) {
@@ -154,6 +197,7 @@ function sanitizeProviderMessage(
     environment.QSTASH_TOKEN,
     environment.QSTASH_CURRENT_SIGNING_KEY,
     environment.QSTASH_NEXT_SIGNING_KEY,
+    environment.VERCEL_AUTOMATION_BYPASS_SECRET,
   ]) {
     const normalizedSecret = secret?.trim();
     if (normalizedSecret) {
@@ -289,6 +333,10 @@ export async function publishJobMessage(input: {
   }
 
   const publisher = input.publisher ?? getQstashClient(environment);
+  const deliveryOptions = getQstashDeliveryOptions(
+    input.correlationId,
+    environment,
+  );
   const response = await publisher.publishJSON({
     url: `${origin}/api/internal/jobs/worker`,
     body: { jobId: input.jobId },
@@ -299,8 +347,7 @@ export async function publishJobMessage(input: {
       input.deduplicationId ?? input.jobId,
     ),
     label: ["portfolioscope", input.type.toLowerCase()],
-    headers: { "x-correlation-id": input.correlationId },
-    redact: { body: true },
+    ...deliveryOptions,
   });
   if (!("messageId" in response) || typeof response.messageId !== "string") {
     throw new JobRequestError(

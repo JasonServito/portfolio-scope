@@ -20,6 +20,7 @@ describe("Sentry privacy configuration", () => {
         headers: {
           authorization: "Bearer secret",
           cookie: "session=secret",
+          "x-vercel-protection-bypass": "preview-bypass-secret",
           "user-agent": "test",
         },
       },
@@ -77,5 +78,31 @@ describe("Sentry privacy configuration", () => {
     expect(event.request?.url).toContain("apikey=[REDACTED]");
     expect(JSON.stringify(event.breadcrumbs)).not.toContain("server-secret");
     expect(JSON.stringify(span)).not.toContain("server-secret");
+  });
+
+  it("redacts the Vercel protection bypass from spans and breadcrumbs", () => {
+    const event = scrubSentryEvent({
+      breadcrumbs: [
+        {
+          category: "http",
+          data: {
+            request: {
+              headers: {
+                "x-vercel-protection-bypass": "preview-bypass-secret",
+              },
+            },
+          },
+        },
+      ],
+    });
+    const span = scrubSentrySpan({
+      data: {
+        "http.request.header.x_vercel_protection_bypass":
+          "preview-bypass-secret",
+      },
+    });
+
+    expect(JSON.stringify(event)).not.toContain("preview-bypass-secret");
+    expect(JSON.stringify(span)).not.toContain("preview-bypass-secret");
   });
 });

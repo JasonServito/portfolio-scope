@@ -77,6 +77,7 @@ Configure each environment independently. Never copy production database credent
 | `QSTASH_URL`                                                          | Blank unless a regional API origin is required                   | Regional QStash HTTPS API origin when needed | Regional QStash HTTPS API origin when needed        |                             No |
 | `QSTASH_CURRENT_SIGNING_KEY`                                          | Blank unless testing jobs                                       | Non-production current key                   | Production current key                              |                            Yes |
 | `QSTASH_NEXT_SIGNING_KEY`                                             | Blank unless testing jobs                                       | Non-production next key                      | Production next key                                 |                            Yes |
+| `VERCEL_AUTOMATION_BYPASS_SECRET`                                     | Blank                                                           | Required automation bypass for protected Preview | Blank; ignored by job publishing                 |                            Yes |
 | `BACKGROUND_JOBS_ENABLED`                                             | `false` until configured                                        | `false` until callback proof                 | `false` until callback proof                        |                             No |
 | `SEC_INGESTION_ENABLED`                                               | `false` until configured                                        | Independent opt-in                           | Independent opt-in                                  |                             No |
 | `PUBLIC_STOCK_PAGES_ENABLED`                                          | Explicit local choice                                           | Independent opt-in                           | Independent opt-in                                  |                             No |
@@ -594,7 +595,11 @@ environment. If an account uses a regional QStash API endpoint, also set
 `QSTASH_URL` to its credential-free HTTPS origin; leave it blank to preserve the
 SDK default. Set `NEXT_PUBLIC_APP_URL` to that environment's stable HTTPS origin;
 QStash signs the full callback URL, so a mismatched host causes a controlled
-`401`.
+`401`. For a Vercel Preview protected by Deployment Protection, also set the
+server-only `VERCEL_AUTOMATION_BYPASS_SECRET`. Preview publishes forward it as
+`x-vercel-protection-bypass` and instruct QStash to redact that header; missing
+or malformed values stop publishing before QStash accepts a message. Production
+publishes never forward this variable.
 
 The Redis keys are prefixed by environment and private identifiers are hashed.
 Cache failure degrades to the provider or PostgreSQL where safe. Ordinary

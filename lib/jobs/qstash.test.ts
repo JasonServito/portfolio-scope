@@ -109,6 +109,103 @@ describe("QStash transport", () => {
     );
   });
 
+  it("forwards and redacts the Vercel automation bypass secret in Preview", async () => {
+    const publisher = {
+      publishJSON: vi.fn().mockResolvedValue({ messageId: "message-preview" }),
+    } as JobPublisher;
+
+    await publishJobMessage({
+      jobId: "job-preview",
+      type: "RESEARCH_AGENT_RUN",
+      maxAttempts: 3,
+      timeoutMs: 30_000,
+      correlationId: "correlation-preview",
+      publisher,
+      environment: {
+        NODE_ENV: "test",
+        VERCEL_ENV: "preview",
+        NEXT_PUBLIC_APP_URL: "https://preview.portfolioscope.dev",
+        VERCEL_AUTOMATION_BYPASS_SECRET: "preview-bypass-secret",
+      } as NodeJS.ProcessEnv,
+    });
+
+    expect(publisher.publishJSON).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          "x-correlation-id": "correlation-preview",
+          "x-vercel-protection-bypass": "preview-bypass-secret",
+        },
+        redact: {
+          body: true,
+          header: ["x-vercel-protection-bypass"],
+        },
+      }),
+    );
+  });
+
+  it.each([undefined, "   ", "invalid\nsecret"])(
+    "fails closed for an invalid Preview automation bypass secret",
+    async (bypassSecret) => {
+      const publisher = {
+        publishJSON: vi.fn().mockResolvedValue({ messageId: "unexpected" }),
+      } as JobPublisher;
+
+      await expect(
+        publishJobMessage({
+          jobId: "job-preview",
+          type: "RESEARCH_AGENT_RUN",
+          maxAttempts: 3,
+          timeoutMs: 30_000,
+          correlationId: "correlation-preview",
+          publisher,
+          environment: {
+            NODE_ENV: "test",
+            VERCEL_ENV: "preview",
+            NEXT_PUBLIC_APP_URL: "https://preview.portfolioscope.dev",
+            VERCEL_AUTOMATION_BYPASS_SECRET: bypassSecret,
+          } as NodeJS.ProcessEnv,
+        }),
+      ).rejects.toMatchObject({
+        code: JobErrorCode.CONFIGURATION_ERROR,
+        status: 503,
+        message: "Protected Preview job delivery is not configured.",
+      });
+      expect(publisher.publishJSON).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not forward a configured Preview bypass secret in Production", async () => {
+    const publishJSON = vi
+      .fn()
+      .mockResolvedValue({ messageId: "message-production" });
+    const publisher = { publishJSON } satisfies JobPublisher;
+
+    await publishJobMessage({
+      jobId: "job-production",
+      type: "RESEARCH_AGENT_RUN",
+      maxAttempts: 3,
+      timeoutMs: 30_000,
+      correlationId: "correlation-production",
+      publisher,
+      environment: {
+        NODE_ENV: "production",
+        VERCEL_ENV: "production",
+        NEXT_PUBLIC_APP_URL: "https://portfolioscope.dev",
+        VERCEL_AUTOMATION_BYPASS_SECRET: "must-not-be-forwarded",
+      } as NodeJS.ProcessEnv,
+    });
+
+    expect(publisher.publishJSON).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: { "x-correlation-id": "correlation-production" },
+        redact: { body: true },
+      }),
+    );
+    expect(JSON.stringify(publishJSON.mock.calls)).not.toContain(
+      "must-not-be-forwarded",
+    );
+  });
+
   it.each([
     [
       "research:cmtjd3d8d0001ju04sxjp4plb:agent:NEWS",
@@ -147,7 +244,7 @@ describe("QStash transport", () => {
   it("extracts only redacted Preview publish diagnostics", () => {
     const error = Object.assign(
       new Error(
-        '{"error":"unauthorized Bearer leaked-bearer QSTASH_TOKEN=preview-token signing_key=current-signing-key raw=next-signing-key"}',
+        '{"error":"unauthorized Bearer leaked-bearer QSTASH_TOKEN=preview-token signing_key=current-signing-key raw=next-signing-key bypass=preview-bypass-secret"}',
       ),
       { name: "QstashError", status: 401, code: "AUTH_FAILED" },
     );
@@ -158,6 +255,7 @@ describe("QStash transport", () => {
       QSTASH_TOKEN: "preview-token",
       QSTASH_CURRENT_SIGNING_KEY: "current-signing-key",
       QSTASH_NEXT_SIGNING_KEY: "next-signing-key",
+      VERCEL_AUTOMATION_BYPASS_SECRET: "preview-bypass-secret",
     } as NodeJS.ProcessEnv;
 
     const diagnostic = getPreviewQstashPublishFailureDiagnostic(
@@ -172,11 +270,12 @@ describe("QStash transport", () => {
       httpStatus: 401,
       errorCode: "AUTH_FAILED",
       providerMessage:
-        "unauthorized Bearer [REDACTED] QSTASH_TOKEN=[REDACTED] signing_key=[REDACTED] raw=[REDACTED]",
+        "unauthorized Bearer [REDACTED] QSTASH_TOKEN=[REDACTED] signing_key=[REDACTED] raw=[REDACTED] bypass=[REDACTED]",
     });
     expect(serialized).not.toContain("preview-token");
     expect(serialized).not.toContain("current-signing-key");
     expect(serialized).not.toContain("next-signing-key");
+    expect(serialized).not.toContain("preview-bypass-secret");
     expect(formatQstashPublishFailureDiagnostic(diagnostic!)).toContain(
       "status=401",
     );

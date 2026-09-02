@@ -142,6 +142,7 @@ describe("background job service", () => {
         VERCEL_ENV: "preview",
         QSTASH_URL: "https://qstash-us-east-1.upstash.io",
         QSTASH_TOKEN: "preview-token",
+        VERCEL_AUTOMATION_BYPASS_SECRET: "preview-bypass-secret",
       } as NodeJS.ProcessEnv,
     }).catch((error: unknown) => error);
 

@@ -7,6 +7,9 @@ type TelemetrySpan = {
 
 const secretQueryParameter =
   /((?:^|[?&])(?:api[-_]?key|token|secret|credential)=)[^&#\s]*/gi;
+const sensitiveSpanAttributeKey =
+  /api[-_]?key|token|secret|credential|x[-_.]?vercel[-_.]?protection[-_.]?bypass/i;
+const vercelProtectionBypassKey = /x[-_.]?vercel[-_.]?protection[-_.]?bypass/i;
 
 function redactTelemetryString(value: string) {
   return value.replace(secretQueryParameter, "$1[REDACTED]");
@@ -19,7 +22,7 @@ function scrubSpanAttribute(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        /api[-_]?key|token|secret|credential/i.test(key)
+        sensitiveSpanAttributeKey.test(key)
           ? "[REDACTED]"
           : scrubSpanAttribute(item),
       ]),
@@ -65,7 +68,10 @@ export function scrubSentryEvent<TEvent extends Event>(event: TEvent): TEvent {
   const headers = event.request?.headers;
   if (headers) {
     for (const key of Object.keys(headers)) {
-      if (/authorization|cookie|token|secret|key/i.test(key)) {
+      if (
+        /authorization|cookie|token|secret|key/i.test(key) ||
+        vercelProtectionBypassKey.test(key)
+      ) {
         delete headers[key];
       }
     }
