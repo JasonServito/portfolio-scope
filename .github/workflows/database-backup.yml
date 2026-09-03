@@ -36,6 +36,17 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
 
+      - name: Verify PostgreSQL backup prerequisites
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: |
+          pg_dump --version
+          psql --version
+          if ! psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -c "SELECT current_database(), current_setting('server_version');" 2>/dev/null; then
+            echo "::error::Read-only PostgreSQL connectivity check failed; connection details were suppressed."
+            exit 1
+          fi
+
       - name: Create compressed logical backup
         env:
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
