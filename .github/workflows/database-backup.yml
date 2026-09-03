@@ -28,6 +28,9 @@ jobs:
           cache: npm
 
       - name: Install dependencies
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
         run: npm ci
 
       - name: Install PostgreSQL client
