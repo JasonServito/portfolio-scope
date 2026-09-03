@@ -58,35 +58,76 @@ function configuredStatus(configured: boolean, detail: string): ServiceStatus {
 
 async function databaseDiagnostics() {
   try {
-    const [sizeRows, failedJobs, supportedCompanies, latestWorker] =
-      await Promise.all([
-        db.$queryRaw<Array<{ bytes: bigint }>>`
+    const [
+      identityRows,
+      sizeRows,
+      failedJobs,
+      supportedCompanies,
+      latestWorker,
+    ] = await Promise.all([
+      db.$queryRaw<
+        Array<{
+          database: string;
+          schema: string | null;
+          hasReasoningTokens: boolean;
+          databaseOid: string;
+          serverAddress: string | null;
+          serverPort: number | null;
+          serverVersionNumber: string;
+          systemIdentifier: string;
+        }>
+      >`
+          SELECT
+            current_database()::text AS "database",
+            current_schema()::text AS "schema",
+            EXISTS (
+              SELECT 1
+              FROM information_schema.columns
+              WHERE table_schema = 'public'
+                AND table_name = 'AiUsage'
+                AND column_name = 'reasoningTokens'
+            ) AS "hasReasoningTokens",
+            (
+              SELECT oid::text
+              FROM pg_database
+              WHERE datname = current_database()
+            ) AS "databaseOid",
+            inet_server_addr()::text AS "serverAddress",
+            inet_server_port() AS "serverPort",
+            current_setting('server_version_num') AS "serverVersionNumber",
+            (
+              SELECT system_identifier::text
+              FROM pg_control_system()
+            ) AS "systemIdentifier"
+        `,
+      db.$queryRaw<Array<{ bytes: bigint }>>`
           SELECT pg_database_size(current_database())::bigint AS bytes
         `,
-        db.backgroundJob.count({
-          where: {
-            status: {
-              in: [
-                BackgroundJobStatus.FAILED,
-                BackgroundJobStatus.PARTIALLY_COMPLETED,
-              ],
-            },
+      db.backgroundJob.count({
+        where: {
+          status: {
+            in: [
+              BackgroundJobStatus.FAILED,
+              BackgroundJobStatus.PARTIALLY_COMPLETED,
+            ],
           },
-        }),
-        db.company.count({ where: { isSupported: true } }),
-        db.backgroundJob.findFirst({
-          where: { heartbeatAt: { not: null } },
-          select: {
-            id: true,
-            type: true,
-            heartbeatAt: true,
-            correlationId: true,
-          },
-          orderBy: { heartbeatAt: "desc" },
-        }),
-      ]);
+        },
+      }),
+      db.company.count({ where: { isSupported: true } }),
+      db.backgroundJob.findFirst({
+        where: { heartbeatAt: { not: null } },
+        select: {
+          id: true,
+          type: true,
+          heartbeatAt: true,
+          correlationId: true,
+        },
+        orderBy: { heartbeatAt: "desc" },
+      }),
+    ]);
     return {
       status: "ok" as const,
+      identity: identityRows[0] ?? null,
       sizeBytes: Number(sizeRows[0]?.bytes ?? 0),
       failedJobs,
       supportedCompanies,
@@ -102,6 +143,7 @@ async function databaseDiagnostics() {
   } catch {
     return {
       status: "failed" as const,
+      identity: null,
       sizeBytes: null,
       failedJobs: null,
       supportedCompanies: null,
@@ -240,6 +282,7 @@ export async function getOperationalDiagnostics() {
       failedJobs: database.failedJobs,
       supportedCompanies: database.supportedCompanies,
     },
+    databaseIdentity: database.identity,
     latestWorkerHeartbeat: database.latestWorkerHeartbeat,
     lastBackup: r2.lastBackup,
     lastRestoreDrill: restoreDrill(),

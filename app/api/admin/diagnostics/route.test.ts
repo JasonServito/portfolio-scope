@@ -6,10 +6,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/auth/authorization", async () => {
-  const original =
-    await vi.importActual<typeof import("@/lib/auth/authorization")>(
-      "@/lib/auth/authorization",
-    );
+  const original = await vi.importActual<
+    typeof import("@/lib/auth/authorization")
+  >("@/lib/auth/authorization");
   return { ...original, requireApiAdmin: mocks.requireApiAdmin };
 });
 
@@ -32,6 +31,16 @@ describe("admin diagnostics route", () => {
     mocks.getOperationalDiagnostics.mockResolvedValue({
       generatedAt: "2026-07-27T00:00:00.000Z",
       services: { database: { status: "ok" } },
+      databaseIdentity: {
+        database: "portfolio_scope",
+        schema: "public",
+        hasReasoningTokens: true,
+        databaseOid: "16384",
+        serverAddress: "192.0.2.10",
+        serverPort: 5432,
+        serverVersionNumber: "170005",
+        systemIdentifier: "7612345678901234567",
+      },
     });
 
     const response = await GET(
@@ -39,11 +48,19 @@ describe("admin diagnostics route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe(
-      "no-store, max-age=0",
-    );
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
     await expect(response.json()).resolves.toMatchObject({
       services: { database: { status: "ok" } },
+      databaseIdentity: {
+        database: "portfolio_scope",
+        schema: "public",
+        hasReasoningTokens: true,
+        databaseOid: "16384",
+        serverAddress: "192.0.2.10",
+        serverPort: 5432,
+        serverVersionNumber: "170005",
+        systemIdentifier: "7612345678901234567",
+      },
     });
   });
 
