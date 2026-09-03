@@ -234,6 +234,7 @@ export async function createPostgresBackup(environment = process.env) {
     await run(
       environment.PG_DUMP_COMMAND?.trim() || "pg_dump",
       [
+        databaseUrl,
         "--format=plain",
         "--no-owner",
         "--no-privileges",
@@ -244,7 +245,6 @@ export async function createPostgresBackup(environment = process.env) {
       {
         env: {
           ...environment,
-          PGDATABASE: databaseUrl,
         },
       },
     );
