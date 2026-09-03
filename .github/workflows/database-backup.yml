@@ -48,7 +48,7 @@ jobs:
           fi
           backup_preflight_path="$(mktemp "$RUNNER_TEMP/portfolioscope-preflight.XXXXXX.sql")"
           trap 'rm -f "$backup_preflight_path"' EXIT
-          if ! PGDATABASE="$DIRECT_URL" pg_dump \
+          if ! pg_dump "$DIRECT_URL" \
             --format=plain \
             --no-owner \
             --no-privileges \
