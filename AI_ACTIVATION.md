@@ -2,19 +2,16 @@
 
 ## Status
 
-M27 validation is Preview-only. Production external AI remains disabled and no
-M27 Production configuration, credential, migration, provider call, billing,
-database, deployment, or feature-flag change is authorized by this record.
-Passing Preview is evidence for a later decision; it is not Production
-readiness or approval.
+M27 Production activation is complete. The Production migration state is
+current, a controlled `AAPL` research report completed successfully, and AI
+accounting and reconciliation checks passed. Ongoing Production operation is
+enabled with `BACKGROUND_JOBS_ENABLED=true`,
+`RESEARCH_GENERATION_ENABLED=true`, and `AI_RESEARCH_ENABLED=true`.
 
-As of 2026-08-25, repository implementation and offline verification are
-complete. Live Preview validation is not complete. The linked Vercel Preview
-environment currently has AI, research generation, and background jobs disabled;
-its database variables are placeholders rather than valid PostgreSQL URLs; and
-separately scoped Preview OpenAI, Redis, QStash, R2, and monitoring resources
-have not been evidenced. No migration or provider call was attempted against
-that environment. Provider usage and cost attributable to M27 remain zero.
+The 2026-08-25 Preview-only record below remains as historical evidence of the
+earlier default-off validation boundary. Its Preview blockers did not authorize
+Production at that time and are now superseded as rollout blockers by the
+separately completed Production activation record.
 
 ## Approved Preview boundary
 
@@ -58,9 +55,9 @@ page and deprecation status immediately before any live call; a price or status
 change stops activation until the code, tests, reservation math, and this record
 are reviewed again.
 
-## Reconciliation contract
+## Historical Preview reconciliation contract
 
-For the single allowed live report, record non-secret job/report identifiers,
+For the single allowed Preview live report, record non-secret job/report identifiers,
 every provider request ID, the stored model/pricing/prompt/retrieval/schema/report
 version tuple, and per-attempt input, cached-input, output, reasoning, and total
 tokens.
@@ -119,7 +116,10 @@ flags disabled and the database values to be placeholders. No secret value was
 recorded. The in-app browser runtime exposed no browser instance, so actual-output
 desktop/mobile review remains an external/manual gate rather than local evidence.
 
-## Required live Preview evidence
+## Historical live Preview evidence
+
+The statuses in this table capture the incomplete 2026-08-25 Preview attempt.
+They are preserved as history and no longer describe the final Production state.
 
 | Gate                                                           | Status                                   | Required evidence                                                                                                               |
 | -------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -137,10 +137,10 @@ desktop/mobile review remains an external/manual gate rather than local evidence
 | Monitoring and alerts                                          | Not verified                             | Preview event/heartbeat/job/cost evidence without private payloads                                                              |
 | Kill switch and rollback                                       | Offline kill switch passed; live pending | Flag-off state after the sole report, usable stock/history pages, rollback target, and zero-network next-call proof             |
 
-## Separate Production activation gate
+## Production activation gate
 
-The following steps are deliberately outside M27 and each Production mutation
-requires a new explicit approval:
+The following steps defined the separate Production approval path after the
+2026-08-25 Preview record:
 
 1. Review the completed Preview record, unresolved risks, current official
    pricing/deprecation status, and a named Production rollback owner/target.
@@ -166,3 +166,21 @@ requires a new explicit approval:
    monitor evidence, rollback proof, reviewer disposition, and whether ongoing
    enablement is approved. A successful one-call proof does not itself authorize
    continuous Production activation.
+
+### Production completion record
+
+The separate Production gate is complete:
+
+- Production migrations are complete and the schema is current.
+- Production AI research activation is complete.
+- One controlled `AAPL` research report completed successfully.
+- AI accounting and reconciliation checks passed.
+- Ongoing Production enablement was approved.
+
+Final Production values:
+
+```text
+BACKGROUND_JOBS_ENABLED=true
+RESEARCH_GENERATION_ENABLED=true
+AI_RESEARCH_ENABLED=true
+```

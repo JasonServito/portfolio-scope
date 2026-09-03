@@ -2,8 +2,8 @@
 
 ## M26 feasibility result
 
-PortfolioScope does not currently have a reliable source for future earnings
-dates. The existing SEC submissions and company-facts integrations are
+Before M26, PortfolioScope did not have a reliable source for future earnings
+dates. The existing SEC submissions and company-facts integrations were
 authoritative for filings that have already been disseminated, but they do not
 publish a normalized calendar of future company earnings announcements. Stored
 demo prices and historical filings cannot be used to invent a future date.
@@ -12,9 +12,10 @@ EarningsAPI.com was approved for M26 implementation on 2026-08-21 because its
 public terms expressly permit retrieving and displaying earnings content in an
 application or website, its documentation supports the per-symbol workflow M26
 needs, and its free quota fits the repository's bounded 25-ticker catalog. The
-adapter and normalized PostgreSQL persistence are implemented, but live
-Production activation remains default-off pending the bounded provider contract
-check and final cache/licensing confirmation described below.
+adapter and normalized PostgreSQL persistence are implemented. The bounded
+provider contract, cache/licensing, normal synchronization, and controlled
+Redis-unavailable fail-closed checks all passed, and Production synchronization
+is enabled with `EARNINGS_SYNC_ENABLED=true`.
 
 ## Feasibility evidence
 
@@ -23,7 +24,7 @@ check and final cache/licensing confirmation described below.
 | Existing SEC integration            | SEC submissions and XBRL APIs update after filings are disseminated. They provide historical filing and report dates, not a normalized future earnings calendar.                                                                                                                                                                                                                                                                                               | Existing approved source, cache, ingestion, and cost boundaries remain appropriate for reported fundamentals. Estimating a future announcement from filing history would create a date the source did not report.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Retain for historical fundamentals; do not derive upcoming dates.                               |
 | Issuer investor-relations pages     | A company announcement can be authoritative when present, but formats, timing, and publication channels differ across the 25-company catalog.                                                                                                                                                                                                                                                                                                                  | Manual maintenance becomes stale; automated scraping would add many brittle parsers and unclear reuse terms. It would not provide a simple, reliable failure contract.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Not selected.                                                                                   |
 | TradingView or Nasdaq display pages | Human-readable calendars may display upcoming events, but the repository has no approved programmatic contract for extracting and aggregating those values.                                                                                                                                                                                                                                                                                                    | Scraping or reusing display-only data would violate the existing provider boundary and would have unclear redistribution rights and failure behavior.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Not selected.                                                                                   |
-| EarningsAPI.com company earnings    | `/v1/earnings?symbol=...` returns historical and upcoming JSON rows with `date`, `symbol`, nullable `name` and market-session `time`, and nullable estimated/actual EPS and revenue. It does not expose a confirmation flag, fiscal-period end, currency, event ID, or provider update timestamp. PortfolioScope therefore calls future dates **expected**, preserves them as date-only, treats missing time as unknown, and attaches its own fetch timestamp. | Public terms permit retrieving and displaying earnings content in an application or website and allow returned content to be styled. The official watchlist guide says to call once per symbol, choose the nearest future row, and store it next to the symbol. The terms prohibit republishing the proprietary feed and do not state a cache-retention period, so M26 persists only the normalized nearest event, never exposes raw responses, and retains it only for bounded freshness/failure handling. The free tier is 60 requests/minute, 100/day, and 1,000/month, reset in New York time. No attribution requirement is published, although the content remains the provider's property and PortfolioScope identifies the source for provenance. The provider disclaims uptime, accuracy, and completeness. | **Selected and implemented default-off; Production activation remains gated.**                  |
+| EarningsAPI.com company earnings    | `/v1/earnings?symbol=...` returns historical and upcoming JSON rows with `date`, `symbol`, nullable `name` and market-session `time`, and nullable estimated/actual EPS and revenue. It does not expose a confirmation flag, fiscal-period end, currency, event ID, or provider update timestamp. PortfolioScope therefore calls future dates **expected**, preserves them as date-only, treats missing time as unknown, and attaches its own fetch timestamp. | Public terms permit retrieving and displaying earnings content in an application or website and allow returned content to be styled. The official watchlist guide says to call once per symbol, choose the nearest future row, and store it next to the symbol. The terms prohibit republishing the proprietary feed and do not state a cache-retention period, so M26 persists only the normalized nearest event, never exposes raw responses, and retains it only for bounded freshness/failure handling. The free tier is 60 requests/minute, 100/day, and 1,000/month, reset in New York time. No attribution requirement is published, although the content remains the provider's property and PortfolioScope identifies the source for provenance. The provider disclaims uptime, accuracy, and completeness. | **Selected, implemented, and validated in Production.**                                         |
 | Alpha Vantage earnings calendar     | One CSV request can return the next three months of expected earnings, including symbol, report date, fiscal-period end, estimate, and currency. A daily whole-calendar refresh would fit the published standard limit. The source does not expose a confirmed-date flag or announcement timezone, so every future date must remain labelled estimated and date-only.                                                                                          | The standard service allows 25 requests per day and may verify open-source or educational projects for higher limits. Its standard terms grant personal, non-commercial use and direct commercial users to sales; they do not clearly grant display to users of a deployed application. Expected API cost is $0 only if PortfolioScope's use is confirmed as permitted.                                                                                                                                                                                                                                                                                                                                                                                                                                              | Technically viable, but superseded by EarningsAPI.com's clearer application-display permission. |
 | Financial Modeling Prep             | The earnings calendar exposes future dates and a provider `lastUpdated` value.                                                                                                                                                                                                                                                                                                                                                                                 | Corporate calendars start on the published Premium plan at $59 USD/month, above the entire project budget, and displayed or redistributed data requires a separate display/licensing agreement.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Not selected.                                                                                   |
 | Finnhub                             | The calendar exposes coming releases, date, and before/after-market timing; its free tier includes new updates.                                                                                                                                                                                                                                                                                                                                                | Published paid plans start at $49.99/month and are licensed for personal use. Application-display rights are not established and the price exceeds the project budget.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Not selected.                                                                                   |
@@ -156,7 +157,8 @@ new runtime dependency, private-data disclosure, or user-scoped provider call.
 ## Production activation gate
 
 The project owner approved EarningsAPI.com and the implementation controls on
-2026-08-21. Production activation remains blocked until an operator records:
+2026-08-21. The following Production activation requirements were subsequently
+completed:
 
 1. a server-only API key and confirmation that expected cost remains `$0` under
    the published free limits;
@@ -218,23 +220,29 @@ completeness, and availability are not guaranteed; and terms may change on
 posting. These remain accepted, non-blocking residual risks for this bounded
 implementation. The affirmative application-display and storage/database
 guidance is sufficient under the activation criteria, so written provider
-clarification is not currently required. This completes Gate 6 only. Explicit
-Production activation remains pending at Gate 7, and
-`EARNINGS_SYNC_ENABLED=false` remains required.
+clarification is not currently required. This completed Gate 6. Gate 7 was
+subsequently completed as recorded below.
 
-### Gate 7 deferred status
+### Gate 7 completion record
 
-**Gate 7: DEFERRED (2026-08-24).** A normal Production sweep succeeded with
+**Gate 7: PASS.** On 2026-08-24, the controlled failure proof was deferred
+because no safe execution path was then available within the tooling constraints;
+that blocker is resolved. A normal Production sweep succeeded with
 25/25 catalog coverage, 25 provider attempts, 0 retries, 0 failures, and outcome
 `AVAILABLE`; PostgreSQL and normal-sweep Redis verification passed, and provider
-daily and monthly usage each reconciled exactly from 25 to 50. The controlled
-Redis-unavailable fail-closed proof remains incomplete because currently safe
-execution approaches are blocked by tooling/environment constraints. This does
-not weaken the requirement: keep `EARNINGS_SYNC_ENABLED=false`, treat overall
-M26 Production earnings activation as incomplete, and resume Gate 7 before final
-Production enablement. No evidence currently indicates a Production earnings
-implementation defect.
+daily and monthly usage each reconciled exactly from 25 to 50.
 
-If these conditions are not satisfied, leave live sync disabled. The completed
-page will continue to show valid persisted observations or explicit unavailable
-states without making provider calls.
+The controlled Redis-unavailable fail-closed proof also passed for `AAPL`:
+
+- the database identity matched;
+- the persisted observation remained unchanged;
+- `providerFetchCount = 0`;
+- Redis failure was simulated; and
+- the source status was `COORDINATION_UNAVAILABLE`.
+
+Production earnings synchronization is enabled and validated. The final
+Production value is `EARNINGS_SYNC_ENABLED=true`.
+
+If these conditions regress, disable live sync. The completed page will continue
+to show valid persisted observations or explicit unavailable states without
+making provider calls.
