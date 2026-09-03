@@ -31,16 +31,6 @@ describe("admin diagnostics route", () => {
     mocks.getOperationalDiagnostics.mockResolvedValue({
       generatedAt: "2026-07-27T00:00:00.000Z",
       services: { database: { status: "ok" } },
-      databaseIdentity: {
-        database: "portfolio_scope",
-        schema: "public",
-        hasReasoningTokens: true,
-        databaseOid: "16384",
-        serverAddress: "192.0.2.10",
-        serverPort: 5432,
-        serverVersionNumber: "170005",
-        systemIdentifier: "7612345678901234567",
-      },
     });
 
     const response = await GET(
@@ -51,16 +41,6 @@ describe("admin diagnostics route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
     await expect(response.json()).resolves.toMatchObject({
       services: { database: { status: "ok" } },
-      databaseIdentity: {
-        database: "portfolio_scope",
-        schema: "public",
-        hasReasoningTokens: true,
-        databaseOid: "16384",
-        serverAddress: "192.0.2.10",
-        serverPort: 5432,
-        serverVersionNumber: "170005",
-        systemIdentifier: "7612345678901234567",
-      },
     });
   });
 

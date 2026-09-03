@@ -137,62 +137,6 @@ export default async function AdminPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Runtime database target</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {diagnostics.databaseIdentity ? (
-            <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-              <DatabaseIdentityField
-                label="Database"
-                value={diagnostics.databaseIdentity.database}
-              />
-              <DatabaseIdentityField
-                label="Schema"
-                value={diagnostics.databaseIdentity.schema ?? "None"}
-              />
-              <DatabaseIdentityField
-                label="reasoningTokens column"
-                value={
-                  diagnostics.databaseIdentity.hasReasoningTokens
-                    ? "Present"
-                    : "Missing"
-                }
-              />
-              <DatabaseIdentityField
-                label="Database OID"
-                value={diagnostics.databaseIdentity.databaseOid}
-              />
-              <DatabaseIdentityField
-                label="Server address"
-                value={
-                  diagnostics.databaseIdentity.serverAddress ?? "Local socket"
-                }
-              />
-              <DatabaseIdentityField
-                label="Server port"
-                value={String(
-                  diagnostics.databaseIdentity.serverPort ?? "None",
-                )}
-              />
-              <DatabaseIdentityField
-                label="PostgreSQL version number"
-                value={diagnostics.databaseIdentity.serverVersionNumber}
-              />
-              <DatabaseIdentityField
-                label="System identifier"
-                value={diagnostics.databaseIdentity.systemIdentifier}
-              />
-            </dl>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Runtime database identity is unavailable.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle className="text-lg">
             Feature flags and kill switches
           </CardTitle>
@@ -413,20 +357,5 @@ function MetricCard({
         <p className="text-lg font-semibold">{value}</p>
       </CardContent>
     </Card>
-  );
-}
-
-function DatabaseIdentityField({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-all font-mono">{value}</dd>
-    </div>
   );
 }
