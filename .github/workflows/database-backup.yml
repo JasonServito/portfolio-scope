@@ -46,24 +46,6 @@ jobs:
             echo "::error::Read-only PostgreSQL connectivity check failed; connection details were suppressed."
             exit 1
           fi
-          backup_preflight_path="$(mktemp "$RUNNER_TEMP/portfolioscope-preflight.XXXXXX.sql")"
-          trap 'rm -f "$backup_preflight_path"' EXIT
-          if ! pg_dump "$DIRECT_URL" \
-            --format=plain \
-            --no-owner \
-            --no-privileges \
-            --encoding=UTF8 \
-            --file "$backup_preflight_path" 2>/dev/null; then
-            echo "::error::pg_dump export preflight failed; connection details were suppressed."
-            exit 1
-          fi
-          if [[ ! -s "$backup_preflight_path" ]]; then
-            echo "::error::pg_dump export preflight produced no data."
-            exit 1
-          fi
-          rm -f "$backup_preflight_path"
-          trap - EXIT
-          echo "pg_dump export preflight succeeded"
 
       - name: Create compressed logical backup
         env:
