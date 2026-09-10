@@ -251,6 +251,12 @@ describe("research UI", () => {
 
     expect(markup).toContain("AI-assisted");
     expect(markup).toContain(
+      "It may contain mistakes, omissions, or outdated information.",
+    );
+    expect(markup).toContain(
+      "do not rely on it as the sole basis for investment decisions.",
+    );
+    expect(markup).toContain(
       '<h2 class="font-medium">Stock research report</h2>',
     );
     expect(markup).toContain(">Summary<");

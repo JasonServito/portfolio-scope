@@ -6,7 +6,7 @@ import { PublicSiteShell } from "@/components/layout/public-site-shell";
 export const metadata: Metadata = {
   title: "Privacy",
   description:
-    "PortfolioScope's concise privacy policy for OAuth identity, portfolio data, product analytics, logs, and account deletion.",
+    "How PortfolioScope uses account and user-created data to provide the app, including OAuth sign-in and limited third-party services.",
   alternates: { canonical: "/privacy" },
 };
 
@@ -14,9 +14,9 @@ export default function PrivacyPage() {
   return (
     <PublicSiteShell>
       <PublicContent
-        description="PortfolioScope collects only what the requested feature needs and keeps private financial values out of product analytics and operational logs."
+        description="PortfolioScope uses account and user-created data to provide the app, with privacy boundaries for analytics, operational telemetry, and optional AI research."
         eyebrow="Privacy"
-        title="Minimal collection. Explicit boundaries."
+        title="How PortfolioScope uses your data."
       >
         <div className="grid gap-8 lg:grid-cols-[0.72fr_1.28fr]">
           <aside className="h-fit rounded-2xl border bg-muted/35 p-5 text-sm leading-6 text-muted-foreground">
@@ -28,10 +28,13 @@ export default function PrivacyPage() {
             </p>
           </aside>
           <div className="space-y-10">
-            <PolicySection title="Information used">
-              Authenticated features may store your name, email, OAuth identity,
-              database session, and the portfolios, holdings, watchlist items,
-              alerts, or research records you create.
+            <PolicySection title="Information used to operate the app">
+              Authentication is handled through OAuth providers such as GitHub
+              and Google. PortfolioScope does not receive or store your provider
+              password. To provide and operate the app, it may store your name,
+              email address, OAuth provider identity, database session, and
+              user-created data such as portfolios, holdings, watchlist items,
+              alerts, and research history.
             </PolicySection>
             <PolicySection title="Product analytics">
               PortfolioScope records a small allowlisted set of navigation

@@ -53,7 +53,7 @@ function generationLabel(research: StockResearch) {
 function generationDescription(research: StockResearch) {
   const date = new Date(research.generatedAt).toLocaleDateString("en-US");
   if (research.generationMode === "EXTERNAL") {
-    return `Prepared ${date} from the cited sources. Verify important claims against the original sources.`;
+    return `AI-assisted report prepared ${date} from the cited sources. It may contain mistakes, omissions, or outdated information. Verify important information independently and do not rely on it as the sole basis for investment decisions.`;
   }
   if (research.generationMode === "RECORDED") {
     return `Prepared ${date} from a saved sample report.`;

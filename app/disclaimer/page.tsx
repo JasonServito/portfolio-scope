@@ -6,7 +6,7 @@ import { PublicSiteShell } from "@/components/layout/public-site-shell";
 export const metadata: Metadata = {
   title: "Disclaimer",
   description:
-    "PortfolioScope is a non-commercial educational analytics project, not a brokerage, adviser, recommendation service, or guaranteed real-time data source.",
+    "PortfolioScope is for informational and educational purposes only and does not provide financial, investment, legal, or tax advice.",
   alternates: { canonical: "/disclaimer" },
 };
 
@@ -14,35 +14,38 @@ export default function DisclaimerPage() {
   return (
     <PublicSiteShell>
       <PublicContent
-        description="PortfolioScope demonstrates full-stack engineering through financial analytics. It does not execute trades, provide personalized advice, or guarantee real-time market information."
+        description="PortfolioScope is for informational and educational purposes only. Nothing in the app is financial, investment, legal, or tax advice."
         eyebrow="Important disclosure"
-        title="Analytics for education—not financial advice."
+        title="Information, not advice."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Disclosure title="No recommendation">
             Research summaries, ratings, alerts, and calculations are
-            educational outputs. They are not personalized buy, sell, or hold
-            recommendations and should not replace professional advice.
+            educational outputs, not personalized buy, sell, or hold
+            recommendations. Make your own decisions and consult qualified
+            financial, legal, or tax professionals where appropriate.
           </Disclosure>
           <Disclosure title="No brokerage">
             PortfolioScope does not connect to brokerage accounts, accept
             deposits, execute orders, custody assets, or automate trading.
           </Disclosure>
           <Disclosure title="Data limitations">
-            SEC-derived facts can be missing, ambiguous, delayed, stale, or
-            affected by issuer filings. TradingView widgets may be delayed or
-            unavailable. Seeded demo values are not live production quotes.
+            Market and financial data may be delayed, incomplete, inaccurate,
+            unavailable, or outdated. SEC-derived facts can be affected by
+            filing quality or interpretation, TradingView widgets may be delayed
+            or unavailable, and seeded demo values are not live quotes.
           </Disclosure>
           <Disclosure title="AI limitations">
-            Optional AI-generated research can be incomplete, incorrect, or
-            misinterpret cited evidence even after automated validation. Its
-            confidence, ratings, and summaries are not guarantees or forecasts;
-            review the linked primary evidence yourself.
+            Some research may be AI-generated or AI-assisted. It can contain
+            mistakes, omissions, or outdated information, including
+            misinterpretation of cited evidence. Verify important information
+            independently and do not rely on AI output as the sole basis for
+            investment decisions.
           </Disclosure>
           <Disclosure title="Do your own review">
-            Verify important information with original filings and qualified
-            professionals. Historical performance and deterministic signals do
-            not predict future results.
+            Check important information against original filings and other
+            reliable sources. Historical performance and deterministic signals
+            do not predict future results.
           </Disclosure>
         </div>
       </PublicContent>
