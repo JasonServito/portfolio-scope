@@ -22,16 +22,24 @@ const screenshotContext = await browser.newContext({
 const screenshotPage = await screenshotContext.newPage();
 
 const captures = [
-  ["/", "landing.png"],
-  ["/dashboard?demo=true", "dashboard.png"],
-  ["/holdings", "holdings.png"],
-  ["/alerts", "alerts.png"],
-  ["/stocks/aapl", "stock-detail.png"],
-  ["/research", "research.png"],
-  ["/watchlist", "watchlist.png"],
+  { route: "/", filename: "landing.png", fullPage: false },
+  {
+    route: "/dashboard?demo=true",
+    filename: "dashboard.png",
+    fullPage: false,
+  },
+  { route: "/holdings", filename: "holdings.png", fullPage: false },
+  { route: "/alerts", filename: "alerts.png", fullPage: false },
+  {
+    route: "/stocks/aapl",
+    filename: "stock-detail.png",
+    fullPage: false,
+  },
+  { route: "/research", filename: "research.png", fullPage: true },
+  { route: "/watchlist", filename: "watchlist.png", fullPage: false },
 ];
 
-for (const [route, filename] of captures) {
+for (const { route, filename, fullPage } of captures) {
   await screenshotPage.goto(new URL(route, baseUrl).toString(), {
     waitUntil: "domcontentloaded",
   });
@@ -43,9 +51,10 @@ for (const [route, filename] of captures) {
   await screenshotPage.waitForTimeout(
     route.startsWith("/stocks/") ? 2_500 : 1_500,
   );
+  await screenshotPage.evaluate(() => window.scrollTo(0, 0));
   await screenshotPage.screenshot({
-    animations: "allow",
-    fullPage: true,
+    animations: "disabled",
+    fullPage,
     path: path.join(screenshotsDir, filename),
   });
 }
