@@ -1,3 +1,4 @@
+import { BackgroundJobType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -6,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   releaseLock: vi.fn(),
   invalidate: vi.fn(),
   setJson: vi.fn(),
+  ensureIdentity: vi.fn(),
+  enqueueBackgroundJob: vi.fn(),
 }));
 
 vi.mock("@/lib/cache/redis", () => ({
@@ -26,12 +29,17 @@ vi.mock("@/lib/sec/ingestion", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/jobs/service", () => ({
+  enqueueBackgroundJob: mocks.enqueueBackgroundJob,
+}));
+
+vi.mock("@/lib/sec/repository", () => ({
+  prismaSecRepository: { ensureIdentity: mocks.ensureIdentity },
+}));
+
 import { JobExecutionError } from "@/lib/jobs/errors";
-import {
-  SecIngestionError,
-  SecIngestionErrorCode,
-} from "@/lib/sec/ingestion";
-import { executeSecIngestionJob } from "@/lib/sec/jobs";
+import { SecIngestionError, SecIngestionErrorCode } from "@/lib/sec/ingestion";
+import { executeSecIngestionJob, queueSecIngestion } from "@/lib/sec/jobs";
 
 describe("M15 SEC background integration", () => {
   beforeEach(() => {
@@ -44,6 +52,14 @@ describe("M15 SEC background integration", () => {
     mocks.releaseLock.mockResolvedValue(true);
     mocks.invalidate.mockResolvedValue(true);
     mocks.setJson.mockResolvedValue(true);
+    mocks.ensureIdentity.mockResolvedValue({
+      companyId: "company-a",
+      secEntityId: "sec-entity-a",
+    });
+    mocks.enqueueBackgroundJob.mockResolvedValue({
+      jobId: "job-a",
+      reused: false,
+    });
     mocks.ingestSupportedCompany.mockResolvedValue({
       runId: "run-a",
       ticker: "AAPL",
@@ -54,6 +70,36 @@ describe("M15 SEC background integration", () => {
       factsSelected: 4,
       ambiguousFacts: 0,
     });
+  });
+
+  it("preserves a scheduled child correlation and the company idempotency bucket", async () => {
+    const publisher = { publishJSON: vi.fn() };
+    const environment = {
+      NODE_ENV: "test",
+      BACKGROUND_JOBS_ENABLED: "true",
+      SEC_INGESTION_ENABLED: "true",
+    } as NodeJS.ProcessEnv;
+
+    await expect(
+      queueSecIngestion("AAPL", {
+        correlationId: "parent-correlation:sec:aapl:child-correlation",
+        publisher,
+        environment,
+        now: () => new Date("2026-09-12T20:15:00.000Z"),
+      }),
+    ).resolves.toEqual({ jobId: "job-a", reused: false });
+
+    expect(mocks.enqueueBackgroundJob).toHaveBeenCalledWith(
+      {
+        type: BackgroundJobType.SEC_SUBMISSIONS_SYNC,
+        idempotencyKey: "sec:company-a:2026-09-12T18:00:00.000Z",
+        correlationId: "parent-correlation:sec:aapl:child-correlation",
+        payload: { ticker: "AAPL" },
+        userId: null,
+        companyId: "company-a",
+      },
+      { publisher, environment },
+    );
   });
 
   it("calls the same core ingestion service used by local synchronous execution", async () => {

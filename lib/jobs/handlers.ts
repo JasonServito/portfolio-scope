@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { BackgroundJobType, type Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
@@ -20,6 +22,20 @@ import {
   queueSecIngestion,
   renormalizeStoredCompanyFacts,
 } from "@/lib/sec/jobs";
+
+const MAX_CORRELATION_ID_LENGTH = 128;
+
+export function createScheduledSecCorrelationId(
+  parentCorrelationId: string,
+  ticker: string,
+) {
+  const suffix = `:sec:${ticker.toLowerCase()}:${randomUUID()}`;
+  const parentPrefix = parentCorrelationId.slice(
+    0,
+    Math.max(0, MAX_CORRELATION_ID_LENGTH - suffix.length),
+  );
+  return `${parentPrefix}${suffix}`;
+}
 
 function requireLink(value: string | null, expected: string, label: string) {
   if (!value || value !== expected) {
@@ -222,7 +238,10 @@ export async function executeBackgroundJobHandler(
         if (!ticker) continue;
         queued.push(
           await queueSecIngestion(ticker, {
-            correlationId: job.correlationId,
+            correlationId: createScheduledSecCorrelationId(
+              job.correlationId,
+              ticker,
+            ),
           }),
         );
       }
