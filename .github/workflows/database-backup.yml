@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
+    inputs:
+      diagnostic_only:
+        description: "Run only the sanitized read-only connection diagnostic"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,6 +34,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
+        if: ${{ github.event_name == 'schedule' || inputs.diagnostic_only != true }}
         env:
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
@@ -36,18 +43,17 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
 
-      - name: Verify PostgreSQL backup prerequisites
+      - name: Classify PostgreSQL connection readiness
         env:
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
-        run: |
-          pg_dump --version
-          psql --version
-          if ! psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -c "SELECT current_database(), current_setting('server_version');" 2>/dev/null; then
-            echo "::error::Read-only PostgreSQL connectivity check failed; connection details were suppressed."
-            exit 1
-          fi
+        run: node scripts/diagnose-postgres-connection.mjs
+
+      - name: Verify PostgreSQL backup tooling
+        if: ${{ github.event_name == 'schedule' || inputs.diagnostic_only != true }}
+        run: pg_dump --version
 
       - name: Create compressed logical backup
+        if: ${{ github.event_name == 'schedule' || inputs.diagnostic_only != true }}
         env:
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

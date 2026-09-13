@@ -1039,6 +1039,15 @@ backups/postgres/{environment}/weekly/
 backups/postgres/{environment}/monthly/
 ```
 
+To classify a Production connection-preflight failure without creating a
+backup, manually dispatch the workflow with `diagnostic_only=true`. This path
+skips dependency lifecycle scripts, `pg_dump`, and all R2 backup logic. It runs
+only the PostgreSQL probe with session and transaction read-only protections
+and reports a fixed coarse success or failure category; raw PostgreSQL errors
+and connection details are never written to the workflow log. Stop after the
+diagnostic and obtain explicit Production approval before changing the secret,
+network access, or running the full backup.
+
 It retains the newest 7 daily, 4 weekly, and 3 monthly objects. Sunday creates a
 weekly generation and the first UTC day of a month creates a monthly generation.
 Run a manual backup from a trusted operator host with PostgreSQL client tools
