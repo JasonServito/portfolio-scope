@@ -9,11 +9,13 @@ signed QStash jobs, maintenance, diagnostics, analytics, security, backups,
 recovery, release verification, evidence-grounded model activation, budgets,
 and rollback.
 
-The Production rollout is complete. The account-side activation evidence for
-M26 earnings, M27 AI research, bounded SEC ingestion, logical backup, Sentry
-release mapping, and the final application smoke test is recorded below. The
-earlier default-off and deferred notes remain where useful as historical gate
-context and are explicitly marked resolved.
+The Production application rollout and the 25-company SEC financial-data
+backfill are complete. The account-side activation evidence for M26 earnings,
+M27 AI research, SEC ingestion, logical backup, Sentry release mapping, and the
+final application smoke test is recorded below. Cloudflare dashboard credential
+hardening and direct Upstash schedule inventory remain explicitly deferred,
+non-blocking follow-up work; earlier default-off notes remain where useful as
+historical gate context.
 
 ## Service inventory and cost
 
@@ -1157,8 +1159,9 @@ credentials merely to automate this low-frequency review.
 
 ### Final Production rollout record
 
-**Status: COMPLETE.** The Production rollout is complete and no
-rollout-blocking issues remain.
+**Status: FINANCIAL-DATA ROLLOUT COMPLETE.** No ingestion, R2-write, public-page,
+or Production-health blocker remains. Two account-console follow-up areas are
+deferred as recorded below.
 
 M26 earnings Gate 7 passed, including the controlled Redis-unavailable
 fail-closed proof recorded above. Production earnings synchronization is enabled
@@ -1168,27 +1171,62 @@ M27 Production migration state is complete and the schema is current. Production
 AI research activation is complete; a controlled `AAPL` research report
 completed successfully, and AI accounting and reconciliation checks passed.
 
-The bounded Production `AAPL` SEC ingestion smoke test passed. Its durable
-records were:
+The controlled Production `GOOGL`, `NVDA`, and `AMZN` SEC proof batch passed
+before the remaining supported companies were ingested in bounded sequential
+batches. The proof records were:
 
-```text
-BackgroundJob.type = SEC_SUBMISSIONS_SYNC
-BackgroundJob.status = COMPLETED
-BackgroundJob.attemptCount = 1
+| Ticker | Filings | Facts | Selected | Ambiguous | Result                 |
+| ------ | ------: | ----: | -------: | --------: | ---------------------- |
+| GOOGL  |      13 | 1,654 |      725 |         0 | Completed, one attempt |
+| NVDA   |      25 | 2,824 |    1,151 |         0 | Completed, one attempt |
+| AMZN   |      24 | 3,246 |    1,202 |         0 | Completed, one attempt |
 
-SecIngestionRun.status = COMPLETED
-SecIngestionRun.trigger = JOB
-SecIngestionRun.filingsProcessed = 45
-SecIngestionRun.factsProcessed = 2940
-SecIngestionRun.factsSelected = 1191
-SecIngestionRun.ambiguousFacts = 0
-SecIngestionRun.errorCode = null
-```
+A final read-only Production audit confirmed 25/25 supported companies with a
+populated `lastSyncedAt`, completed latest job and run, one attempt, matching
+correlation IDs, and a QStash message ID. The universe contains 708 filings,
+69,418 normalized facts, 26,683 selected facts, and zero ambiguous facts. Every
+company has both `COMPANY_FACTS` and `SUBMISSIONS` raw sources with valid
+SHA-256 metadata, nonzero byte lengths, and JSON content types. There were no
+active or failed SEC jobs after completion.
 
-Provenance verification confirmed a populated `lastSyncedAt`, `filingCount =
-45`, and `factCount = 2940`. Raw sources included `COMPANY_FACTS` and
-`SUBMISSIONS`, with SHA-256 metadata, nonzero byte lengths, and `contentType =
-application/json`.
+The bounded admin-ingestion rate limit was exercised without bypass: after five
+accepted requests in the configured 600-second window, the sixth request
+returned HTTP 429 and created no job. The remaining submissions succeeded after
+the natural window reset.
+
+Every `/stocks/<ticker>` URL in the 25-company registry returned HTTP 200 and
+rendered Key Metrics, three financial-trend regions, and the filing-evidence
+control. None rendered the not-loaded, failed-refresh, or application-error
+state. Hydrated checks on `GOOGL`, `JNJ`, and `INTC` also matched the requested
+ticker and rendered live financial evidence.
+
+Signed runtime delivery is verified independently of schedule inventory: all
+25 SEC jobs carried QStash message IDs and reached `COMPLETED`, while
+administrator readiness reported Redis and QStash healthy. A durable
+`RECOVER_STALE_JOBS` maintenance job completed in one attempt. Exact Upstash
+schedule inventory remains deferred because Google blocked the controlled
+browser login and no API/CLI token was available. Follow-up must verify no
+duplicates and the documented destinations, signing, retries, timeouts, and UTC
+cadence for:
+
+- `portfolioscope-recover-stale-jobs` — hourly;
+- `portfolioscope-refresh-stale-sec` — 02:15 and 14:15 UTC daily.
+
+The existing working Production R2 credential was not rotated or revoked.
+Production raw-source writes and the backup path are healthy, local `.env` has
+no Production R2 access, and local background, SEC, and manual-ingestion flags
+remain disabled. The private `portfolioscope-sec-development` bucket exists;
+creating its bucket-scoped credential, rotating the Production credential, and
+confirming Preview credential isolation in the Cloudflare dashboard remain
+deferred because Google blocked controlled-browser authentication.
+
+Before ingestion, Production backup workflow run `34875395358` completed for
+commit `7db065e`. It uploaded a non-empty 559,228-byte gzip object with SHA-256
+`9937c241ff9094f7eae69be6f667ad0f877627c40ee08c7d35e99e7f10fb8390`,
+validated the checksum and plain-SQL format, and pruned one object under the
+documented retention policy. The existing Production credential denied
+account-level bucket listing; its complete dashboard policy and rotation remain
+deferred rather than inferred from that runtime check.
 
 The final Production smoke test passed for:
 
@@ -1368,7 +1406,7 @@ operational checks; they do not supersede the final rollout completion record.
 
 | Item                                                      | Status              | Evidence                                                                                                                                                                                                                                                                                                                                      |
 | --------------------------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel project connected                                  | Not verified        | Deployment URL and timestamp                                                                                                                                                                                                                                                                                                                  |
+| Vercel project connected                                  | Verified 2026-09-15 | Production deployment `dpl_7X1PYYc56BTJuLjYH4SFNzr5FDg5` was Ready at the canonical alias; liveness and readiness returned HTTP 200                                                                                                                                                                                                           |
 | Preview deployment isolated                               | Not verified        | Preview URL and non-production database confirmation                                                                                                                                                                                                                                                                                          |
 | Neon production database provisioned                      | Not verified        | Project/branch recorded outside source control                                                                                                                                                                                                                                                                                                |
 | Production migrations applied                             | Verified            | Production migration state complete and schema current                                                                                                                                                                                                                                                                                        |
@@ -1377,7 +1415,7 @@ operational checks; they do not supersede the final rollout completion record.
 | Google OAuth callback verified                            | Not verified        | Disposable sign-in and callback timestamp                                                                                                                                                                                                                                                                                                     |
 | Session revocation verified                               | Not verified        | Disposable multi-session test                                                                                                                                                                                                                                                                                                                 |
 | Account deletion verified                                 | Not verified        | Disposable user and cascade check                                                                                                                                                                                                                                                                                                             |
-| Private R2 bucket and least-privilege token verified      | Not verified        | Bucket policy and test object metadata                                                                                                                                                                                                                                                                                                        |
+| Private R2 runtime access verified                        | Verified 2026-09-15 | Existing Production access completed the SEC raw-source and logical-backup paths; account-level bucket listing was denied; credential scope, policy, and rotation review remain deferred                                                                                                                                                      |
 | SEC user-agent/contact verified                           | Not verified        | Controlled request and operator review                                                                                                                                                                                                                                                                                                        |
 | M15 migrations applied                                    | Not verified        | Deployment log showing both ordered migration names                                                                                                                                                                                                                                                                                           |
 | Preview required AI migrations applied with AI disabled   | Blocked             | 2026-08-24 value check found placeholder Preview database URLs; 2026-08-25 inventory recheck found no isolated service configuration; no backup/migration attempted; 11 local migrations pass                                                                                                                                                 |
@@ -1391,26 +1429,26 @@ operational checks; they do not supersede the final rollout completion record.
 | AI kill switch and degradation verified                   | Partial             | Offline next-call proof passed; live flag-off, page, rollback, and monitor evidence pending                                                                                                                                                                                                                                                   |
 | Production AI explicitly approved and bounded             | Verified            | Controlled AAPL report completed; accounting and reconciliation passed; Production activation complete                                                                                                                                                                                                                                        |
 | Preview Redis/QStash isolated                             | Not verified        | Resource identifiers recorded outside source control                                                                                                                                                                                                                                                                                          |
-| Signed QStash delivery verified                           | Not verified        | Preview job ID, attempt, and terminal status                                                                                                                                                                                                                                                                                                  |
-| M15 rate limits verified                                  | Not verified        | Controlled `429` and recovery timestamp                                                                                                                                                                                                                                                                                                       |
-| Maintenance schedules configured                          | Not verified        | Two named schedule IDs and reviewed UTC cadence                                                                                                                                                                                                                                                                                               |
-| M14 migration and supported registry seed applied         | Not verified        | Migration log and 25-company count                                                                                                                                                                                                                                                                                                            |
+| Signed QStash delivery verified                           | Verified Production | 25/25 Production SEC jobs carried QStash message IDs, matched their completed ingestion runs, and completed in one attempt                                                                                                                                                                                                                    |
+| M15 rate limits verified                                  | Verified 2026-09-15 | The sixth bounded admin-ingestion request returned `429`; submission succeeded after the documented 600-second window reset without bypassing the guard                                                                                                                                                                                       |
+| Maintenance schedules configured                          | Deferred            | Controlled Upstash browser login was blocked by Google and no API/CLI token was available; verify the two named schedules, destinations, cadence, signing, retry/timeout settings, deliveries, and duplicate absence                                                                                                                          |
+| M14 migration and supported registry seed applied         | Verified 2026-09-15 | 25/25 supported companies resolved and completed SEC jobs/runs; final universe audit recorded 708 filings and 69,418 normalized facts                                                                                                                                                                                                         |
 | M26 earnings migration applied with sync disabled         | Verified            | Migration was applied under the guarded activation sequence; final sync state is enabled                                                                                                                                                                                                                                                      |
 | EarningsAPI.com free quota confirmed                      | Verified 2026-08-24 | Owner dashboard: Free/$0; 60/minute, 100/day, 1,000/month; 0% usage; New York reset; no API request                                                                                                                                                                                                                                           |
 | EarningsAPI.com terms/cache permission confirmed          | Verified 2026-08-24 | Gate 6 complete: dated official terms, storage/database workflows, endpoint limits, bounded retention, and residual-risk review; written clarification not required                                                                                                                                                                           |
 | Bounded 25-symbol earnings contract check passed          | Verified 2026-08-24 | `2026-08-24T17:59:10.474Z`: 25/25 ordered symbols; 25 requests; HTTP 200 and contract-valid nonempty result for every symbol; 0 retries/redirect/transient/contract failures; dashboard 25/100 daily used, 75 remaining, Free, 1,000/month, 60/minute, New York reset; no DB/Redis/sync/config writes; flag remained false; no secret exposed |
 | Earnings Redis fail-closed behavior verified              | Verified            | Gate 7 PASS: controlled AAPL Redis failure; database identity matched; observation unchanged; `providerFetchCount = 0`; source `COORDINATION_UNAVAILABLE`                                                                                                                                                                                     |
 | Production earnings activation explicitly approved        | Verified            | `EARNINGS_SYNC_ENABLED=true`; Production synchronization and final page smoke test passed                                                                                                                                                                                                                                                     |
-| Bounded AAPL SEC ingestion reviewed                       | Verified            | `SEC_SUBMISSIONS_SYNC` completed in one attempt; 45 filings, 2,940 facts, 1,191 selected, 0 ambiguous; raw-source provenance verified                                                                                                                                                                                                         |
-| TradingView attribution/failure state verified            | Not verified        | Production stock-page smoke test                                                                                                                                                                                                                                                                                                              |
-| Custom domain and HTTPS active                            | Not verified        | Canonical URL and certificate check                                                                                                                                                                                                                                                                                                           |
+| Bounded Production SEC ingestion reviewed                 | Verified 2026-09-15 | `GOOGL`/`NVDA`/`AMZN` proof then bounded registry backfill; 25/25 completed in one attempt, 708 filings, 69,418 facts, 26,683 selected, 0 ambiguous; both raw-source kinds and public pages verified                                                                                                                                          |
+| TradingView attribution verified                          | Verified 2026-09-15 | Hydrated `INTC` page exposed the labelled chart region, TradingView source link and attribution, and live SEC fundamentals; the explicit widget-failure path was not exercised                                                                                                                                                                |
+| Canonical Vercel domain and HTTPS active                  | Verified 2026-09-15 | `https://portfolio-scope.vercel.app` and the 25 stock-page routes returned HTTP 200 over HTTPS; a separately owned custom domain was not verified                                                                                                                                                                                             |
 | Sentry Production release verified                        | Verified            | Explicit release overrides removed; new events use `VERCEL_GIT_COMMIT_SHA`; stale `d7d0369` no longer used                                                                                                                                                                                                                                    |
 | Better Stack monitor active                               | Not verified        | Monitor ID and test notification                                                                                                                                                                                                                                                                                                              |
 | Better Stack worker heartbeat active                      | Not verified        | Heartbeat ID, success, missed signal, and recovery timestamps                                                                                                                                                                                                                                                                                 |
 | Better Stack Production Backup heartbeat active           | Verified            | Success heartbeat manually verified up; failure monitor remains separate                                                                                                                                                                                                                                                                      |
 | PostHog privacy review complete                           | Not verified        | Event/property export reviewed in Preview                                                                                                                                                                                                                                                                                                     |
-| Production logical database backup complete               | Verified            | Daily upload completed; 265,428 bytes; SHA-256 metadata recorded; `/admin` detected it; 0 objects pruned                                                                                                                                                                                                                                      |
+| Production logical database backup complete               | Verified 2026-09-14 | Workflow `34875395358`; 559,228 bytes; checksum and plain-SQL format valid; one object pruned under retention; account-level bucket listing denied                                                                                                                                                                                            |
 | Non-production restore drill complete                     | Not verified        | Timestamp and non-secret evidence reference                                                                                                                                                                                                                                                                                                   |
-| Security headers and TradingView CSP verified             | Not verified        | Header capture and widget smoke-test timestamp                                                                                                                                                                                                                                                                                                |
+| Security headers and TradingView CSP verified             | Verified 2026-09-15 | Production HEAD response included HSTS, `nosniff`, `X-Frame-Options: DENY`, and a CSP permitting the attributed TradingView integration                                                                                                                                                                                                       |
 | Security automation and branch protection active          | Not verified        | Required-check names and repository settings review                                                                                                                                                                                                                                                                                           |
 | Previous Vercel deployment restored/tested                | Not verified        | Rollback drill date and deployment ID                                                                                                                                                                                                                                                                                                         |
