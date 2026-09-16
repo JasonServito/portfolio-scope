@@ -75,6 +75,63 @@ sources._
 - Background jobs handle longer-running ingestion, research, and maintenance
   work.
 
+## AI Research Multi-Agent Workflow
+
+The research layer fans a durable job out to focused specialists, then builds
+one evidence-grounded report from their structured results. Model-assisted
+generation is optional and default-off; deterministic and recorded providers
+keep local development and automated tests reproducible.
+
+```mermaid
+flowchart TD
+    Request["Authenticated research request"] --> Gate["Ownership, feature flag, reuse,<br/>duplicate-work, and quota checks"]
+    Gate --> Job["Durable ResearchJob in PostgreSQL"]
+    Job --> Queue["Signed background fan-out<br/>with idempotency, retries, and timeouts"]
+
+    Sources["Public evidence only<br/>SEC facts · company catalog · deterministic signals"] --> Snapshot["Versioned evidence snapshot<br/>stable IDs · provenance · hash"]
+    Snapshot --> Retrieval["Agent-specific retrieval<br/>filters · reranking · context budget"]
+
+    Queue --> Inputs["Bounded specialist work items"]
+    Retrieval --> Inputs
+    Inputs --> Runner["Per-agent structured execution"]
+
+    subgraph Specialists["Independent specialist agents"]
+        direction LR
+        Financials["Financials"]
+        Competitors["Competitors"]
+        Risk["Risk"]
+        News["News<br/>explicit missing state without a licensed source"]
+        Politics["Political activity<br/>explicit missing state without a valid source"]
+    end
+
+    Runner --> Financials
+    Runner --> Competitors
+    Runner --> Risk
+    Runner --> News
+    Runner --> Politics
+
+    Provider["Structured provider boundary<br/>deterministic · recorded · OpenAI when enabled"] -. "selected execution mode" .-> Runner
+    Controls["Safety and cost controls<br/>kill switch · hard budgets · one repair attempt"] -. "guards metered calls" .-> Provider
+    Privacy["Private holdings, identity, alerts,<br/>and user notes stay outside model input"] -. "enforced boundary" .-> Snapshot
+
+    Financials --> Collected["Persisted structured specialist results"]
+    Competitors --> Collected
+    Risk --> Collected
+    News --> Collected
+    Politics --> Collected
+
+    Collected --> Synthesis["Synthesis agent<br/>validated specialist outputs only"]
+    Synthesis --> Validation["Schema, evidence-grounding,<br/>and no-recommendation validation"]
+    Validation --> Records["PostgreSQL<br/>AgentRuns · report · claims · evidence · usage"]
+    Records --> UI["Research API and UI<br/>summary · strengths · risks · what to watch · sources"]
+```
+
+Each material claim must cite supplied evidence. Missing data, counter-evidence,
+and specialist disagreements remain visible through synthesis; the system does
+not fill gaps from model memory or issue buy, sell, hold, allocation, or price
+target instructions. See the [AI research design](docs/ai-research.md) for the
+full data, safety, cost, and activation boundaries.
+
 ## Project Highlights
 
 - Deployed full-stack application with a public read-only demo
