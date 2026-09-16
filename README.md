@@ -75,6 +75,29 @@ sources._
 - Background jobs handle longer-running ingestion, research, and maintenance
   work.
 
+## Application Architecture
+
+PortfolioScope is a modular Next.js application backed by durable PostgreSQL
+data and a small set of managed services.
+
+```mermaid
+flowchart TD
+    User["Browser"] --> App["PortfolioScope on Vercel<br/>Next.js UI and server APIs"]
+
+    App --> Auth["Auth.js<br/>GitHub and Google sign-in"]
+    App --> Database["PostgreSQL<br/>users, portfolios, alerts, research, and jobs"]
+    App --> Cache["Redis<br/>cache, rate limits, and locks"]
+    App --> Jobs["QStash background jobs<br/>ingestion, research, and maintenance"]
+    App --> Providers["External services<br/>SEC, earnings, TradingView, and optional OpenAI"]
+
+    Jobs --> Database
+    Jobs --> Providers
+    Jobs --> Storage["R2 object storage<br/>raw SEC data"]
+```
+
+PostgreSQL is the source of truth. Redis holds only temporary cache, rate-limit,
+lock, and deduplication data.
+
 ## AI Research Multi-Agent Workflow
 
 The research layer runs focused specialists in parallel, then combines their
