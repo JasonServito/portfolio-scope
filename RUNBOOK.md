@@ -689,8 +689,8 @@ before any usage can exceed the free allowances.
 
 This section preserves the original Preview-only validation procedure. Its
 restriction against Production activation applied at that stage; the separately
-approved and completed Production result is recorded in
-[`AI_ACTIVATION.md`](AI_ACTIVATION.md) and the final rollout record below.
+approved and completed Production result is recorded in the completion section
+and final rollout record below.
 
 M18 is a default-off interpretation layer over public evidence. SEC EDGAR fact
 excerpts and filing metadata, application catalog data, and deterministic signals
@@ -788,13 +788,33 @@ Record the Preview job/report IDs, source-review notes, privacy evidence,
 version tuple, provider usage/charge, kill-switch result, reviewer, and rollback
 target, desktop/mobile review, and monitor results. Restore
 `AI_RESEARCH_ENABLED=false` and stop M27. Preview success does not authorize or
-establish Production readiness. The exact later Production steps require a new
-explicit approval and are recorded in [`AI_ACTIVATION.md`](AI_ACTIVATION.md).
-Do not create Production credentials, configure billing, migrate, deploy,
-enable a flag, or call the provider merely because Preview passes. The detailed
-methodology and rubric are in
+establish Production readiness. The later Production steps required a new
+explicit approval. Do not create Production credentials, configure billing,
+migrate, deploy, enable a flag, or call the provider merely because Preview
+passes. The detailed methodology and rubric are in
 [`docs/ai-research.md`](docs/ai-research.md) and
 [`docs/ai-evaluation.md`](docs/ai-evaluation.md).
+
+### Production activation completion
+
+Production activation is complete. The Production migration state is current,
+one controlled `AAPL` research report completed successfully, AI usage and cost
+accounting reconciled, and ongoing enablement was approved. The active
+Production values are:
+
+```text
+BACKGROUND_JOBS_ENABLED=true
+RESEARCH_GENERATION_ENABLED=true
+AI_RESEARCH_ENABLED=true
+```
+
+Continued operation remains constrained to the pinned model and hard limits
+documented above. Recheck official pricing and deprecation status before a live
+model change or reactivation review. Automated validation does not replace
+human citation and financial-advice safety review. For an incident, set
+`AI_RESEARCH_ENABLED=false` first and follow **Job or cache failure** below;
+preserve additive AI usage records for reconciliation and forward-fix the
+schema.
 
 ## M26 EarningsAPI.com activation
 
@@ -1399,8 +1419,7 @@ Sentry and Better Stack are optional application dependencies. A monitoring outa
 
 This table preserves the itemized deployment evidence. Do not mark an item
 complete without direct evidence. M27's historical Preview-only boundary and
-completed Production gate are also recorded in
-[`AI_ACTIVATION.md`](AI_ACTIVATION.md).
+completed Production gate are recorded in the M27 section above.
 Rows that remain unverified preserve narrower historical or recurring
 operational checks; they do not supersede the final rollout completion record.
 
