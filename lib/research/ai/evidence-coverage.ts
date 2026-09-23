@@ -119,13 +119,22 @@ function structuredPresence(evidence: readonly ResearchEvidence[]) {
   };
 }
 
+// Only a 10-K or 10-Q dates the financial facts; a Form 8-K current report
+// (M32) is event evidence and does not refresh them, so it is excluded from
+// the newest-filing freshness measure.
+function isPeriodicFiling(item: ResearchEvidence) {
+  const formType = item.metadata.formType;
+  return typeof formType !== "string" || !formType.startsWith("8-K");
+}
+
 function newestFilingDate(evidence: readonly ResearchEvidence[]) {
   return (
     evidence
       .filter(
         (item) =>
           (item.sourceKind === "SEC_FACT" || item.sourceKind === "SEC_FILING") &&
-          item.sourceDate !== null,
+          item.sourceDate !== null &&
+          isPeriodicFiling(item),
       )
       .map((item) => item.sourceDate!)
       .sort()

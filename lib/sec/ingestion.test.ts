@@ -54,6 +54,57 @@ const fixtureClient = {
 };
 
 describe("controlled SEC ingestion", () => {
+  it("retains twelve months of 8-K metadata only where current reports are enabled, leaving facts unchanged", async () => {
+    const now = () => new Date("2026-07-15T18:00:00.000Z");
+    const run = async (environment: NodeJS.ProcessEnv) => {
+      const repository = createRepository();
+      const result = await ingestSupportedCompany(
+        "AAPL",
+        { trigger: "TEST", correlationId: `correlation-${Math.random()}` },
+        {
+          repository,
+          storage: new InMemoryObjectStorage(),
+          client: fixtureClient,
+          now,
+          environment,
+        },
+      );
+      const saveFilings = vi.mocked(repository.saveFilings);
+      const saveFacts = vi.mocked(repository.saveFacts);
+      return {
+        result,
+        filings: saveFilings.mock.calls[0][1],
+        facts: saveFacts.mock.calls[0][0].facts,
+      };
+    };
+
+    const disabled = await run({ NODE_ENV: "test" } as NodeJS.ProcessEnv);
+    expect(disabled.result.filingsProcessed).toBe(2);
+    expect(disabled.filings.map((filing) => filing.formType)).toEqual([
+      "10-K",
+      "10-Q",
+    ]);
+
+    const enabled = await run({
+      NODE_ENV: "test",
+      SEC_CURRENT_REPORTS_ENABLED: "true",
+    } as NodeJS.ProcessEnv);
+    expect(enabled.result.filingsProcessed).toBe(4);
+    expect(
+      enabled.filings.map((filing) => [filing.formType, filing.itemCodes]),
+    ).toEqual([
+      ["10-K", []],
+      ["10-Q", []],
+      ["8-K", ["2.02", "9.01"]],
+      ["8-K", ["2.02", "9.01"]],
+    ]);
+    // The relaxed form filter changes no fact: facts come from Company Facts
+    // and keep their own 10-K/10-Q filter.
+    expect(enabled.facts).toEqual(disabled.facts);
+    expect(enabled.result.factsProcessed).toBe(disabled.result.factsProcessed);
+    expect(enabled.result.factsSelected).toBe(disabled.result.factsSelected);
+  });
+
   it("stores raw payloads before persisting normalized facts and completes idempotently", async () => {
     const repository = createRepository();
     const storage = new InMemoryObjectStorage();

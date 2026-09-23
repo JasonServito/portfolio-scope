@@ -21,7 +21,7 @@ import {
   findFixtureEvidence,
 } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import {
-  AAPL_GROUNDED_SYNTHESIS,
+  AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS,
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
   CURATED_AAPL_SNAPSHOT,
 } from "@/lib/research/ai/fixtures/curated-evaluation";
@@ -211,7 +211,7 @@ function recordedProvider() {
       rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.FINANCIALS),
       rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.COMPETITORS),
       rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.RISK),
-      rekeyOutput(AAPL_GROUNDED_SYNTHESIS),
+      rekeyOutput(AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS),
     ].map((output, index) => ({
       result: {
         output,

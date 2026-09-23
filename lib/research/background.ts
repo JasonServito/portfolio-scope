@@ -30,6 +30,7 @@ import {
   AI_PROMPT_VERSION,
   AI_REPORT_VERSION,
   AI_SPECIALIST_AGENT_VERSION,
+  AI_SPECIALIST_MAX_OUTPUT_TOKENS,
   AI_SYNTHESIS_AGENT_VERSION,
   AiConfigurationError,
   getQueuedAiResearchConfig,
@@ -48,6 +49,7 @@ import {
 } from "@/lib/research/ai/providers";
 import {
   buildResearchEvidenceSnapshot,
+  hasCurrentReportEvidence,
   ResearchEvidenceSnapshotError,
   selectSpecialistEvidence,
   selectSynthesisEvidence,
@@ -66,6 +68,7 @@ import {
 import { seededResearchProvider } from "@/lib/research/providers/seeded-provider";
 import { synthesizeResearch } from "@/lib/research/synthesis-agent";
 import {
+  deferredSpecialistAgentNames,
   scheduledSpecialistAgentNames,
   type AgentResult,
   type ResearchFinding,
@@ -225,7 +228,7 @@ function missingExternalSpecialist(
 
 function publicDataGap(agentName: SpecialistAgentName) {
   if (agentName === "NEWS") {
-    return "Licensed current-news evidence is not configured; filings are not treated as current news.";
+    return "No Form 8-K current report from the last twelve months is stored for this company, so recent events are not assessed; third-party news is not used.";
   }
   return "Verified political-activity evidence is not configured for this company.";
 }
@@ -479,15 +482,15 @@ async function enqueueSynthesisIfReady(
   });
   // Readiness counts only the specialists scheduled for this job's mode; an
   // unscheduled historical run neither blocks nor satisfies synthesis.
-  const scheduled = scheduledSpecialistAgentNames(
-    parent?.generationMode ?? ResearchGenerationMode.EXTERNAL,
-  );
+  const generationMode = parent?.generationMode ?? ResearchGenerationMode.EXTERNAL;
+  const scheduled = scheduledSpecialistAgentNames(generationMode);
+  const deferred = deferredSpecialistAgentNames(generationMode);
   const specialistStates = await db.agentRun.findMany({
     where: {
       researchJobId: input.researchJobId,
       agentName: { in: [...scheduled] },
     },
-    select: { status: true },
+    select: { agentName: true, status: true },
   });
   const completedSpecialists = specialistStates.filter(
     ({ status }) => status === AgentStatus.COMPLETED,
@@ -503,6 +506,37 @@ async function enqueueSynthesisIfReady(
   }
 
   if (completedSpecialists !== scheduled.length) {
+    // Second stage: a deferred specialist is queued once every first-stage
+    // specialist has completed, so its model reservation never overlaps
+    // theirs. The key is per job and agent, so concurrent completions queue
+    // it once, and a run already running or failed is left to its own job.
+    const hasStatus = (agentName: SpecialistAgentName, status: AgentStatus) =>
+      specialistStates.some(
+        (run) => run.agentName === agentName && run.status === status,
+      );
+    const firstStageComplete = scheduled
+      .filter((agentName) => !deferred.includes(agentName))
+      .every((agentName) => hasStatus(agentName, AgentStatus.COMPLETED));
+    if (firstStageComplete) {
+      for (const agentName of deferred) {
+        if (!hasStatus(agentName, AgentStatus.PENDING)) continue;
+        await enqueueBackgroundJob(
+          {
+            type: BackgroundJobType.RESEARCH_AGENT_RUN,
+            idempotencyKey: `research:${input.researchJobId}:agent:${agentName}`,
+            correlationId: input.correlationId,
+            payload: { researchJobId: input.researchJobId, agentName },
+            userId: input.userId,
+            researchJobId: input.researchJobId,
+            agentName,
+          },
+          {
+            publisher: dependencies.publisher,
+            environment: dependencies.environment,
+          },
+        );
+      }
+    }
     await db.researchJob.updateMany({
       where: {
         id: input.researchJobId,
@@ -663,9 +697,12 @@ export async function executeResearchAgent(
         );
       }
 
+      // News is a model call only when the snapshot lists at least one Form
+      // 8-K current report; otherwise it reports the gap without a call, so
+      // it never invents recency (M32).
       if (
-        input.agentName === "NEWS" ||
-        input.agentName === "POLITICAL_ACTIVITY"
+        input.agentName === "POLITICAL_ACTIVITY" ||
+        (input.agentName === "NEWS" && !hasCurrentReportEvidence(snapshot))
       ) {
         const output = missingExternalSpecialist(
           input.agentName,
@@ -697,6 +734,15 @@ export async function executeResearchAgent(
           environment,
           dependencies,
         );
+        // The reduced specialist allowances pay for the News model call, so
+        // they apply only to a job whose snapshot holds current reports;
+        // otherwise the configured per-call maximum applies as before M32.
+        const outputAllowance = hasCurrentReportEvidence(snapshot)
+          ? Math.min(
+              config.maxOutputTokensPerCall,
+              AI_SPECIALIST_MAX_OUTPUT_TOKENS[input.agentName],
+            )
+          : config.maxOutputTokensPerCall;
         const evidenceSelection = selectSpecialistEvidence(
           snapshot,
           input.agentName,
@@ -724,6 +770,7 @@ export async function executeResearchAgent(
             agentRunId: existing?.id,
             operation,
             idempotencyKey: `research:${researchJob.id}:agent:${input.agentName}:delivery:${input.attemptNumber ?? 1}`,
+            maxOutputTokens: outputAllowance,
             now: dependencies.now?.(),
             signal: input.signal,
           },
@@ -741,9 +788,7 @@ export async function executeResearchAgent(
           {
             provider: generated.providerResult.provider,
             model: generated.providerResult.model,
-            modelConfigJson: {
-              maxOutputTokens: config.maxOutputTokensPerCall,
-            },
+            modelConfigJson: { maxOutputTokens: outputAllowance },
             promptVersion: AI_PROMPT_VERSION,
             outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
             agentVersion: AI_SPECIALIST_AGENT_VERSION,

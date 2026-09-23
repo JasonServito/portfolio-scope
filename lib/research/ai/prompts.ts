@@ -126,7 +126,11 @@ export const SPECIALIST_RESEARCH_QUESTIONS: Record<
     "Regulatory, governance, and political exposure: answer only if supplied evidence describes such exposure; otherwise state that no such evidence is supplied.",
   ],
   NEWS: [
-    "Is licensed current-news evidence supplied? If not, report availability NOT_AVAILABLE with no claims and state the gap; never infer current events from filings.",
+    "For each Form 8-K current report supplied, what was reported: the filing date, the item codes, and, where an Exhibit 99.1 press-release passage is supplied, the results or announcement the company made?",
+    "What changed compared with the earlier current reports or the periodic filings in the evidence, such as a new result, a dividend or repurchase decision, a leadership change, a shareholder vote, or an agreement?",
+    "Why may each event matter for the business, stated as the filing itself frames it, without predicting share prices?",
+    "How strong is the evidence for each event: a press-release passage that describes it, or only the item codes of the 8-K cover?",
+    "What remains unknown, including items with no exhibit text, and how recent is the newest current report? If no current report is supplied, report availability NOT_AVAILABLE with no claims.",
   ],
   POLITICAL_ACTIVITY: [
     "Is verified political-activity evidence supplied? If not, report availability NOT_AVAILABLE with no claims and state the gap.",
@@ -134,7 +138,7 @@ export const SPECIALIST_RESEARCH_QUESTIONS: Record<
 };
 
 const agentPurpose: Record<SpecialistAgentName, string> = {
-  NEWS: "Licensed current-news evidence is not configured, so answer the question by reporting the gap. Do not infer current events from filings.",
+  NEWS: "Describe recent company events only from the supplied Form 8-K current reports and their Exhibit 99.1 press-release passages. Make one claim per event: state the filing date and items, cite the 8-K current-report item for the date and the press-release passage for what was said, and label a claim FACT when it restates the filing. Never describe an event that no supplied 8-K reports, never treat the absence of a report as evidence that nothing happened, and never use third-party news, memory, or the periodic filings as a source of events.",
   FINANCIALS:
     "Answer from the reported financial facts, the financial summary table, the quarterly trend excerpt, and the derived growth, margin, cash-generation, and leverage values, always with their periods and units; use MD&A passages only for the drivers the filing gives. Keep explicit gaps explicit and never invent valuation inputs.",
   COMPETITORS:
@@ -168,7 +172,7 @@ const numericRules = [
 ];
 
 const sourceKindRules = [
-  "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q (form, section, and filing date given); attribute it to that filing as the company's disclosure, not independent verification, and read forward-looking language as expectation, not fact.",
+  "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q, a passage of a press release the company attached to a Form 8-K, or the cover items of a Form 8-K current report (form, section, and filing date given); attribute it to that filing as the company's disclosure, not independent verification, and read forward-looking language as expectation, not fact.",
 ];
 
 const claimKindRules = [
@@ -245,6 +249,7 @@ export function synthesisPrompt(input: {
     ...claimKindRules,
     `Keep the kind of any claim you carry forward and label your own conclusions INTERPRETATION. ${ratingRule}`,
     "In whatWouldChange, list up to six concrete developments grounded in the supplied evidence that would change this analysis, such as a specific derived metric moving in the next filing or a missing metric becoming available. Do not mention share prices.",
+    "Recent events come only from the News specialist's claims and the Form 8-K current reports they cite; never describe an event without such a citation, and treat the newest filing date as the limit of what is known.",
     ...safetyRules,
   ].join(" ");
   const body = JSON.stringify({

@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 
+import { CURRENT_REPORT_FORM_TYPE } from "@/lib/sec/current-reports";
+
 /**
- * Heuristic section extraction for SEC 10-K and 10-Q primary documents.
+ * Heuristic section extraction for SEC 10-K and 10-Q primary documents, and
+ * whole-document passages for an 8-K Exhibit 99.1 press release (M32).
  *
  * The parser converts the inline-XBRL HTML to normalized plain text, locates
  * the Item headings it needs (Item 1 Business, Item 1A Risk Factors, and Item
@@ -22,10 +25,16 @@ import { createHash } from "node:crypto";
 
 export const SEC_FILING_SECTION_PARSER_VERSION = "sec-filing-sections-v1";
 
-export type FilingSectionKind = "BUSINESS" | "RISK_FACTORS" | "MDA";
+export type FilingSectionKind =
+  | "BUSINESS"
+  | "RISK_FACTORS"
+  | "MDA"
+  | "PRESS_RELEASE";
 
 /** The forms whose latest primary document supplies narrative evidence. */
 export const FILING_TEXT_FORM_TYPES = ["10-K", "10-Q"] as const;
+
+export const PRESS_RELEASE_SECTION_LABEL = "Exhibit 99.1 Press Release";
 
 export type FilingSectionLimits = {
   /** Characters of one section that are chunked; the remainder is dropped and recorded as truncated. */
@@ -48,6 +57,18 @@ export const FILING_SECTION_LIMITS: Readonly<FilingSectionLimits> = {
   maxChunksPerSection: 50,
   maxChunksPerFiling: 150,
   minSectionChars: 400,
+  minChunkChars: 40,
+};
+
+// An earnings press release is a few narrative paragraphs followed by
+// condensed statements; the cap keeps the narrative and the first tables.
+export const PRESS_RELEASE_LIMITS: Readonly<FilingSectionLimits> = {
+  maxCharsPerSection: 24_000,
+  targetChunkChars: 1_200,
+  maxChunkChars: 1_600,
+  maxChunksPerSection: 20,
+  maxChunksPerFiling: 20,
+  minSectionChars: 200,
   minChunkChars: 40,
 };
 
@@ -133,6 +154,7 @@ const SECTION_DEFINITIONS: Record<"10-K" | "10-Q", SectionDefinition[]> = {
 };
 
 export function expectedFilingSectionKinds(formType: string): FilingSectionKind[] {
+  if (formType === CURRENT_REPORT_FORM_TYPE) return ["PRESS_RELEASE"];
   const definitions = SECTION_DEFINITIONS[formType as "10-K" | "10-Q"];
   return definitions ? definitions.map((definition) => definition.kind) : [];
 }
@@ -430,14 +452,71 @@ function findSection(
 }
 
 /**
- * Extracts the expected sections of a 10-K or 10-Q primary document. An
- * unsupported form type yields no expected sections; a missing heading is
- * reported, never guessed.
+ * An 8-K press-release exhibit has no Item headings: the whole normalized
+ * document is the one expected section, chunked with the same passage
+ * rules, so a cited excerpt verifies against its stored chunk exactly as a
+ * 10-K passage does. An exhibit too short to be a release is reported
+ * missing rather than chunked.
+ */
+function extractPressRelease(
+  html: string,
+  limits: Readonly<FilingSectionLimits>,
+): FilingSectionExtraction {
+  const documentText = htmlToText(html);
+  const body = trimRange(documentText, { start: 0, end: documentText.length });
+  const chunked =
+    body.end - body.start >= limits.minSectionChars
+      ? chunkRange(documentText, body, limits, limits.maxChunksPerSection)
+      : { chunks: [], truncated: false };
+  const sections: FilingSection[] =
+    chunked.chunks.length > 0
+      ? [
+          {
+            kind: "PRESS_RELEASE",
+            label: PRESS_RELEASE_SECTION_LABEL,
+            headingStart: 0,
+            start: body.start,
+            end: body.end,
+            truncated:
+              chunked.truncated || body.end - body.start > limits.maxCharsPerSection,
+            chunks: chunked.chunks,
+          },
+        ]
+      : [];
+  return {
+    parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+    formType: CURRENT_REPORT_FORM_TYPE,
+    documentText,
+    expectedSections: ["PRESS_RELEASE"],
+    sections,
+    missingSections: sections.length === 0 ? ["PRESS_RELEASE"] : [],
+    truncatedSections: sections
+      .filter((section) => section.truncated)
+      .map((section) => section.kind),
+    chunkCount: chunked.chunks.length,
+  };
+}
+
+/**
+ * Extracts the expected sections of a 10-K or 10-Q primary document, or the
+ * press-release passages of an 8-K exhibit. An unsupported form type yields
+ * no expected sections; a missing heading is reported, never guessed.
  */
 export function extractFilingSections(
   html: string,
   formType: string,
-  limits: Readonly<FilingSectionLimits> = FILING_SECTION_LIMITS,
+  limits?: Readonly<FilingSectionLimits>,
+): FilingSectionExtraction {
+  if (formType === CURRENT_REPORT_FORM_TYPE) {
+    return extractPressRelease(html, limits ?? PRESS_RELEASE_LIMITS);
+  }
+  return extractItemSections(html, formType, limits ?? FILING_SECTION_LIMITS);
+}
+
+function extractItemSections(
+  html: string,
+  formType: string,
+  limits: Readonly<FilingSectionLimits>,
 ): FilingSectionExtraction {
   const documentText = htmlToText(html);
   const definitions = SECTION_DEFINITIONS[formType as "10-K" | "10-Q"] ?? [];

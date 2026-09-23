@@ -32,12 +32,18 @@ import {
   samePeriod as sameBoundaries,
   type PeriodBoundaries,
 } from "@/lib/sec/derived-metrics";
+import {
+  CURRENT_REPORT_FORM_TYPE,
+  currentReportWindowStart,
+  describeItemCode,
+  RESULTS_ITEM_CODE,
+} from "@/lib/sec/current-reports";
 import { FILING_TEXT_FORM_TYPES } from "@/lib/sec/filing-sections";
 import { expectedMetricNames } from "@/lib/sec/normalization";
 import { z } from "zod";
 
 export const RESEARCH_EVIDENCE_SNAPSHOT_VERSION =
-  "m31-public-evidence-snapshot-v3";
+  "m32-public-evidence-snapshot-v4";
 
 const ALL_RESEARCH_AGENTS: readonly ResearchAgentName[] = [
   "NEWS",
@@ -77,20 +83,29 @@ const TREND_METRICS = new Set([
 const PEER_ANNUAL_LOOKBACK_DAYS = 2 * 365 + 60;
 const PEER_INSTANT_LOOKBACK_DAYS = 400;
 const MAX_PEER_FACT_ROWS = 1_000;
-// The structured evidence (about 100 items at the default limits) comes first
-// and the filing passages (at most 24) last, so the cap only ever clips
-// passages, and only if the structured evidence alone approaches it.
-const MAX_SNAPSHOT_EVIDENCE = 160;
+// The structured evidence (about 100 items at the default limits) comes
+// first, then the current-report items (at most 5), and the filing passages
+// (at most 24 from the 10-K and 10-Q plus 6 per listed press release) last,
+// so the cap only ever clips passages, and only if the structured evidence
+// alone approaches it.
+const MAX_SNAPSHOT_EVIDENCE = 200;
 // Filing passages come from the latest 10-K and latest 10-Q whose sections
-// were extracted. Each section contributes its opening passage plus the
-// passages that best match the owning agents' research questions, so a long
-// Risk Factors section still surfaces its regulatory discussion.
+// were extracted, and from the press release of each listed Item 2.02 8-K.
+// Each section contributes its opening passage plus the passages that best
+// match the owning agents' research questions, so a long Risk Factors
+// section still surfaces its regulatory discussion.
 const MAX_FILING_PASSAGES_PER_SECTION = 6;
-const FILING_SECTION_ORDER = ["BUSINESS", "RISK_FACTORS", "MDA"] as const;
+const FILING_SECTION_ORDER = [
+  "BUSINESS",
+  "RISK_FACTORS",
+  "MDA",
+  "PRESS_RELEASE",
+] as const;
 const FILING_SECTION_AGENTS: Record<string, readonly ResearchAgentName[]> = {
   BUSINESS: ["COMPETITORS", "FINANCIALS", "SYNTHESIS"],
   RISK_FACTORS: ["RISK", "SYNTHESIS"],
   MDA: ["FINANCIALS", "RISK", "SYNTHESIS"],
+  PRESS_RELEASE: ["NEWS", "SYNTHESIS"],
 };
 const FILING_SECTION_QUERIES: Record<string, string> = {
   BUSINESS:
@@ -98,7 +113,18 @@ const FILING_SECTION_QUERIES: Record<string, string> = {
   RISK_FACTORS:
     "risk regulatory regulation legal litigation government political tariff trade supply competition liquidity debt demand",
   MDA: "net sales revenue increased decreased growth margin operating income expenses cash flow liquidity capital debt outlook",
+  PRESS_RELEASE:
+    "announced reported results quarter revenue net income earnings per share guidance outlook dividend repurchase agreement acquisition appointed chief executive officer director",
 };
+// Current reports (M32): the newest 8-Ks of the twelve-month window are
+// dated event items the News specialist always receives (four fit its
+// budget beside one press-release passage), and the coverage item states
+// the window count so an empty window is an explicit missing state rather
+// than silence.
+const MAX_CURRENT_REPORT_EVENTS = 4;
+export const CURRENT_REPORT_EVIDENCE_TYPE = "SEC_CURRENT_REPORT";
+export const CURRENT_REPORT_COVERAGE_EVIDENCE_TYPE =
+  "SEC_CURRENT_REPORT_COVERAGE";
 
 const DEFAULT_MAX_RESULTS = 12;
 const DEFAULT_CONTEXT_CHAR_BUDGET = 12_000;
@@ -231,7 +257,7 @@ export type SecFactEvidenceRecord = {
   rawSource: RawSourceRecord;
 };
 
-export type FilingPassageRecord = {
+export type FilingChunkRecord = {
   id: string;
   filingId: string;
   rawSourceId: string;
@@ -242,6 +268,9 @@ export type FilingPassageRecord = {
   passageEnd: number;
   sha256: string;
   text: string;
+};
+
+export type FilingPassageRecord = FilingChunkRecord & {
   parserVersion: string;
   filing: {
     id: string;
@@ -251,8 +280,30 @@ export type FilingPassageRecord = {
     reportDate: DateValue | null;
     primaryDocument: string | null;
     sourceUrl: string;
+    /** Form 8-K item codes; absent for 10-K and 10-Q passages. */
+    itemCodes?: readonly string[];
   };
   rawSource: RawSourceRecord;
+};
+
+/** A Form 8-K current report of the twelve-month window with its press-release extraction, if any. */
+export type CurrentReportRecord = {
+  id: string;
+  accessionNumber: string;
+  formType: string;
+  filingDate: DateValue;
+  reportDate: DateValue | null;
+  itemCodes: readonly string[];
+  isAmendment: boolean;
+  primaryDocument: string | null;
+  sourceUrl: string;
+  extraction: {
+    status: string;
+    parserVersion: string;
+    errorCode: string | null;
+    rawSource: RawSourceRecord | null;
+    chunks: readonly FilingChunkRecord[];
+  } | null;
 };
 
 export type ResearchJobStockIdentity = {
@@ -286,6 +337,10 @@ export interface ResearchEvidenceRepository {
   }): Promise<PeerSecFactRecord[]>;
   findUpcomingEarnings(stockId: string): Promise<UpcomingEarningsRecord | null>;
   listFilingPassages(input: { secEntityId: string }): Promise<FilingPassageRecord[]>;
+  listCurrentReports(input: {
+    secEntityId: string;
+    filedOnOrAfter: Date;
+  }): Promise<CurrentReportRecord[]>;
 }
 
 export type ResearchEvidenceDatabase = Pick<
@@ -307,6 +362,8 @@ export type ResearchEvidenceDependencies = {
   repository?: ResearchEvidenceRepository;
   database?: ResearchEvidenceDatabase;
   limits?: Partial<EvidenceSnapshotLimits>;
+  /** Clock for the twelve-month current-report window. */
+  now?: () => Date;
 };
 
 export type ResearchEvidenceStock = Readonly<{
@@ -815,6 +872,67 @@ export function createPrismaResearchEvidenceRepository(
       }
       return passages;
     },
+
+    async listCurrentReports({ secEntityId, filedOnOrAfter }) {
+      const filings = await database.secFiling.findMany({
+        where: {
+          secEntityId,
+          formType: {
+            in: [CURRENT_REPORT_FORM_TYPE, `${CURRENT_REPORT_FORM_TYPE}/A`],
+          },
+          filingDate: { gte: filedOnOrAfter },
+        },
+        orderBy: [{ filingDate: "desc" }, { accessionNumber: "desc" }],
+        take: 40,
+        select: {
+          id: true,
+          accessionNumber: true,
+          formType: true,
+          filingDate: true,
+          reportDate: true,
+          itemCodes: true,
+          isAmendment: true,
+          primaryDocument: true,
+          sourceUrl: true,
+          extraction: {
+            select: {
+              status: true,
+              parserVersion: true,
+              errorCode: true,
+              rawSource: {
+                select: {
+                  id: true,
+                  kind: true,
+                  sourceUrl: true,
+                  objectKey: true,
+                  sha256: true,
+                  contentType: true,
+                  byteLength: true,
+                  firstRetrievedAt: true,
+                  lastRetrievedAt: true,
+                },
+              },
+              chunks: {
+                orderBy: [{ ordinal: "asc" }],
+                select: {
+                  id: true,
+                  filingId: true,
+                  rawSourceId: true,
+                  sectionKind: true,
+                  sectionLabel: true,
+                  ordinal: true,
+                  passageStart: true,
+                  passageEnd: true,
+                  sha256: true,
+                  text: true,
+                },
+              },
+            },
+          },
+        },
+      });
+      return filings;
+    },
   };
 }
 
@@ -1178,6 +1296,7 @@ function makeFilingPassageEvidence(
       ticker: stock.ticker,
       cik: stock.cik,
       formType: record.filing.formType,
+      itemCodes: [...(record.filing.itemCodes ?? [])],
       sectionKind: record.sectionKind,
       sectionLabel: record.sectionLabel,
       accessionNumber: record.filing.accessionNumber,
@@ -1244,6 +1363,232 @@ function selectFilingPassageEvidence(
         left.ordinal - right.ordinal,
     )
     .map((record) => makeFilingPassageEvidence(stock, record));
+}
+
+type CurrentReportExhibitState = "EXTRACTED" | "NOT_EXTRACTED" | "NOT_EXPECTED";
+
+/** Whether a listed 8-K should carry press-release passages, and whether it does. */
+function currentReportExhibitState(
+  report: CurrentReportRecord,
+): CurrentReportExhibitState {
+  if (report.isAmendment || !report.itemCodes.includes(RESULTS_ITEM_CODE)) {
+    return "NOT_EXPECTED";
+  }
+  const extraction = report.extraction;
+  return extraction?.rawSource &&
+    extraction.chunks.length > 0 &&
+    (extraction.status === "COMPLETED" ||
+      extraction.status === "PARTIALLY_COMPLETED")
+    ? "EXTRACTED"
+    : "NOT_EXTRACTED";
+}
+
+function compareNewestFirst(
+  left: { filingDate: DateValue; accessionNumber: string },
+  right: { filingDate: DateValue; accessionNumber: string },
+) {
+  return (
+    (date(right.filingDate) ?? "").localeCompare(date(left.filingDate) ?? "") ||
+    right.accessionNumber.localeCompare(left.accessionNumber)
+  );
+}
+
+/** The press-release passages of a listed results 8-K, shaped like 10-K passages so one builder serves both. */
+function exhibitPassageRecords(report: CurrentReportRecord): FilingPassageRecord[] {
+  const extraction = report.extraction;
+  if (currentReportExhibitState(report) !== "EXTRACTED" || !extraction?.rawSource) {
+    return [];
+  }
+  const rawSource = extraction.rawSource;
+  const filing = {
+    id: report.id,
+    accessionNumber: report.accessionNumber,
+    formType: report.formType,
+    filingDate: report.filingDate,
+    reportDate: report.reportDate,
+    primaryDocument: report.primaryDocument,
+    sourceUrl: report.sourceUrl,
+    itemCodes: report.itemCodes,
+  };
+  return extraction.chunks.map((chunk) => ({
+    ...chunk,
+    parserVersion: extraction.parserVersion,
+    filing,
+    rawSource,
+  }));
+}
+
+/**
+ * The newest reports of the window, always including the newest results
+ * filing (the one with a press release) even when later 8-Ks about other
+ * items would otherwise push it out of the list.
+ */
+function selectListedReports(reports: readonly CurrentReportRecord[]) {
+  const listed = reports.slice(0, MAX_CURRENT_REPORT_EVENTS);
+  const newestResults = reports.find(
+    (report) => currentReportExhibitState(report) !== "NOT_EXPECTED",
+  );
+  if (newestResults && !listed.includes(newestResults)) {
+    listed.splice(MAX_CURRENT_REPORT_EVENTS - 1, 1, newestResults);
+  }
+  return listed.sort(compareNewestFirst);
+}
+
+/** Plain-language reason for a missing press release; the error code stays in metadata. */
+function exhibitUnavailableReason(errorCode: string | null) {
+  switch (errorCode) {
+    case "SEC_FILING_EXHIBIT_NOT_FOUND":
+      return "the filing index lists no press-release exhibit";
+    case "SEC_FILING_SECTIONS_NOT_FOUND":
+    case "SEC_FILING_EXTRACTION_FAILED":
+      return "the exhibit could not be parsed";
+    default:
+      return "the exhibit has not been retrieved";
+  }
+}
+
+/**
+ * One dated item per listed Form 8-K: the form, filing date, event date,
+ * item codes with their titles, and whether its press release is supplied.
+ * It cites the filing index page, so an event claim always resolves to a
+ * dated SEC filing even when no exhibit text exists.
+ */
+function makeCurrentReportEvidence(
+  stock: ResearchEvidenceStock,
+  report: CurrentReportRecord,
+  suppliedPassages: number,
+  identityRawSource: RawSourceRecord | null,
+) {
+  const filingDate = dateOnly(report.filingDate);
+  const reportDate = dateOnly(report.reportDate);
+  const exhibitState = currentReportExhibitState(report);
+  const sourceReference = `sec-current-report:${report.accessionNumber}`;
+  const items =
+    report.itemCodes.length > 0
+      ? report.itemCodes.map(describeItemCode).join("; ")
+      : "none listed";
+  const exhibit =
+    exhibitState === "EXTRACTED"
+      ? `Exhibit 99.1 press release: ${suppliedPassages} passage${suppliedPassages === 1 ? "" : "s"} supplied.`
+      : exhibitState === "NOT_EXTRACTED"
+        ? `Exhibit 99.1 press release: not available (${exhibitUnavailableReason(report.extraction?.errorCode ?? null)}).`
+        : "No press-release exhibit is expected for these items.";
+  // The event date is stated only when it differs from the filing date; the
+  // items are kept compact because synthesis carries them beside a passage.
+  const events =
+    reportDate && reportDate !== filingDate ? ` for events dated ${reportDate}` : "";
+  const excerpt = `Form ${report.formType} filed ${filingDate}${events}. Items: ${items}. ${exhibit}`;
+  return validatedEvidence({
+    id: evidenceId({ sourceKind: "SEC_FILING", sourceReference }),
+    sourceKind: "SEC_FILING",
+    title: text(
+      `${stock.ticker} Form ${report.formType} current report filed ${filingDate}`,
+      240,
+    ),
+    sourceReference,
+    sourceUrl: report.sourceUrl,
+    accessionNumber: report.accessionNumber,
+    section: text(`Items ${report.itemCodes.join(", ") || "not listed"}`, 240),
+    objectKey: null,
+    sha256: null,
+    sourceDate: filingDate,
+    retrievedAt: identityRawSource ? date(identityRawSource.lastRetrievedAt) : null,
+    excerpt: text(excerpt, 4_000),
+    passageStart: null,
+    passageEnd: null,
+    secFilingId: report.id,
+    secRawSourceId: null,
+    secFinancialFactId: null,
+    metadata: {
+      evidenceType: CURRENT_REPORT_EVIDENCE_TYPE,
+      agentNames: ["NEWS", "SYNTHESIS"],
+      mandatoryAgentNames: ["NEWS"],
+      ticker: stock.ticker,
+      cik: stock.cik,
+      formType: report.formType,
+      accessionNumber: report.accessionNumber,
+      filingDate,
+      reportDate,
+      itemCodes: [...report.itemCodes],
+      isAmendment: report.isAmendment,
+      primaryDocument: report.primaryDocument,
+      filingIndexUrl: report.sourceUrl,
+      exhibitState,
+      exhibitErrorCode:
+        exhibitState === "NOT_EXTRACTED"
+          ? (report.extraction?.errorCode ?? null)
+          : null,
+      exhibitPassagesSupplied: suppliedPassages,
+    },
+  });
+}
+
+/** States how many current reports the window holds, so "none" is explicit. */
+function makeCurrentReportCoverageEvidence(
+  stock: ResearchEvidenceStock,
+  reports: readonly CurrentReportRecord[],
+  listed: readonly CurrentReportRecord[],
+) {
+  const sourceReference = `sec-current-report-coverage:${stock.ticker}`;
+  const results = reports.filter(
+    (report) => currentReportExhibitState(report) !== "NOT_EXPECTED",
+  );
+  const extracted = results.filter(
+    (report) => currentReportExhibitState(report) === "EXTRACTED",
+  ).length;
+  const newestFilingDate = reports.length > 0 ? dateOnly(reports[0].filingDate) : null;
+  const details =
+    reports.length === 0
+      ? `No Form 8-K current report filed in the twelve months (365 days) before the report date is stored for ${stock.ticker}, so recent events cannot be described from filings.`
+      : [
+          `${reports.length} Form 8-K current report${reports.length === 1 ? "" : "s"} filed in the twelve months (365 days) before the report date ${reports.length === 1 ? "is" : "are"} stored for ${stock.ticker}, the newest filed ${newestFilingDate}.`,
+          listed.length === reports.length
+            ? "Each is listed as a dated item."
+            : `The ${listed.length} most recent are listed as dated items.`,
+          `Item 2.02 results filings: ${extracted} with an Exhibit 99.1 press release supplied as passages, ${results.length - extracted} without an extracted exhibit.`,
+          "Events are described only from these filings; nothing after the newest filing date is known.",
+        ].join(" ");
+  return validatedEvidence({
+    id: evidenceId({ sourceKind: "DETERMINISTIC", sourceReference }),
+    sourceKind: "DETERMINISTIC",
+    title: text(`${stock.ticker} SEC current-report coverage`, 240),
+    sourceReference,
+    sourceUrl: null,
+    accessionNumber: null,
+    section: "Recent events policy",
+    objectKey: null,
+    sha256: null,
+    sourceDate: null,
+    retrievedAt: null,
+    excerpt: text(details, 4_000),
+    passageStart: null,
+    passageEnd: null,
+    secFilingId: null,
+    secRawSourceId: null,
+    secFinancialFactId: null,
+    metadata: {
+      evidenceType: CURRENT_REPORT_COVERAGE_EVIDENCE_TYPE,
+      agentNames: ["NEWS"],
+      mandatoryAgentNames: ["NEWS"],
+      ticker: stock.ticker,
+      reportCount: reports.length,
+      listedCount: listed.length,
+      resultsFilings: results.length,
+      resultsFilingsExtracted: extracted,
+      newestFilingDate,
+      windowDays: 365,
+      missingValuePolicy: "DO_NOT_INFER_EVENTS",
+    },
+  });
+}
+
+/** True when the snapshot lists at least one Form 8-K current report. */
+export function hasCurrentReportEvidence(snapshot: {
+  evidence: readonly ResearchEvidence[];
+}) {
+  return snapshot.evidence.some(
+    (item) => item.metadata.evidenceType === CURRENT_REPORT_EVIDENCE_TYPE,
+  );
 }
 
 type SelectableFact = {
@@ -1545,6 +1890,8 @@ export type ResearchEvidenceSnapshotInput = {
   upcomingEarnings: UpcomingEarningsRecord | null;
   /** Passages of the latest extracted 10-K and 10-Q; absent when none were extracted. */
   filingPassages?: readonly FilingPassageRecord[];
+  /** Form 8-K current reports of the twelve-month window; absent or empty when none is stored. */
+  currentReports?: readonly CurrentReportRecord[];
   limits?: Partial<EvidenceSnapshotLimits>;
 };
 
@@ -1596,6 +1943,23 @@ export function assembleResearchEvidenceSnapshot(
           source: text(input.upcomingEarnings.source, 240),
         })
       : null;
+  // Current reports are listed newest first; only a listed results filing
+  // contributes press-release passages, so every passage has its dated item.
+  const currentReports = [...(input.currentReports ?? [])].sort(compareNewestFirst);
+  const listedReports = selectListedReports(currentReports);
+  const passageEvidence = selectFilingPassageEvidence(stock, [
+    ...(input.filingPassages ?? []),
+    ...listedReports.flatMap(exhibitPassageRecords),
+  ]);
+  const suppliedPassagesByFiling = new Map<string, number>();
+  for (const passage of passageEvidence) {
+    if (passage.secFilingId) {
+      suppliedPassagesByFiling.set(
+        passage.secFilingId,
+        (suppliedPassagesByFiling.get(passage.secFilingId) ?? 0) + 1,
+      );
+    }
+  }
   const evidence = deepFreeze(
     [
       makeCompanyEvidence(stock, identityRawSource),
@@ -1621,7 +1985,16 @@ export function assembleResearchEvidenceSnapshot(
         ),
       ),
       ...(earnings ? [validatedEvidence(earnings)] : []),
-      ...selectFilingPassageEvidence(stock, input.filingPassages ?? []),
+      makeCurrentReportCoverageEvidence(stock, currentReports, listedReports),
+      ...listedReports.map((report) =>
+        makeCurrentReportEvidence(
+          stock,
+          report,
+          suppliedPassagesByFiling.get(report.id) ?? 0,
+          identityRawSource,
+        ),
+      ),
+      ...passageEvidence,
     ].slice(0, MAX_SNAPSHOT_EVIDENCE),
   );
 
@@ -1669,8 +2042,13 @@ export async function prepareResearchEvidenceSnapshot(
     );
   }
   const secEntityId = record.company?.secEntity?.id ?? null;
-  const [factCandidates, peerRecords, upcomingEarnings, filingPassages] =
-    await Promise.all([
+  const [
+    factCandidates,
+    peerRecords,
+    upcomingEarnings,
+    filingPassages,
+    currentReports,
+  ] = await Promise.all([
     secEntityId && limits.factsPerMetric > 0
       ? repository.listSecFactCandidates({
           secEntityId,
@@ -1690,6 +2068,14 @@ export async function prepareResearchEvidenceSnapshot(
     repository.findUpcomingEarnings(record.id),
     secEntityId
       ? repository.listFilingPassages({ secEntityId })
+      : Promise.resolve([]),
+    secEntityId
+      ? repository.listCurrentReports({
+          secEntityId,
+          filedOnOrAfter: currentReportWindowStart(
+            dependencies.now?.() ?? new Date(),
+          ),
+        })
       : Promise.resolve([]),
   ]);
   const lookbacks = peerFactLookbacks(
@@ -1718,6 +2104,7 @@ export async function prepareResearchEvidenceSnapshot(
     peerFactCandidates,
     upcomingEarnings,
     filingPassages,
+    currentReports,
     limits: dependencies.limits,
   });
 }
@@ -2079,7 +2466,7 @@ function specialistQuery(agentName: SpecialistAgentName) {
     case "RISK":
       return "liabilities debt equity cash leverage liquidity ratio revenue concentration ambiguity missing risk filing derived regulatory regulation legal litigation government political tariff supply";
     case "NEWS":
-      return "licensed current company news";
+      return "current report filed announced reported results quarter revenue net income earnings per share guidance dividend repurchase agreement acquisition appointed officer director event";
     case "POLITICAL_ACTIVITY":
       return "verified political activity lobbying contribution";
   }
@@ -2102,6 +2489,7 @@ export function selectSpecialistEvidence(
     query,
     agent: agentName,
     sourceKinds: ["SEC_FILING"],
+    metadata: { evidenceType: "SEC_FILING_PASSAGE" },
     maxResults: SPECIALIST_NARRATIVE_SLOTS,
     contextCharBudget: MAX_CONTEXT_CHAR_BUDGET,
   });
@@ -2114,17 +2502,28 @@ export function selectSpecialistEvidence(
   });
 }
 
+// Cited current-report items placed ahead of the cited passages at
+// synthesis. They are small and date the events synthesis may carry forward,
+// but more than two would crowd out the one passage the budget can hold.
+const MAX_SYNTHESIS_CURRENT_REPORTS_FIRST = 2;
+
 /**
- * Evidence ids cited by validated specialist claims, filing passages first
- * and then the highest-confidence claims' items, so synthesis receives the
- * narrative behind the claims it weighs before cheaper derived items that the
- * summary table already restates.
+ * Evidence ids cited by validated specialist claims: up to two dated
+ * current-report items first, then filing passages, then any further cited
+ * current-report items, then the highest-confidence claims' other items, so
+ * synthesis receives the narrative behind the claims it weighs before cheaper
+ * derived items that the summary table already restates.
  */
 export function synthesisPreferredEvidenceIds(
   snapshot: ResearchEvidenceSnapshot,
   specialistClaims: readonly ModelClaim[],
 ) {
   const kinds = new Map(snapshot.evidence.map((item) => [item.id, item.sourceKind]));
+  const currentReports = new Set(
+    snapshot.evidence
+      .filter((item) => item.metadata.evidenceType === CURRENT_REPORT_EVIDENCE_TYPE)
+      .map((item) => item.id),
+  );
   const ordered = [...specialistClaims].sort(
     (left, right) => right.confidence - left.confidence,
   );
@@ -2134,8 +2533,13 @@ export function synthesisPreferredEvidenceIds(
       if (!cited.includes(id)) cited.push(id);
     }
   }
+  const citedReports = cited.filter((id) => currentReports.has(id));
   return [
-    ...cited.filter((id) => kinds.get(id) === "SEC_FILING"),
+    ...citedReports.slice(0, MAX_SYNTHESIS_CURRENT_REPORTS_FIRST),
+    ...cited.filter(
+      (id) => kinds.get(id) === "SEC_FILING" && !currentReports.has(id),
+    ),
+    ...citedReports.slice(MAX_SYNTHESIS_CURRENT_REPORTS_FIRST),
     ...cited.filter((id) => kinds.get(id) !== "SEC_FILING"),
   ];
 }

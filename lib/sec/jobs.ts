@@ -19,6 +19,13 @@ import {
 } from "@/lib/sec/client";
 import { getSupportedCompany } from "@/lib/sec/company-registry";
 import {
+  CURRENT_REPORT_FORM_TYPE,
+  currentReportWindowStart,
+  findExhibitDocument,
+  PRESS_RELEASE_EXHIBIT_TYPE,
+  RESULTS_ITEM_CODE,
+} from "@/lib/sec/current-reports";
+import {
   decodeFilingDocument,
   expectedFilingSectionKinds,
   extractFilingSections,
@@ -43,7 +50,24 @@ import {
 const DETERMINISTIC_EXTRACTION_ERROR_CODES = new Set([
   "SEC_FILING_SECTIONS_NOT_FOUND",
   "SEC_FILING_EXTRACTION_FAILED",
+  "SEC_FILING_EXHIBIT_NOT_FOUND",
+  "SEC_FILING_EXHIBIT_NOT_EXPECTED",
 ]);
+// Item 2.02 results filings in a twelve-month window; a company files about
+// four, and the bound keeps one refresh from queueing an unusual backlog.
+const MAX_CURRENT_REPORT_FETCHES = 12;
+
+type FetchCandidate = {
+  id: string;
+  accessionNumber: string;
+  formType: string;
+  primaryDocument: string | null;
+  extraction: {
+    status: SecFilingExtractionStatus;
+    parserVersion: string;
+    errorCode: string | null;
+  } | null;
+};
 
 function sixHourBucket(date: Date) {
   const bucket = new Date(date);
@@ -95,14 +119,16 @@ export async function queueSecIngestion(
 }
 
 /**
- * Queues one `SEC_FILING_FETCH` job for the latest 10-K and the latest 10-Q
- * whose sections are not current: no extraction with the current parser
- * version, or a failed one whose error was transient (fetch or storage). Jobs
- * are keyed per filing, parser version, and six-hour bucket, so a refresh that
- * finds every latest filing current queues nothing, a new filing queues one
- * fetch, and a filing left failed by a transient outage is queued again by a
- * later refresh rather than waiting for an administrator. The feature stays
- * off until `SEC_FILING_TEXT_ENABLED` is set.
+ * Queues one `SEC_FILING_FETCH` job for each filing whose passages are not
+ * current: the latest 10-K and the latest 10-Q when `SEC_FILING_TEXT_ENABLED`
+ * is set (M31), and every Item 2.02 results 8-K filed in the last twelve
+ * months when `SEC_CURRENT_REPORTS_ENABLED` is set (M32). "Not current" means
+ * no extraction with the current parser version, or a failed one whose error
+ * was transient (fetch or storage). Jobs are keyed per filing, parser
+ * version, and six-hour bucket, so a refresh that finds every filing current
+ * queues nothing, a new filing queues one fetch, and a filing left failed by
+ * a transient outage is queued again by a later refresh rather than waiting
+ * for an administrator. Both capabilities stay off until their flag is set.
  */
 export async function queueSecFilingDocumentFetches(input: {
   ticker: string;
@@ -112,11 +138,19 @@ export async function queueSecFilingDocumentFetches(input: {
   now?: () => Date;
 }) {
   const environment = input.environment ?? process.env;
-  if (!isBackgroundFeatureEnabled("SEC_FILING_TEXT_ENABLED", environment)) {
+  const filingText = isBackgroundFeatureEnabled(
+    "SEC_FILING_TEXT_ENABLED",
+    environment,
+  );
+  const currentReports = isBackgroundFeatureEnabled(
+    "SEC_CURRENT_REPORTS_ENABLED",
+    environment,
+  );
+  if (!filingText && !currentReports) {
     return {
       queued: [],
       current: [],
-      skipped: "SEC filing text evidence is disabled.",
+      skipped: "SEC filing text and current-report evidence are disabled.",
     };
   }
   const supported = getSupportedCompany(input.ticker);
@@ -128,29 +162,57 @@ export async function queueSecFilingDocumentFetches(input: {
     );
   }
 
-  const filings = await db.secFiling.findMany({
-    where: {
-      secEntity: { cik: supported.cik },
-      formType: { in: [...FILING_TEXT_FORM_TYPES] },
-      primaryDocument: { not: null },
+  const now = input.now?.() ?? new Date();
+  const select = {
+    id: true,
+    accessionNumber: true,
+    formType: true,
+    primaryDocument: true,
+    extraction: {
+      select: { status: true, parserVersion: true, errorCode: true },
     },
-    orderBy: [{ filingDate: "desc" }, { accessionNumber: "desc" }],
-    take: 24,
-    select: {
-      id: true,
-      accessionNumber: true,
-      formType: true,
-      primaryDocument: true,
-      extraction: {
-        select: { status: true, parserVersion: true, errorCode: true },
+  } as const;
+  const candidates: FetchCandidate[] = [];
+  if (filingText) {
+    const filings = await db.secFiling.findMany({
+      where: {
+        secEntity: { cik: supported.cik },
+        formType: { in: [...FILING_TEXT_FORM_TYPES] },
+        primaryDocument: { not: null },
       },
-    },
-  });
-  const bucket = sixHourBucket(input.now?.() ?? new Date());
-  const latestByForm = new Map<string, (typeof filings)[number]>();
-  for (const filing of filings) {
-    if (!latestByForm.has(filing.formType)) latestByForm.set(filing.formType, filing);
+      orderBy: [{ filingDate: "desc" }, { accessionNumber: "desc" }],
+      take: 24,
+      select,
+    });
+    const latestByForm = new Map<string, FetchCandidate>();
+    for (const filing of filings) {
+      if (!latestByForm.has(filing.formType)) latestByForm.set(filing.formType, filing);
+    }
+    for (const formType of FILING_TEXT_FORM_TYPES) {
+      const filing = latestByForm.get(formType);
+      if (filing) candidates.push(filing);
+    }
   }
+  if (currentReports) {
+    // Every results filing in the window is fetched, newest first; an
+    // amendment is kept as metadata only and never fetched.
+    candidates.push(
+      ...(await db.secFiling.findMany({
+        where: {
+          secEntity: { cik: supported.cik },
+          formType: CURRENT_REPORT_FORM_TYPE,
+          isAmendment: false,
+          itemCodes: { has: RESULTS_ITEM_CODE },
+          filingDate: { gte: currentReportWindowStart(now) },
+          primaryDocument: { not: null },
+        },
+        orderBy: [{ filingDate: "desc" }, { accessionNumber: "desc" }],
+        take: MAX_CURRENT_REPORT_FETCHES,
+        select,
+      })),
+    );
+  }
+  const bucket = sixHourBucket(now);
 
   const queued: Array<{
     jobId: string;
@@ -163,9 +225,9 @@ export async function queueSecFilingDocumentFetches(input: {
     accessionNumber: string;
     status: SecFilingExtractionStatus;
   }> = [];
-  for (const formType of FILING_TEXT_FORM_TYPES) {
-    const filing = latestByForm.get(formType);
-    if (!filing?.primaryDocument) continue;
+  for (const filing of candidates) {
+    if (!filing.primaryDocument) continue;
+    const { formType } = filing;
     const extraction = filing.extraction;
     if (
       extraction?.parserVersion === SEC_FILING_SECTION_PARSER_VERSION &&
@@ -232,11 +294,15 @@ export async function executeSecIngestionJob(
   }
 
   try {
-    const result = await ingestSupportedCompany(input.ticker, {
-      trigger: "JOB",
-      requestedByUserId: input.requestedByUserId,
-      correlationId: input.correlationId,
-    });
+    const result = await ingestSupportedCompany(
+      input.ticker,
+      {
+        trigger: "JOB",
+        requestedByUserId: input.requestedByUserId,
+        correlationId: input.correlationId,
+      },
+      { environment: dependencies.environment },
+    );
     await Promise.all([
       ephemeralStore.invalidate("fundamentals", input.ticker),
       ephemeralStore.setJson(
@@ -396,17 +462,34 @@ async function recordFilingExtractionFailure(input: {
   ]);
 }
 
+function fetchFailure(error: unknown) {
+  return error instanceof SecClientError
+    ? new JobExecutionError(error.code, error.retryable, error.message, false, {
+        cause: error,
+      })
+    : new JobExecutionError(
+        "SEC_FILING_FETCH_FAILED",
+        true,
+        "The SEC filing document could not be retrieved.",
+        false,
+        { cause: error },
+      );
+}
+
 /**
- * Fetches one filing's primary document through the identified SEC client,
- * stores it content-addressed in private R2 as a `FILING_DOCUMENT` raw
- * source, extracts the expected sections, and replaces the filing's passages
- * in PostgreSQL. A failure after the filing lookup is recorded on the filing's
- * extraction state before it is rethrown, so the state is explicit and never
- * blocks fact ingestion or page rendering. One exception keeps evidence
- * available: when no new document was obtained (fetch or storage failure) and
- * an earlier extraction still holds passages, that extraction is left as it
- * is, the job row records the failure, and a later refresh queues the fetch
- * again because the earlier extraction is not current.
+ * Fetches one filing's document through the identified SEC client, stores it
+ * content-addressed in private R2 as a `FILING_DOCUMENT` raw source, extracts
+ * the expected sections, and replaces the filing's passages in PostgreSQL.
+ * For a 10-K or 10-Q the document is the primary document in the payload;
+ * for an Item 2.02 8-K it is the Exhibit 99.1 press release named on the
+ * filing's index page, which is read first (M32). A failure after the filing
+ * lookup is recorded on the filing's extraction state before it is rethrown,
+ * so the state is explicit and never blocks fact ingestion or page
+ * rendering. One exception keeps evidence available: when no new document
+ * was obtained (fetch or storage failure) and an earlier extraction still
+ * holds passages, that extraction is left as it is, the job row records the
+ * failure, and a later refresh queues the fetch again because the earlier
+ * extraction is not current.
  */
 export async function fetchSecFilingDocument(
   input: {
@@ -434,7 +517,13 @@ export async function fetchSecFilingDocument(
       primaryDocument: input.primaryDocument,
       secEntity: { cik: supported.cik },
     },
-    select: { id: true, secEntityId: true, formType: true },
+    select: {
+      id: true,
+      secEntityId: true,
+      formType: true,
+      isAmendment: true,
+      itemCodes: true,
+    },
   });
   if (!filing) {
     throw new JobExecutionError(
@@ -472,33 +561,60 @@ export async function fetchSecFilingDocument(
     throw error;
   };
 
+  let documentName = input.primaryDocument;
+  if (filing.formType === CURRENT_REPORT_FORM_TYPE) {
+    if (filing.isAmendment || !filing.itemCodes.includes(RESULTS_ITEM_CODE)) {
+      return fail(
+        null,
+        new JobExecutionError(
+          "SEC_FILING_EXHIBIT_NOT_EXPECTED",
+          false,
+          "Only an Item 2.02 results 8-K carries a press-release exhibit to extract.",
+        ),
+      );
+    }
+    let index: Awaited<ReturnType<SecEdgarClient["getFilingDocument"]>>;
+    try {
+      index = await client.getFilingDocument(
+        supported.cik,
+        input.accessionNumber,
+        `${input.accessionNumber}-index.html`,
+      );
+    } catch (error) {
+      return fail(null, fetchFailure(error));
+    }
+    const exhibit = findExhibitDocument(
+      decodeFilingDocument(index.body, index.contentType),
+      PRESS_RELEASE_EXHIBIT_TYPE,
+    );
+    if (!exhibit) {
+      return fail(
+        null,
+        new JobExecutionError(
+          "SEC_FILING_EXHIBIT_NOT_FOUND",
+          false,
+          "The 8-K filing index lists no Exhibit 99.1 press release.",
+          true,
+        ),
+      );
+    }
+    documentName = exhibit;
+  }
+
   let document: Awaited<ReturnType<SecEdgarClient["getFilingDocument"]>>;
   try {
     document = await client.getFilingDocument(
       supported.cik,
       input.accessionNumber,
-      input.primaryDocument,
+      documentName,
     );
   } catch (error) {
-    return fail(
-      null,
-      error instanceof SecClientError
-        ? new JobExecutionError(error.code, error.retryable, error.message, false, {
-            cause: error,
-          })
-        : new JobExecutionError(
-            "SEC_FILING_FETCH_FAILED",
-            true,
-            "The SEC filing document could not be retrieved.",
-            false,
-            { cause: error },
-          ),
-    );
+    return fail(null, fetchFailure(error));
   }
 
   const digest = createHash("sha256").update(document.body).digest("hex");
   const objectKey = `sec/${supported.cik}/filings/${digest}.${documentExtension(
-    input.primaryDocument,
+    documentName,
     document.contentType,
   )}`;
   let stored: Awaited<ReturnType<ObjectStorage["put"]>>;
@@ -617,6 +733,8 @@ export async function fetchSecFilingDocument(
   }
   return {
     filingId: filing.id,
+    formType: filing.formType,
+    document: documentName,
     rawSourceId: rawSource.id,
     objectKey: stored.key,
     sha256: digest,

@@ -219,6 +219,7 @@ export class PrismaSecRepository implements SecRepository {
             sourceUrl: filing.sourceUrl,
             isAmendment: filing.isAmendment,
             amendsAccessionNumber: filing.amendsAccessionNumber,
+            itemCodes: filing.itemCodes,
           },
           create: {
             secEntityId,

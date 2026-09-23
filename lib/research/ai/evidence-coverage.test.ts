@@ -6,7 +6,10 @@ import {
   researchEvidenceCoverageSchema,
   upcomingEarningsFromEvidence,
 } from "@/lib/research/ai/evidence-coverage";
-import { buildAaplFixtureSnapshot } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
+import {
+  aaplFixtureCurrentReports,
+  buildAaplFixtureSnapshot,
+} from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import { expectedMetricNames } from "@/lib/sec/normalization";
 
 const snapshot = buildAaplFixtureSnapshot();
@@ -100,6 +103,35 @@ describe("evidence coverage", () => {
       newestFilingAgeDays: null,
       freshness: 0,
     });
+  });
+
+  it("dates freshness by the newest 10-K or 10-Q, never by a Form 8-K current report", () => {
+    // A current report filed after the newest 10-Q must not move the date.
+    const [results, ...others] = aaplFixtureCurrentReports();
+    const withReports = buildAaplFixtureSnapshot({
+      currentReports: [
+        {
+          ...results,
+          id: "filing-aapl-8k-later-fixture",
+          accessionNumber: "0000320193-26-000031",
+          filingDate: new Date("2026-09-10T00:00:00.000Z"),
+          reportDate: new Date("2026-09-10T00:00:00.000Z"),
+        },
+        ...others,
+      ],
+    });
+    const newestCurrentReport = withReports.evidence
+      .filter((item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT")
+      .map((item) => item.sourceDate!)
+      .sort()
+      .at(-1)!;
+    expect(newestCurrentReport > newestFiling).toBe(true);
+
+    const coverage = computeEvidenceCoverage(withReports, daysAfter(newestFiling, 10));
+    expect(coverage.newestFilingDate).toBe(newestFiling);
+    expect(coverage).toEqual(
+      computeEvidenceCoverage(snapshot, daysAfter(newestFiling, 10)),
+    );
   });
 
   it("extracts the stored upcoming earnings event for What to Watch", () => {

@@ -84,6 +84,7 @@ Configure each environment independently. Never copy production database credent
 | `BACKGROUND_JOBS_ENABLED`                                             | `false` until configured                                        | `false` until callback proof                     | `true`                                       |                             No |
 | `SEC_INGESTION_ENABLED`                                               | `false` until configured                                        | Independent opt-in                               | `true`                                       |                             No |
 | `SEC_FILING_TEXT_ENABLED`                                             | `false` unless validating filing text                           | `false` until the M31 approval is recorded       | `false` until the M31 approval is recorded   |                             No |
+| `SEC_CURRENT_REPORTS_ENABLED`                                         | `false` unless validating current reports                       | `false` until the M32 approval is recorded       | `false` until the M32 approval is recorded   |                             No |
 | `PUBLIC_STOCK_PAGES_ENABLED`                                          | Explicit local choice                                           | Independent opt-in                               | Independent opt-in                           |                             No |
 | `RESEARCH_GENERATION_ENABLED`                                         | `false` until configured                                        | Independent opt-in                               | `true`                                       |                             No |
 | `AI_RESEARCH_ENABLED`                                                 | `false`                                                         | `false` until controlled proof                   | `true`                                       |                             No |
@@ -603,6 +604,61 @@ Neither blocks fact ingestion or page rendering. To stop the capability, set
 the flag back to `false`: no page reads SEC or R2, and stored passages remain
 usable by research until they are deliberately removed.
 
+### 6. Enable current-report events (M32)
+
+`SEC_CURRENT_REPORTS_ENABLED` keeps twelve months of each supported company's
+Form 8-K metadata with item codes and fetches the Exhibit 99.1 press release
+of each Item 2.02 results filing from SEC Archives (the filing index page,
+then the exhibit) into the private R2 bucket. Enabling it in an environment
+is the Level 2 decision recorded in `docs/task-backlog-part-3.md` (M32
+prerequisites), separate from the M31 approval: record the approval for the
+8-K metadata and exhibit ingestion, the additive
+`20260923120000_m32_current_report_events` migration, and the expected R2
+growth before setting the flag. The flag is independent of
+`SEC_FILING_TEXT_ENABLED`; either can be on without the other.
+
+1. Apply the migration with the approved remote procedure and keep the flag
+   `false`. The migration is additive (an empty item-code list on existing
+   filings and a new section kind) and needs no backfill.
+2. Set `SEC_CURRENT_REPORTS_ENABLED=true` only where `SEC_INGESTION_ENABLED`
+   and signed background delivery are already proven.
+3. Trigger one ingestion for one ticker (the same admin request as step 3 of
+   the SEC section). The fact refresh now retains the company's 8-Ks from the
+   last twelve months, and its result lists one queued `SEC_FILING_FETCH` job
+   per Item 2.02 8-K (about four). Follow them in `/admin`; each completes
+   with `PRESS_RELEASE` and its passage count, or ends `FAILED` with
+   `SEC_FILING_EXHIBIT_NOT_FOUND` when the filing index lists no `EX-99.1`
+   document, which is an explicit recorded state rather than a retry.
+4. Inspect the state with the same query as step 4 of the filing-text section;
+   8-K rows show `formType` `8-K` and the extracted section `PRESS_RELEASE`.
+5. Confirm one new `FILING_DOCUMENT` object per fetched exhibit in R2 and
+   record the stored bytes, then let the twice-daily stale-SEC schedule cover
+   the remaining companies. A company whose results filings are already
+   extracted queues nothing; a new 8-K queues one fetch on the next refresh.
+
+Research uses the stored reports on the next report generation: the News
+specialist lists the newest current reports with their filing dates and
+reports `NOT_AVAILABLE` for a company with none in the window. A job whose
+snapshot holds current reports runs News as a fourth model call after the
+other three specialists settle, and that job's specialist calls reserve
+smaller output allowances (Financials 1,200, Risk 1,200, Competitors 900,
+News 800 tokens); a job whose snapshot holds none keeps the earlier job
+topology and the configured per-call maximum, and only the Competitors and
+Risk context budgets (4,600 and 6,000 characters) apply to every external
+job. Before enabling the flag in Production, generate one report in Preview
+with the flag on and compare each specialist's settled output plus reasoning
+tokens (`AiUsage`) with its allowance: a provider response that hits
+`max_output_tokens` is recorded `UNCONFIRMED` and blocks further AI
+reservations until reconciled, so if any specialist is within about 30
+percent of its allowance, lower that specialist's context budget and raise
+its allowance before activation. If a first-stage specialist ends `FAILED`,
+the deferred News run stays pending and the job remains partial exactly as
+for any failed specialist; an administrator retry of the failed specialist
+queues News. To stop the capability, set the flag back to `false`: 8-K
+metadata is no longer retained or fetched, stored rows and passages remain
+readable by research until they are deliberately removed, and nothing reads
+SEC or R2 at page time.
+
 ### Failure and recovery
 
 - Missing SEC/R2 configuration fails the run without exposing variable names or
@@ -739,7 +795,8 @@ before any usage can exceed the free allowances.
   must observe the cancelled parent or finish safely; permanent writes are not
   interrupted halfway.
 - For rollback, disable SEC and research first (including
-  `SEC_FILING_TEXT_ENABLED`), then background publishing; pause the two named
+  `SEC_FILING_TEXT_ENABLED` and `SEC_CURRENT_REPORTS_ENABLED`), then
+  background publishing; pause the two named
   schedules; preserve job rows; and forward-fix the additive schema.
 
 ## M27 Preview-only validation of M18 external AI

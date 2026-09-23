@@ -124,11 +124,15 @@ describe("M15 SEC background integration", () => {
       }),
     ).resolves.toMatchObject({ status: "COMPLETED" });
 
-    expect(mocks.ingestSupportedCompany).toHaveBeenCalledWith("AAPL", {
-      trigger: "JOB",
-      requestedByUserId: "admin-a",
-      correlationId: "correlation-a",
-    });
+    expect(mocks.ingestSupportedCompany).toHaveBeenCalledWith(
+      "AAPL",
+      {
+        trigger: "JOB",
+        requestedByUserId: "admin-a",
+        correlationId: "correlation-a",
+      },
+      { environment: undefined },
+    );
     expect(mocks.releaseLock).toHaveBeenCalledWith(
       "sec-company",
       "company-a",
@@ -213,7 +217,7 @@ describe("M31 filing document fetch queueing", () => {
     ).resolves.toEqual({
       queued: [],
       current: [],
-      skipped: "SEC filing text evidence is disabled.",
+      skipped: "SEC filing text and current-report evidence are disabled.",
     });
     expect(mocks.findFilings).not.toHaveBeenCalled();
     expect(mocks.enqueueBackgroundJob).not.toHaveBeenCalled();
@@ -228,7 +232,7 @@ describe("M31 filing document fetch queueing", () => {
     expect(ingestion.filingDocuments).toEqual({
       queued: [],
       current: [],
-      skipped: "SEC filing text evidence is disabled.",
+      skipped: "SEC filing text and current-report evidence are disabled.",
     });
   });
 
@@ -359,5 +363,160 @@ describe("M31 filing document fetch queueing", () => {
       },
     });
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("M32 current-report exhibit fetch queueing", () => {
+  const enabled = {
+    NODE_ENV: "test",
+    BACKGROUND_JOBS_ENABLED: "true",
+    SEC_INGESTION_ENABLED: "true",
+    SEC_CURRENT_REPORTS_ENABLED: "true",
+  } as NodeJS.ProcessEnv;
+  const now = () => new Date("2026-09-12T20:15:00.000Z");
+  const bucket = "2026-09-12T18:00:00.000Z";
+  const reports = [
+    {
+      id: "filing-8k-new",
+      accessionNumber: "0000320193-26-000061",
+      formType: "8-K",
+      primaryDocument: "aapl-20260730.htm",
+      extraction: null,
+    },
+    {
+      id: "filing-8k-current",
+      accessionNumber: "0000320193-26-000044",
+      formType: "8-K",
+      primaryDocument: "aapl-20260430.htm",
+      extraction: {
+        status: "COMPLETED",
+        parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+        errorCode: null,
+      },
+    },
+    {
+      id: "filing-8k-no-exhibit",
+      accessionNumber: "0000320193-26-000010",
+      formType: "8-K",
+      primaryDocument: "aapl-20260129.htm",
+      extraction: {
+        status: "FAILED",
+        parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+        errorCode: "SEC_FILING_EXHIBIT_NOT_FOUND",
+      },
+    },
+  ];
+
+  it("queues one parser-versioned exhibit fetch per results 8-K in the window that is not current, and no 10-K or 10-Q work while filing text is off", async () => {
+    mocks.findFilings.mockResolvedValue(reports);
+    const publisher = { publishJSON: vi.fn() };
+
+    const result = await queueSecFilingDocumentFetches({
+      ticker: "AAPL",
+      correlationId: "correlation-a",
+      publisher,
+      environment: enabled,
+      now,
+    });
+
+    expect(result).toEqual({
+      queued: [
+        {
+          jobId: "job-a",
+          formType: "8-K",
+          accessionNumber: "0000320193-26-000061",
+          reused: false,
+        },
+      ],
+      current: [
+        {
+          formType: "8-K",
+          accessionNumber: "0000320193-26-000044",
+          status: "COMPLETED",
+        },
+        {
+          formType: "8-K",
+          accessionNumber: "0000320193-26-000010",
+          status: "FAILED",
+        },
+      ],
+    });
+    expect(mocks.findFilings).toHaveBeenCalledTimes(1);
+    expect(mocks.findFilings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          secEntity: { cik: "0000320193" },
+          formType: "8-K",
+          isAmendment: false,
+          itemCodes: { has: "2.02" },
+          filingDate: { gte: new Date("2025-09-12T00:00:00.000Z") },
+          primaryDocument: { not: null },
+        },
+        take: 12,
+      }),
+    );
+    expect(mocks.enqueueBackgroundJob).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueBackgroundJob).toHaveBeenCalledWith(
+      {
+        type: BackgroundJobType.SEC_FILING_FETCH,
+        idempotencyKey: `sec-filing:filing-8k-new:${SEC_FILING_SECTION_PARSER_VERSION}:${bucket}`,
+        correlationId: "correlation-a",
+        payload: {
+          ticker: "AAPL",
+          accessionNumber: "0000320193-26-000061",
+          primaryDocument: "aapl-20260730.htm",
+        },
+      },
+      { publisher, environment: enabled },
+    );
+  });
+
+  it("queues the latest 10-K and 10-Q together with the results 8-Ks when both capabilities are enabled", async () => {
+    mocks.findFilings.mockImplementation(
+      async (args: { where: { formType: unknown } }) =>
+        typeof args.where.formType === "string"
+          ? reports
+          : [
+              {
+                id: "filing-10q-new",
+                accessionNumber: "0000320193-26-000060",
+                formType: "10-Q",
+                primaryDocument: "aapl-20260627.htm",
+                extraction: null,
+              },
+            ],
+    );
+
+    const result = await queueSecFilingDocumentFetches({
+      ticker: "AAPL",
+      correlationId: "correlation-a",
+      environment: { ...enabled, SEC_FILING_TEXT_ENABLED: "true" },
+      now,
+    });
+
+    expect(result.queued.map((job) => [job.formType, job.accessionNumber])).toEqual([
+      ["10-Q", "0000320193-26-000060"],
+      ["8-K", "0000320193-26-000061"],
+    ]);
+    expect(mocks.findFilings).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands the job environment to fact ingestion so 8-K metadata retention follows the same flag", async () => {
+    await executeSecIngestionJob(
+      {
+        ticker: "AAPL",
+        requestedByUserId: null,
+        companyId: "company-a",
+        correlationId: "correlation-a",
+        timeoutMs: 30_000,
+      },
+      { environment: enabled },
+    );
+
+    expect(mocks.ingestSupportedCompany).toHaveBeenCalledWith(
+      "AAPL",
+      expect.objectContaining({ trigger: "JOB" }),
+      { environment: enabled },
+    );
   });
 });

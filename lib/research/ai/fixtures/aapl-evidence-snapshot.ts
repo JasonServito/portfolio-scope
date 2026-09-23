@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   assembleResearchEvidenceSnapshot,
+  type CurrentReportRecord,
   type FilingPassageRecord,
   type PeerSecFactRecord,
   type PublicPeerRecord,
@@ -23,9 +24,10 @@ import nvdaCompanyFacts from "@/tests/fixtures/sec/nvda-companyfacts-history.jso
 /**
  * A deterministic AAPL research evidence snapshot assembled offline from the
  * checked-in, clipped SEC Company Facts fixtures (public EDGAR data captured
- * 2026-09-22) and the synthetic recorded-shape 10-K and 10-Q primary-document
- * fixtures parsed by the real section parser. No database, network, or
- * provider is involved.
+ * 2026-09-22) and the synthetic recorded-shape 10-K, 10-Q, and 8-K
+ * press-release fixtures parsed by the real section parser. No database,
+ * network, or provider is involved. Current reports (M32) are opt-in so the
+ * earlier milestones' expectations keep their exact snapshot.
  */
 
 const OBSERVED_AT = new Date("2026-09-22T00:00:00.000Z");
@@ -235,6 +237,120 @@ export function aaplFixtureFilingPassages(
   });
 }
 
+/**
+ * Three synthetic Form 8-K current reports of the twelve-month window before
+ * the fixture's observation date: a results filing whose Exhibit 99.1 press
+ * release was extracted, an earlier results filing whose exhibit was not
+ * found, and a shareholder-vote filing with no exhibit expected.
+ */
+export const AAPL_FIXTURE_CURRENT_REPORTS = {
+  results: {
+    filingId: "filing-aapl-8k-results-fixture",
+    rawSourceId: "raw-aapl-8k-exhibit-fixture",
+    accessionNumber: "0000320193-26-000019",
+    filingDate: "2026-07-30",
+    reportDate: "2026-07-30",
+    primaryDocument: "aapl-20260730.htm",
+    itemCodes: ["2.02", "9.01"],
+    exhibit: "a8-kex991q3202606272026.htm",
+    file: "aapl-8k-ex991-press-release-clipped.htm",
+  },
+  resultsWithoutExhibit: {
+    filingId: "filing-aapl-8k-results-pending-fixture",
+    accessionNumber: "0000320193-26-000009",
+    filingDate: "2026-04-30",
+    reportDate: "2026-04-30",
+    primaryDocument: "aapl-20260430.htm",
+    itemCodes: ["2.02", "9.01"],
+  },
+  shareholderVote: {
+    filingId: "filing-aapl-8k-vote-fixture",
+    accessionNumber: "0000320193-26-000004",
+    filingDate: "2026-02-26",
+    reportDate: "2026-02-24",
+    primaryDocument: "aapl-20260224.htm",
+    itemCodes: ["5.07"],
+  },
+} as const;
+
+export function aaplFixtureCurrentReports(): CurrentReportRecord[] {
+  const { results, resultsWithoutExhibit, shareholderVote } =
+    AAPL_FIXTURE_CURRENT_REPORTS;
+  const html = readFileSync(
+    join(process.cwd(), "tests", "fixtures", "sec", results.file),
+    "utf8",
+  );
+  const body = Buffer.from(html, "utf8");
+  const documentSha256 = createHash("sha256").update(body).digest("hex");
+  const extraction = extractFilingSections(html, "8-K");
+  const record = (
+    fixture: {
+      filingId: string;
+      accessionNumber: string;
+      filingDate: string;
+      reportDate: string;
+      primaryDocument: string;
+      itemCodes: readonly string[];
+    },
+    extractionRecord: CurrentReportRecord["extraction"],
+  ): CurrentReportRecord => ({
+    id: fixture.filingId,
+    accessionNumber: fixture.accessionNumber,
+    formType: "8-K",
+    filingDate: new Date(`${fixture.filingDate}T00:00:00.000Z`),
+    reportDate: new Date(`${fixture.reportDate}T00:00:00.000Z`),
+    itemCodes: [...fixture.itemCodes],
+    isAmendment: false,
+    primaryDocument: fixture.primaryDocument,
+    sourceUrl: buildSecFilingIndexUrl("0000320193", fixture.accessionNumber),
+    extraction: extractionRecord,
+  });
+  return [
+    record(results, {
+      status: "COMPLETED",
+      parserVersion: extraction.parserVersion,
+      errorCode: null,
+      rawSource: {
+        id: results.rawSourceId,
+        kind: "FILING_DOCUMENT",
+        sourceUrl: buildSecFilingUrl(
+          "0000320193",
+          results.accessionNumber,
+          results.exhibit,
+        ),
+        objectKey: `sec/0000320193/filings/${documentSha256}.htm`,
+        sha256: documentSha256,
+        contentType: "text/html",
+        byteLength: String(body.byteLength),
+        firstRetrievedAt: RETRIEVED_AT,
+        lastRetrievedAt: RETRIEVED_AT,
+      },
+      chunks: extraction.sections.flatMap((section) =>
+        section.chunks.map((chunk) => ({
+          id: `${results.filingId}-${section.kind.toLowerCase()}-${chunk.ordinal}`,
+          filingId: results.filingId,
+          rawSourceId: results.rawSourceId,
+          sectionKind: section.kind,
+          sectionLabel: section.label,
+          ordinal: chunk.ordinal,
+          passageStart: chunk.passageStart,
+          passageEnd: chunk.passageEnd,
+          sha256: chunk.sha256,
+          text: chunk.text,
+        })),
+      ),
+    }),
+    record(resultsWithoutExhibit, {
+      status: "FAILED",
+      parserVersion: extraction.parserVersion,
+      errorCode: "SEC_FILING_EXHIBIT_NOT_FOUND",
+      rawSource: null,
+      chunks: [],
+    }),
+    record(shareholderVote, null),
+  ];
+}
+
 function normalized(fixture: unknown, cik: string) {
   return normalizeCompanyFacts(secCompanyFactsSchema.parse(fixture), {
     cik,
@@ -330,6 +446,8 @@ export function buildAaplFixtureSnapshot(
     peerRecords: PublicPeerRecord[];
     peerFactCandidates: PeerSecFactRecord[];
     filingPassages: FilingPassageRecord[];
+    /** Absent means no stored current report, the state before M32 is enabled. */
+    currentReports: CurrentReportRecord[];
   }> = {},
 ): ResearchEvidenceSnapshot {
   return assembleResearchEvidenceSnapshot({
@@ -343,6 +461,7 @@ export function buildAaplFixtureSnapshot(
         ? AAPL_FIXTURE_UPCOMING_EARNINGS
         : overrides.upcomingEarnings,
     filingPassages: overrides.filingPassages ?? aaplFixtureFilingPassages(),
+    currentReports: overrides.currentReports ?? [],
   });
 }
 

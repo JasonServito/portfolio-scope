@@ -10,6 +10,7 @@ import {
   extractFilingSections,
   FILING_SECTION_LIMITS,
   htmlToText,
+  PRESS_RELEASE_LIMITS,
   SEC_FILING_SECTION_PARSER_VERSION,
   type FilingSectionExtraction,
 } from "@/lib/sec/filing-sections";
@@ -21,6 +22,10 @@ const tenK = readFileSync(
 );
 const tenQ = readFileSync(
   join(fixtureDirectory, "aapl-10q-primary-document-clipped.htm"),
+  "utf8",
+);
+const pressRelease = readFileSync(
+  join(fixtureDirectory, "aapl-8k-ex991-press-release-clipped.htm"),
   "utf8",
 );
 
@@ -279,10 +284,79 @@ describe("10-Q section extraction", () => {
   });
 
   it("expects no sections from an unsupported form type", () => {
-    expect(expectedFilingSectionKinds("8-K")).toEqual([]);
-    const extraction = extractFilingSections(tenQ, "8-K");
+    expect(expectedFilingSectionKinds("DEF 14A")).toEqual([]);
+    const extraction = extractFilingSections(tenQ, "DEF 14A");
     expect(extraction.expectedSections).toEqual([]);
     expect(extraction.sections).toEqual([]);
     expect(extraction.missingSections).toEqual([]);
+  });
+});
+
+describe("8-K press-release exhibit extraction", () => {
+  const extraction = extractFilingSections(pressRelease, "8-K");
+
+  it("expects one PRESS_RELEASE section and chunks the whole exhibit into hash-verifiable passages", () => {
+    expect(expectedFilingSectionKinds("8-K")).toEqual(["PRESS_RELEASE"]);
+    expect(extraction).toMatchObject({
+      parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+      formType: "8-K",
+      expectedSections: ["PRESS_RELEASE"],
+      missingSections: [],
+      truncatedSections: [],
+    });
+    const release = section(extraction, "PRESS_RELEASE");
+    expect(release.label).toBe("Exhibit 99.1 Press Release");
+    expect(release.chunks.length).toBeGreaterThan(3);
+    expect(release.chunks.length).toBeLessThanOrEqual(
+      PRESS_RELEASE_LIMITS.maxChunksPerSection,
+    );
+    expect(extraction.chunkCount).toBe(release.chunks.length);
+    expect(release.chunks[0].text).toContain("Apple reports third quarter results");
+    expect(release.chunks[0].text).toContain("quarterly revenue of $94.0 billion");
+    expect(extraction.documentText).not.toMatch(/<[a-z]/i);
+    release.chunks.forEach((chunk, index) => {
+      expect(chunk.ordinal).toBe(index);
+      expect(chunk.text).toBe(
+        extraction.documentText.slice(chunk.passageStart, chunk.passageEnd),
+      );
+      expect(sha256(chunk.text)).toBe(chunk.sha256);
+      expect(chunk.text.length).toBeLessThanOrEqual(PRESS_RELEASE_LIMITS.maxChunkChars);
+      expect(chunk.text).toBe(chunk.text.trim());
+    });
+    // Passages are contiguous and in document order.
+    for (let index = 1; index < release.chunks.length; index += 1) {
+      expect(release.chunks[index].passageStart).toBeGreaterThanOrEqual(
+        release.chunks[index - 1].passageEnd,
+      );
+    }
+  });
+
+  it("reports an exhibit too short to be a press release as missing", () => {
+    const short = extractFilingSections(
+      "<html><body><div>Exhibit 99.1</div><div>Press release to follow.</div></body></html>",
+      "8-K",
+    );
+    expect(short.sections).toEqual([]);
+    expect(short.missingSections).toEqual(["PRESS_RELEASE"]);
+    expect(short.chunkCount).toBe(0);
+  });
+
+  it("applies the press-release passage cap and records truncation", () => {
+    const capped = extractFilingSections(pressRelease, "8-K", {
+      ...PRESS_RELEASE_LIMITS,
+      maxChunksPerSection: 2,
+      maxChunksPerFiling: 2,
+    });
+    expect(section(capped, "PRESS_RELEASE").chunks).toHaveLength(2);
+    expect(capped.truncatedSections).toEqual(["PRESS_RELEASE"]);
+  });
+
+  it("leaves 10-K and 10-Q section extraction unchanged", () => {
+    expect(extractFilingSections(tenK, "10-K").expectedSections).toEqual([
+      "BUSINESS",
+      "RISK_FACTORS",
+      "MDA",
+    ]);
+    expect(extractFilingSections(tenQ, "10-Q").expectedSections).toEqual(["MDA"]);
   });
 });

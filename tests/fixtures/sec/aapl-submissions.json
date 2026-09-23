@@ -1,29 +1,87 @@
 {
   "_fixtureMetadata": {
     "source": "https://data.sec.gov/submissions/CIK0000320193.json",
-    "description": "Clipped SEC submissions fixture retaining the production response shape."
+    "description": "Clipped SEC submissions fixture retaining the production response shape. The 10-K and 10-Q rows come first because older tests rewrite the first two accession numbers; the Form 8-K rows and their item codes are synthetic recorded-shape entries for M32 tests."
   },
   "cik": "0000320193",
   "entityType": "operating",
   "sic": "3571",
   "sicDescription": "Electronic Computers",
   "name": "Apple Inc.",
-  "tickers": ["AAPL"],
-  "exchanges": ["Nasdaq"],
+  "tickers": [
+    "AAPL"
+  ],
+  "exchanges": [
+    "Nasdaq"
+  ],
   "fiscalYearEnd": "0927",
   "stateOfIncorporation": "CA",
   "filings": {
     "recent": {
       "accessionNumber": [
         "0000320193-25-000079",
-        "0000320193-25-000057"
+        "0000320193-25-000057",
+        "0000320193-25-000077",
+        "0000320193-25-000073",
+        "0000320193-25-000015",
+        "0000320193-24-000080"
       ],
-      "filingDate": ["2025-10-31", "2025-08-01"],
-      "reportDate": ["2025-09-27", "2025-06-28"],
-      "acceptanceDateTime": ["20251031061415", "20250801061657"],
-      "form": ["10-K", "10-Q"],
-      "primaryDocument": ["aapl-20250927.htm", "aapl-20250628.htm"],
-      "primaryDocDescription": ["10-K", "10-Q"]
+      "filingDate": [
+        "2025-10-31",
+        "2025-08-01",
+        "2025-10-30",
+        "2025-07-31",
+        "2025-02-27",
+        "2024-08-01"
+      ],
+      "reportDate": [
+        "2025-09-27",
+        "2025-06-28",
+        "2025-10-30",
+        "2025-07-31",
+        "2025-02-25",
+        "2024-08-01"
+      ],
+      "acceptanceDateTime": [
+        "20251031061415",
+        "20250801061657",
+        "20251030163012",
+        "20250731163045",
+        "20250227163301",
+        "20240801163104"
+      ],
+      "form": [
+        "10-K",
+        "10-Q",
+        "8-K",
+        "8-K",
+        "8-K",
+        "8-K"
+      ],
+      "primaryDocument": [
+        "aapl-20250927.htm",
+        "aapl-20250628.htm",
+        "aapl-20251030.htm",
+        "aapl-20250731.htm",
+        "aapl-20250225.htm",
+        "aapl-20240801.htm"
+      ],
+      "primaryDocDescription": [
+        "10-K",
+        "10-Q",
+        "8-K",
+        "8-K",
+        "8-K",
+        "8-K"
+      ],
+      "items": [
+        "",
+        "",
+        "2.02,9.01",
+        "2.02,9.01",
+        "5.07",
+        "2.02,9.01"
+      ]
     },
     "files": []
   }

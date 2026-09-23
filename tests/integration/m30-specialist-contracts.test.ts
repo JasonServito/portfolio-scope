@@ -27,7 +27,7 @@ import {
   aaplFixturePeerFactCandidates,
 } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import {
-  AAPL_GROUNDED_SYNTHESIS,
+  AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS,
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
   CURATED_AAPL_SNAPSHOT,
 } from "@/lib/research/ai/fixtures/curated-evaluation";
@@ -155,7 +155,7 @@ const recordedOutputs = {
   FINANCIALS: rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.FINANCIALS),
   COMPETITORS: rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.COMPETITORS),
   RISK: rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.RISK),
-  SYNTHESIS: rekeyOutput(AAPL_GROUNDED_SYNTHESIS),
+  SYNTHESIS: rekeyOutput(AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS),
 };
 
 function recordedProvider(outputs: readonly GroundedModelOutput[]) {
@@ -336,6 +336,8 @@ describe("M30 specialist contracts and calibration", () => {
     );
     expect(created.requestedAgents).not.toContain(AgentName.POLITICAL_ACTIVITY);
     expect(created.requestedAgents).toContain(AgentName.SYNTHESIS);
+    // This snapshot holds no current report, so News makes no model call and
+    // is queued with the others rather than deferred (M32).
     await expect(
       db.backgroundJob.count({
         where: { researchJobId: queued.jobId, type: "RESEARCH_AGENT_RUN" },

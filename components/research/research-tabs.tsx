@@ -13,10 +13,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type {
-  ResearchClaim,
-  ResearchEvidenceRecord,
-  StockResearch,
+import {
+  RECENT_EVENTS_LABEL,
+  type ResearchClaim,
+  type ResearchEvidenceRecord,
+  type StockResearch,
 } from "@/lib/research/types";
 
 function evidenceAnchor(id: string) {
@@ -206,6 +207,13 @@ function ReportListSection({
 function WhatToWatch({ research }: { research: StockResearch }) {
   const earnings = research.report.upcomingEarnings;
   const groups = [
+    {
+      label: RECENT_EVENTS_LABEL,
+      items: (research.report.recentEvents ?? []).map(
+        (event) =>
+          `${formatDate(event.filingDate) ?? event.filingDate} (Form ${event.formType}): ${event.statement}`,
+      ),
+    },
     {
       label: "What would change this analysis",
       items: research.report.whatWouldChange ?? [],

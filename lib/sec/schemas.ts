@@ -12,6 +12,9 @@ const recentFilingsSchema = z
     form: z.array(z.string()),
     primaryDocument: z.array(z.string()).optional(),
     primaryDocDescription: z.array(z.string()).optional(),
+    // Comma-separated Form 8-K item codes per filing ("2.02,9.01"); empty
+    // for other forms.
+    items: z.array(z.string()).optional(),
   })
   .passthrough();
 

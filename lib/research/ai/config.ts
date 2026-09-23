@@ -3,8 +3,8 @@ import { z } from "zod";
 import type { SpecialistAgentName } from "@/lib/research/types";
 
 export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
-export const AI_PROMPT_VERSION = "m31-research-v3";
-export const AI_RETRIEVAL_VERSION = "m31-structured-lexical-v2";
+export const AI_PROMPT_VERSION = "m32-research-v4";
+export const AI_RETRIEVAL_VERSION = "m32-structured-lexical-v3";
 export const AI_OUTPUT_SCHEMA_VERSION = "m30-claims-v2";
 export const AI_REPORT_VERSION = "m30-report-v2";
 export const AI_SPECIALIST_AGENT_VERSION = "m30-specialist-v2";
@@ -22,27 +22,54 @@ export const AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL = 2_000;
 // contract, so the evidence context was lowered from 8,000 characters; the
 // owned structured evidence still fits in full.
 export const AI_SPECIALIST_CONTEXT_CHAR_BUDGET = 7_200;
-// M31 rebalances the three model specialists so each can receive at least one
-// filing passage after its owned structured evidence: Financials' owned
-// tables filled its budget, while Competitors owns little structured
-// evidence. The sum (20,900) is below three uniform budgets because the M31
-// filing-passage prompt rule and purposes spend part of the concurrent
-// reservation envelope checked in prompt-budget.test.ts; Financials' budget
-// holds its owned evidence plus one MD&A passage with room for longer tickers
-// and titles.
+// M31 rebalances the three first-stage model specialists so each can receive
+// at least one filing passage after its owned structured evidence:
+// Financials' owned tables (about 7,000 characters on the AAPL fixture)
+// plus one MD&A passage need 8,400, Risk's owned items plus one Risk
+// Factors passage need 5,900, and Competitors owns little structured
+// evidence. M32 makes News a fourth model call that runs only after the
+// three settle, because their concurrent reservations already fill the
+// token cap; its budget holds the coverage statement, the four newest
+// current-report items, and one press-release passage. The settled usage
+// of all four calls plus one repair and the synthesis reservation must stay
+// inside the unchanged 50,000-token cap under the conservative model in
+// prompt-budget.test.ts; the lower specialist output allowances below are
+// what pay for the fourth call.
 export const AI_SPECIALIST_CONTEXT_CHAR_BUDGETS: Record<
   SpecialistAgentName,
   number
 > = {
   FINANCIALS: 8_500,
-  COMPETITORS: 5_600,
-  RISK: 6_800,
-  NEWS: AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+  COMPETITORS: 4_600,
+  RISK: 6_000,
+  NEWS: 3_200,
   POLITICAL_ACTIVITY: AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
 };
 export const AI_SPECIALIST_MAX_EVIDENCE_ITEMS = 16;
+// Output allowances reserved per specialist call of a job whose snapshot
+// holds current reports (so News will make a model call), below the
+// configured per-call maximum that synthesis keeps; a job without current
+// reports keeps the configured maximum as before M32. A specialist answers
+// at most six research questions with short claims (the recorded outputs
+// are 400 to 900 tokens), so its validated output is far shorter than a
+// synthesis report; reserving less for it is what leaves room for the
+// fourth specialist call. A response that hits its allowance is recorded
+// UNCONFIRMED and blocks further reservations, so the runbook measures
+// settled output plus reasoning tokens in Preview before activation.
+export const AI_SPECIALIST_MAX_OUTPUT_TOKENS: Record<
+  SpecialistAgentName,
+  number
+> = {
+  FINANCIALS: 1_200,
+  COMPETITORS: 900,
+  RISK: 1_200,
+  NEWS: 800,
+  POLITICAL_ACTIVITY: 800,
+};
 // Synthesis runs after the specialists settle, so its budget can carry the
-// filing passages the specialists cited; the envelope test bounds it.
+// filing passages the specialists cited: its owned items (about 6,700
+// characters on the fixture), the dated current-report items the News
+// specialist cited, and one cited passage; the envelope test bounds it.
 export const AI_SYNTHESIS_CONTEXT_CHAR_BUDGET = 8_600;
 export const AI_SYNTHESIS_MAX_EVIDENCE_ITEMS = 16;
 // Serialized specialist outputs forwarded to synthesis. All validated claims

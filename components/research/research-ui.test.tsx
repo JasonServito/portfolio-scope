@@ -108,6 +108,15 @@ const externalResearch: StockResearch = {
       freshness: 1,
     },
     upcomingEarnings: { eventDate: "2026-10-29", marketSession: "AFTER_MARKET" },
+    recentEvents: [
+      {
+        filingDate: "2026-07-30",
+        formType: "8-K",
+        accessionNumber: "0000320193-26-000019",
+        statement:
+          "In a Form 8-K filed 2026-07-30 the company announced third quarter results.",
+      },
+    ],
   },
   claims: [
     {
@@ -283,6 +292,13 @@ describe("research UI", () => {
     expect(markup.indexOf("Evidence coverage 78%")).toBeLessThan(
       markup.indexOf("61% reported confidence"),
     );
+    expect(markup).toContain("Recent events from filings");
+    expect(markup).toContain(
+      "7/30/2026 (Form 8-K): In a Form 8-K filed 2026-07-30 the company announced third quarter results.",
+    );
+    expect(markup.indexOf("Recent events from filings")).toBeLessThan(
+      markup.indexOf("What would change this analysis"),
+    );
     expect(markup).toContain("What would change this analysis");
     expect(markup).toContain("A margin recovery in the next quarterly filing.");
     expect(markup).toContain("Upcoming earnings");
@@ -327,6 +343,7 @@ describe("research UI", () => {
           report: {
             ...externalResearch.report,
             whatWouldChange: undefined,
+            recentEvents: undefined,
             evidenceCoverage: null,
             upcomingEarnings: null,
           },

@@ -1,5 +1,7 @@
 import type { ResearchEvaluationCase } from "@/lib/research/ai/evaluation";
 import {
+  AAPL_FIXTURE_CURRENT_REPORTS,
+  aaplFixtureCurrentReports,
   buildAaplFixtureSnapshot,
   findFixtureEvidence,
 } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
@@ -13,15 +15,19 @@ import {
 /**
  * Curated offline evaluation cases rebuilt for M29 from the checked-in AAPL
  * SEC fixtures, re-recorded for the M30 specialist contract (claim kinds,
- * availability, and "what would change"), and extended for M31 with claims
- * that cite filing passages from the synthetic recorded-shape 10-K and 10-Q
- * fixtures. The evidence is the exact deterministic snapshot the runtime
+ * availability, and "what would change"), extended for M31 with claims that
+ * cite filing passages from the synthetic recorded-shape 10-K and 10-Q
+ * fixtures, and for M32 with a News specialist output that describes dated
+ * events from synthetic Form 8-K current reports and a press-release
+ * passage. The evidence is the exact deterministic snapshot the runtime
  * would build; the outputs are reviewed recorded responses (a grounded report
  * and a deliberately flawed one). Usage and latency are recorded estimates
  * for the m29 context and output limits, not provider-billed measurements.
  */
 
-export const CURATED_AAPL_SNAPSHOT = buildAaplFixtureSnapshot();
+export const CURATED_AAPL_SNAPSHOT = buildAaplFixtureSnapshot({
+  currentReports: aaplFixtureCurrentReports(),
+});
 export const CURATED_RESEARCH_EVIDENCE = [...CURATED_AAPL_SNAPSHOT.evidence];
 
 const derived = (metricId: string, periodKind: string) =>
@@ -60,6 +66,22 @@ const salesByCategoryPassage = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
   formType: "10-K",
   sectionKind: "MDA",
   chunkOrdinal: 1,
+});
+// Current reports the News specialist receives: the dated 8-K items and the
+// opening passage of the results press release.
+const resultsReport = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
+  evidenceType: "SEC_CURRENT_REPORT",
+  accessionNumber: AAPL_FIXTURE_CURRENT_REPORTS.results.accessionNumber,
+});
+const resultsReportWithoutExhibit = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
+  evidenceType: "SEC_CURRENT_REPORT",
+  accessionNumber:
+    AAPL_FIXTURE_CURRENT_REPORTS.resultsWithoutExhibit.accessionNumber,
+});
+const pressReleaseOpening = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
+  evidenceType: "SEC_FILING_PASSAGE",
+  sectionKind: "PRESS_RELEASE",
+  chunkOrdinal: 0,
 });
 
 // Each specialist may only cite evidence inside its own retrieval selection,
@@ -184,11 +206,51 @@ const eventClaim: ModelClaim = {
   assumptions: [],
 };
 
+// Every event claim cites the dated 8-K item; the press-release passage
+// supplies what was announced.
+const resultsEventClaim: ModelClaim = {
+  category: "SUPPORTIVE",
+  kind: "FACT",
+  statement:
+    "In a Form 8-K filed 2026-07-30 under Item 2.02, the Company announced fiscal 2026 third quarter results: quarterly revenue of $94.0 billion, up 10 percent year over year, and diluted earnings per share of $1.57, up 12 percent year over year, with Services revenue at a June quarter record of $27.4 billion.",
+  confidence: 0.84,
+  evidenceIds: [resultsReport.id, pressReleaseOpening.id],
+  counterEvidenceIds: [],
+  assumptions: [
+    "The press release is the company's own announcement and is not independently verified.",
+  ],
+};
+
+// Synthesis carries the event forward with the dated 8-K citation alone; the
+// figures stay in the News specialist's passage-backed claim, because its
+// context holds the small current-report item but not the press release.
+const resultsFilingClaim: ModelClaim = {
+  category: "SUPPORTIVE",
+  kind: "FACT",
+  statement:
+    "The newest current report in the window is a Form 8-K filed 2026-07-30 under Item 2.02, in which the Company announced its fiscal 2026 third quarter results by press release; the News specialist describes revenue and diluted earnings per share growth from that release.",
+  confidence: 0.78,
+  evidenceIds: [resultsReport.id],
+  counterEvidenceIds: [],
+  assumptions: [],
+};
+
+const unavailableExhibitClaim: ModelClaim = {
+  category: "RISK",
+  kind: "FACT",
+  statement:
+    "A Form 8-K filed 2026-04-30 under Item 2.02 reported results for an earlier quarter, but its Exhibit 99.1 press release is not available because the filing index lists no press-release exhibit, so what it reported is unknown beyond its item codes.",
+  confidence: 0.72,
+  evidenceIds: [resultsReportWithoutExhibit.id],
+  counterEvidenceIds: [],
+  assumptions: [],
+};
+
 export const AAPL_GROUNDED_SYNTHESIS: SynthesisModelOutput = {
   rating: "MIXED",
   confidence: 0.74,
   summary:
-    "Derived growth, margins, and cash generation from the selected SEC facts are strong, while derived net cash is negative and peer operating margins are higher. The 10-K risk factors disclose antitrust and digital-market regulation affecting app distribution and payments. Quarterly cash-flow coverage is incomplete and no licensed news evidence is available. This is educational research, not financial advice.",
+    "Derived growth, margins, and cash generation from the selected SEC facts are strong, while derived net cash is negative and peer operating margins are higher. The 10-K risk factors disclose antitrust and digital-market regulation affecting app distribution and payments. The latest Form 8-K press release announces third quarter revenue and earnings growth, while quarterly cash-flow coverage is incomplete and one earlier results filing has no extracted press release. This is educational research, not financial advice.",
   claims: [
     growthClaim,
     cashGenerationClaim,
@@ -197,11 +259,14 @@ export const AAPL_GROUNDED_SYNTHESIS: SynthesisModelOutput = {
     trendCoverageClaim,
     eventClaim,
     regulatoryDisclosureClaim,
+    resultsFilingClaim,
   ],
   warnings: [
     "Derived values are calculated from cited SEC facts and are not reported by the filer.",
   ],
-  missingData: ["Licensed current-news evidence is not configured."],
+  missingData: [
+    "The Form 8-K filed 2026-04-30 has no extracted press release, so the results it reported are unknown beyond its item codes.",
+  ],
   disagreements: [
     "Positive derived revenue and cash-flow growth contrasts with negative derived net cash and lower operating margin than the compared peers.",
   ],
@@ -209,13 +274,34 @@ export const AAPL_GROUNDED_SYNTHESIS: SynthesisModelOutput = {
     "The next annual filing showing derived revenue growth below the current annual rate would weaken the growth case.",
     "Derived net cash turning positive, with cash and equivalents exceeding long-term debt at the next reporting date.",
     "Quarterly free cash flow becoming available for every quarter in the eight-quarter trend excerpt.",
-    "A licensed current-news source being configured so recent events can be assessed.",
+    "A new Form 8-K current report filed after 2026-07-30 describing a material event or the next quarter's results.",
     "The results reported at the stored earnings event replacing the selected annual and quarterly facts.",
   ],
 };
 
+/**
+ * The same grounded report for a snapshot with no stored current report, the
+ * state before M32 is enabled: no event claim, and the gap stated instead.
+ */
+export const AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS: SynthesisModelOutput = {
+  ...AAPL_GROUNDED_SYNTHESIS,
+  summary:
+    "Derived growth, margins, and cash generation from the selected SEC facts are strong, while derived net cash is negative and peer operating margins are higher. The 10-K risk factors disclose antitrust and digital-market regulation affecting app distribution and payments. Quarterly cash-flow coverage is incomplete and no Form 8-K current report is stored, so recent events are not assessed. This is educational research, not financial advice.",
+  claims: AAPL_GROUNDED_SYNTHESIS.claims.filter(
+    (claim) => claim !== resultsFilingClaim,
+  ),
+  missingData: [
+    "No Form 8-K current report from the last twelve months is stored, so recent events are not assessed.",
+  ],
+  whatWouldChange: AAPL_GROUNDED_SYNTHESIS.whatWouldChange.map((item) =>
+    item.startsWith("A new Form 8-K")
+      ? "A Form 8-K current report becoming available so recent events can be assessed."
+      : item,
+  ),
+};
+
 export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
-  "FINANCIALS" | "COMPETITORS" | "RISK",
+  "FINANCIALS" | "COMPETITORS" | "RISK" | "NEWS",
   SpecialistModelOutput
 > = {
   FINANCIALS: {
@@ -260,6 +346,21 @@ export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
     warnings: [],
     missingData: [
       "No political-activity evidence beyond the company's own risk factor disclosure is supplied.",
+    ],
+  },
+  NEWS: {
+    rating: "NEUTRAL",
+    confidence: 0.7,
+    availability: "PARTIAL",
+    summary:
+      "Three Form 8-K current reports are stored for the last twelve months. The newest, filed 2026-07-30, announces fiscal 2026 third quarter results in an attached press release; an earlier results filing has no extracted press release, and a shareholder-vote filing carries no exhibit, so those events are known only by their item codes.",
+    claims: [resultsEventClaim, unavailableExhibitClaim],
+    warnings: [
+      "Events come only from the company's own Form 8-K filings; no third-party news is used.",
+    ],
+    missingData: [
+      "The Form 8-K filed 2026-02-26 reports a shareholder vote (Item 5.07) with no exhibit text, so the outcome is unknown.",
+      "Nothing after the newest current report filed 2026-07-30 is known.",
     ],
   },
 };

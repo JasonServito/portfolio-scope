@@ -93,6 +93,8 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
     agentRunId?: string | null;
     operation: string;
     idempotencyKey: string;
+    /** Output allowance for this call; never above the configured per-call maximum. */
+    maxOutputTokens?: number;
     now?: Date;
     signal?: AbortSignal;
   },
@@ -105,6 +107,10 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
     dependencies.markUnconfirmed ?? markAiUsageUnconfirmed;
   const environment = dependencies.environment ?? process.env;
   const metered = input.provider.provider === "openai";
+  const maxOutputTokens = Math.min(
+    input.config.maxOutputTokensPerCall,
+    input.maxOutputTokens ?? input.config.maxOutputTokensPerCall,
+  );
   let repairFeedback: string | undefined;
 
   for (let attemptNumber = 1; attemptNumber <= 2; attemptNumber += 1) {
@@ -148,7 +154,7 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
         reservedInputTokens:
           estimateInputTokenUpperBound(serializedProviderInput) +
           PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE,
-        reservedOutputTokens: input.config.maxOutputTokensPerCall,
+        reservedOutputTokens: maxOutputTokens,
         config: input.config,
         now: input.now,
       });
@@ -161,7 +167,7 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
         input: prompt.input,
         outputSchema: input.schema,
         outputSchemaName: input.schemaName,
-        maxOutputTokens: input.config.maxOutputTokensPerCall,
+        maxOutputTokens,
         signal: input.signal,
       });
     } catch (error) {

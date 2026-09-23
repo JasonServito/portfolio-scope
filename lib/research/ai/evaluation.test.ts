@@ -31,12 +31,12 @@ describe("offline research evaluation", () => {
         contradictionPreserved: true,
       },
       counts: {
-        claims: 7,
-        citations: 9,
+        claims: 8,
+        citations: 10,
         unsupportedClaims: 0,
-        numericalClaims: 6,
-        numericallySupportedClaims: 6,
-        claimKinds: { fact: 2, derived: 3, interpretation: 2 },
+        numericalClaims: 7,
+        numericallySupportedClaims: 7,
+        claimKinds: { fact: 3, derived: 3, interpretation: 2 },
       },
       latencyMs: 9_400,
       usage: {
@@ -50,7 +50,7 @@ describe("offline research evaluation", () => {
     });
   });
 
-  it("cites derived, table, trend, peer, event, and filing passage evidence that all resolve to supplied items", () => {
+  it("cites derived, table, trend, peer, event, filing passage, and current-report evidence that all resolve to supplied items", () => {
     const grounded = CURATED_EVALUATION_CASES[0];
     const evidenceById = new Map(
       (grounded.evidence as ResearchEvidence[]).map((item) => [item.id, item]),
@@ -71,6 +71,7 @@ describe("offline research evaluation", () => {
         "PEER_COMPARISON_TABLE",
         "UPCOMING_EARNINGS_EVENT",
         "SEC_FILING_PASSAGE",
+        "SEC_CURRENT_REPORT",
       ]),
     );
     expect(

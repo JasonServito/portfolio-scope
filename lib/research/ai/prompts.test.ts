@@ -67,7 +67,7 @@ describe("AI research prompts", () => {
     ["FINANCIALS", 6],
     ["COMPETITORS", 5],
     ["RISK", 6],
-    ["NEWS", 1],
+    ["NEWS", 5],
   ] as const)(
     "poses the %s specialist's bounded research questions and contract",
     (agentName, questionCount) => {
@@ -103,7 +103,45 @@ describe("AI research prompts", () => {
     expect(SPECIALIST_RESEARCH_QUESTIONS.RISK.at(-1)).toMatch(
       /Regulatory, governance, and political exposure: answer only if supplied evidence/,
     );
-    expect(SPECIALIST_RESEARCH_QUESTIONS.NEWS[0]).toContain("NOT_AVAILABLE");
+    expect(SPECIALIST_RESEARCH_QUESTIONS.NEWS.at(-1)).toContain("NOT_AVAILABLE");
+  });
+
+  it("asks the News specialist for a structured extraction per Form 8-K event and forbids uncited events", () => {
+    const questions = SPECIALIST_RESEARCH_QUESTIONS.NEWS.join(" ");
+    for (const part of [
+      "what was reported",
+      "What changed",
+      "Why may each event matter",
+      "How strong is the evidence",
+      "What remains unknown",
+    ]) {
+      expect(questions).toContain(part);
+    }
+    const prompt = specialistPrompt({
+      agentName: "NEWS",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      asOfDate: "2026-01-02",
+      evidence: [evidence],
+    });
+    expect(prompt.instructions).toContain("Form 8-K current reports");
+    expect(prompt.instructions).toContain(
+      "Never describe an event that no supplied 8-K reports",
+    );
+    expect(prompt.instructions).toContain("never use third-party news");
+    expect(prompt.instructions).toContain(
+      "the cover items of a Form 8-K current report",
+    );
+    const synthesis = synthesisPrompt({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      asOfDate: "2026-01-02",
+      evidence: [evidence],
+      specialists: [],
+    });
+    expect(synthesis.instructions).toContain(
+      "never describe an event without such a citation",
+    );
   });
 
   it("forwards a NOT_AVAILABLE specialist to synthesis as a gap, never as a neutral opinion", () => {

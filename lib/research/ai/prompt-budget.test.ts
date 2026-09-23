@@ -6,9 +6,13 @@ import {
   AI_HARD_MAX_COST_PER_JOB_USD,
   AI_HARD_MAX_TOKENS_PER_JOB,
   AI_SPECIALIST_CONTEXT_CHAR_BUDGETS,
+  AI_SPECIALIST_MAX_OUTPUT_TOKENS,
   getSupportedResearchModels,
 } from "@/lib/research/ai/config";
-import { buildAaplFixtureSnapshot } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
+import {
+  aaplFixtureCurrentReports,
+  buildAaplFixtureSnapshot,
+} from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import {
   AAPL_GROUNDED_SYNTHESIS,
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
@@ -27,14 +31,21 @@ import {
   synthesisModelOutputSchema,
   validateGroundedOutput,
 } from "@/lib/research/ai/schemas";
+import {
+  DEFERRED_EXTERNAL_SPECIALIST_AGENT_NAMES,
+  initialSpecialistAgentNames,
+} from "@/lib/research/types";
 
 /**
  * Reservations treat every serialized provider-input byte as a token, so the
  * m29 context and output limits plus the m30 research questions and claim
- * contract and the m31 filing passages must keep three concurrent specialist
- * reservations, and synthesis after their settlement, inside the 50,000-token
- * and $0.25 job caps. Settled specialist usage is approximated conservatively
- * at three bytes per input token plus the full output allowance.
+ * contract, the m31 filing passages, and the m32 News specialist must keep
+ * the job inside the 50,000-token and $0.25 caps under a conservative
+ * model: the three first-stage specialists reserve concurrently; News
+ * reserves only after they settle; and synthesis reserves after News
+ * settles, with one specialist repair allowed. Settled usage is
+ * approximated conservatively at three bytes per input token plus the
+ * call's full output allowance.
  */
 
 const CONSERVATIVE_BYTES_PER_INPUT_TOKEN = 3;
@@ -52,8 +63,16 @@ const SPECIALIST_RESERVATION_OVERHEAD_TOKENS = 9_500;
 const PRIVATE_DATA_PATTERN =
   /userId|portfolio|holding|alert|targetPrice|costBasis|quantity|email|@/i;
 
-const snapshot = buildAaplFixtureSnapshot();
-const modelAgents = ["FINANCIALS", "COMPETITORS", "RISK"] as const;
+const snapshot = buildAaplFixtureSnapshot({
+  currentReports: aaplFixtureCurrentReports(),
+});
+const firstStageAgents = initialSpecialistAgentNames("EXTERNAL").filter(
+  (agent): agent is "FINANCIALS" | "COMPETITORS" | "RISK" =>
+    agent === "FINANCIALS" || agent === "COMPETITORS" || agent === "RISK",
+);
+const deferredAgents = DEFERRED_EXTERNAL_SPECIALIST_AGENT_NAMES;
+const modelAgents = [...firstStageAgents, ...deferredAgents] as const;
+type ModelAgent = (typeof modelAgents)[number];
 const specialistClaims = modelAgents.flatMap(
   (agent) => AAPL_RECORDED_SPECIALIST_OUTPUTS[agent].claims,
 );
@@ -72,7 +91,7 @@ function withoutFilingPassages(input: string, evidence: readonly { sourceKind: s
     .reduce((text, item) => text.replaceAll(escaped(item.excerpt), ""), input);
 }
 
-function specialistSerialized(agent: (typeof modelAgents)[number]) {
+function specialistSerialized(agent: ModelAgent) {
   const selection = selectSpecialistEvidence(snapshot, agent);
   const prompt = specialistPrompt({
     agentName: agent,
@@ -83,6 +102,7 @@ function specialistSerialized(agent: (typeof modelAgents)[number]) {
     evidenceContext: selection.context,
   });
   return {
+    agent,
     evidence: selection.evidence,
     input: prompt.input,
     serialized: serializeProviderInput(
@@ -90,10 +110,18 @@ function specialistSerialized(agent: (typeof modelAgents)[number]) {
       `research_${agent.toLowerCase()}_v1`,
       specialistModelOutputSchema,
     ),
+    outputTokens: AI_SPECIALIST_MAX_OUTPUT_TOKENS[agent],
   };
 }
 
-function synthesisSerialized() {
+function synthesisSerialized(
+  specialists: Parameters<typeof synthesisPrompt>[0]["specialists"] = modelAgents.map(
+    (agentName) => ({
+      agentName,
+      output: AAPL_RECORDED_SPECIALIST_OUTPUTS[agentName],
+    }),
+  ),
+) {
   const selection = selectSynthesisEvidence(snapshot, { specialistClaims });
   const prompt = synthesisPrompt({
     ticker: snapshot.stock.ticker,
@@ -101,27 +129,7 @@ function synthesisSerialized() {
     asOfDate: "2026-09-22",
     evidence: [...selection.evidence],
     evidenceContext: selection.context,
-    specialists: [
-      ...modelAgents.map((agentName) => ({
-        agentName,
-        output: AAPL_RECORDED_SPECIALIST_OUTPUTS[agentName],
-      })),
-      {
-        agentName: "NEWS" as const,
-        output: {
-          rating: "NEUTRAL" as const,
-          confidence: 0,
-          availability: "NOT_AVAILABLE" as const,
-          summary:
-            "Licensed current-news evidence is not configured; filings are not treated as current news.",
-          claims: [],
-          warnings: [],
-          missingData: [
-            "Licensed current-news evidence is not configured; filings are not treated as current news.",
-          ],
-        },
-      },
-    ],
+    specialists,
   });
   return {
     evidence: selection.evidence,
@@ -131,61 +139,83 @@ function synthesisSerialized() {
       "research_synthesis_v1",
       synthesisModelOutputSchema,
     ),
+    outputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
   };
 }
 
-function reservation(serialized: string) {
+function reservation(call: { serialized: string; outputTokens: number }) {
   return (
-    bytes(serialized) +
+    bytes(call.serialized) +
     PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE +
-    AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL
+    call.outputTokens
   );
 }
 
-describe("m29 prompt envelope with the AAPL fixture", () => {
-  const specialists = modelAgents.map((agent) => ({
-    agent,
-    ...specialistSerialized(agent),
-  }));
+function settled(call: { serialized: string; outputTokens: number }) {
+  return (
+    Math.ceil(bytes(call.serialized) / CONSERVATIVE_BYTES_PER_INPUT_TOKEN) +
+    call.outputTokens
+  );
+}
+
+function sum(values: number[]) {
+  return values.reduce((total, value) => total + value, 0);
+}
+
+describe("m32 prompt envelope with the AAPL fixture", () => {
+  const specialists = modelAgents.map(specialistSerialized);
+  const firstStage = specialists.filter((item) =>
+    (firstStageAgents as readonly string[]).includes(item.agent),
+  );
+  const deferred = specialists.filter((item) =>
+    (deferredAgents as readonly string[]).includes(item.agent),
+  );
+  const largestFirstStage = firstStage.reduce((largest, item) =>
+    settled(item) > settled(largest) ? item : largest,
+  );
   const synthesis = synthesisSerialized();
 
-  it("keeps three concurrent specialist reservations inside the job token cap", () => {
-    const total = specialists.reduce(
-      (sum, item) => sum + reservation(item.serialized),
-      0,
-    );
-    expect(total).toBeLessThanOrEqual(
+  it("keeps the three concurrent first-stage specialist reservations inside the job token cap", () => {
+    expect(firstStage.map((item) => item.agent)).toEqual([
+      "FINANCIALS",
+      "COMPETITORS",
+      "RISK",
+    ]);
+    expect(sum(firstStage.map(reservation))).toBeLessThanOrEqual(
       AI_HARD_MAX_TOKENS_PER_JOB - CONCURRENT_SPECIALIST_HEADROOM_TOKENS,
     );
     for (const item of specialists) {
-      expect(reservation(item.serialized)).toBeLessThan(
+      expect(reservation(item)).toBeLessThan(
         AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[item.agent] +
           SPECIALIST_RESERVATION_OVERHEAD_TOKENS,
       );
+      expect(item.outputTokens).toBeLessThanOrEqual(
+        AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
+      );
     }
-    // The rebalanced per-agent budgets stay within three uniform
-    // 7,200-character budgets; the M31 prompt rule spends the difference.
+    // The first-stage budgets stay within three uniform 7,200-character
+    // budgets; the M31 and M32 prompt rules spend the difference.
     expect(
-      modelAgents.reduce(
-        (sum, agent) => sum + AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[agent],
-        0,
-      ),
+      sum(firstStageAgents.map((agent) => AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[agent])),
     ).toBeLessThanOrEqual(3 * 7_200);
   });
 
-  it("leaves room for synthesis after the specialists settle, including one repair", () => {
-    const settledSpecialists = specialists.reduce(
-      (sum, item) =>
-        sum +
-        Math.ceil(bytes(item.serialized) / CONSERVATIVE_BYTES_PER_INPUT_TOKEN) +
-        AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
-      0,
+  it("defers the News specialist because a fourth concurrent reservation would not fit, then fits it after the first stage settles", () => {
+    expect(deferred.map((item) => item.agent)).toEqual(["NEWS"]);
+    const news = deferred[0];
+    expect(sum(firstStage.map(reservation)) + reservation(news)).toBeGreaterThan(
+      AI_HARD_MAX_TOKENS_PER_JOB - CONCURRENT_SPECIALIST_HEADROOM_TOKENS,
     );
-    const oneRepair =
-      Math.ceil(bytes(specialists[0].serialized) / CONSERVATIVE_BYTES_PER_INPUT_TOKEN) +
-      AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL;
+    expect(sum(firstStage.map(settled)) + reservation(news)).toBeLessThanOrEqual(
+      AI_HARD_MAX_TOKENS_PER_JOB - CONCURRENT_SPECIALIST_HEADROOM_TOKENS,
+    );
+  });
+
+  it("leaves room for synthesis after all four specialists settle, including one repair", () => {
     expect(
-      settledSpecialists + oneRepair + reservation(synthesis.serialized),
+      sum(specialists.map(settled)) +
+        settled(largestFirstStage) +
+        reservation(synthesis),
     ).toBeLessThanOrEqual(AI_HARD_MAX_TOKENS_PER_JOB);
   });
 
@@ -193,7 +223,7 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
     // Worst case: each specialist returns the schema maximum of twelve long
     // claims with assumptions and a long summary (about 8,000 characters,
     // the size of a 2,000-token output).
-    const verbose = (agentName: (typeof modelAgents)[number]) => ({
+    const verbose = (agentName: ModelAgent) => ({
       agentName,
       output: {
         rating: "MIXED" as const,
@@ -213,92 +243,62 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
         missingData: ["m".repeat(200)],
       },
     });
-    const selection = selectSynthesisEvidence(snapshot, { specialistClaims });
-    const prompt = synthesisPrompt({
-      ticker: snapshot.stock.ticker,
-      companyName: snapshot.stock.companyName,
-      asOfDate: "2026-09-22",
-      evidence: [...selection.evidence],
-      evidenceContext: selection.context,
-      specialists: modelAgents.map(verbose),
-    });
-    const serialized = serializeProviderInput(
-      prompt,
-      "research_synthesis_v1",
-      synthesisModelOutputSchema,
-    );
-    const settledSpecialists = specialists.reduce(
-      (sum, item) =>
-        sum +
-        Math.ceil(bytes(item.serialized) / CONSERVATIVE_BYTES_PER_INPUT_TOKEN) +
-        AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
-      0,
-    );
-    expect(JSON.parse(prompt.input).omittedSpecialistClaims).toBeGreaterThan(0);
-    expect(settledSpecialists + reservation(serialized)).toBeLessThanOrEqual(
-      AI_HARD_MAX_TOKENS_PER_JOB,
-    );
+    const verboseSynthesis = synthesisSerialized(modelAgents.map(verbose));
+    expect(JSON.parse(verboseSynthesis.input).omittedSpecialistClaims).toBeGreaterThan(0);
+    expect(
+      sum(specialists.map(settled)) + reservation(verboseSynthesis),
+    ).toBeLessThanOrEqual(AI_HARD_MAX_TOKENS_PER_JOB);
   });
 
   it("keeps the reserved and estimated per-report cost far below the job cost cap", () => {
     const pricing = getSupportedResearchModels()[0];
-    const reservedCost = [
-      ...specialists.map((item) => item.serialized),
-      synthesis.serialized,
-    ]
-      .map((serialized) =>
+    const calls = [...specialists, synthesis];
+    const reservedCost = sum(
+      calls.map((call) =>
         calculateAiCostUsd(
           {
-            inputTokens: bytes(serialized) + PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE,
-            outputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
+            inputTokens:
+              bytes(call.serialized) + PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE,
+            outputTokens: call.outputTokens,
           },
           pricing,
         ),
-      )
-      .reduce((sum, value) => sum + value, 0);
+      ),
+    );
     expect(reservedCost).toBeLessThan(AI_HARD_MAX_COST_PER_JOB_USD / 2);
-    const estimatedCost = [
-      ...specialists.map((item) => item.serialized),
-      synthesis.serialized,
-    ]
-      .map((serialized) =>
+    const estimatedCost = sum(
+      calls.map((call) =>
         calculateAiCostUsd(
           {
             inputTokens: Math.ceil(
-              bytes(serialized) / CONSERVATIVE_BYTES_PER_INPUT_TOKEN,
+              bytes(call.serialized) / CONSERVATIVE_BYTES_PER_INPUT_TOKEN,
             ),
-            outputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
+            outputTokens: call.outputTokens,
           },
           pricing,
         ),
-      )
-      .reduce((sum, value) => sum + value, 0);
+      ),
+    );
     expect(estimatedCost).toBeLessThan(0.06);
   });
 
   it("grounds every recorded output inside the evidence its agent actually receives", () => {
-    for (const agent of modelAgents) {
-      const selection = selectSpecialistEvidence(snapshot, agent);
+    for (const item of specialists) {
       expect(() =>
-        validateGroundedOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS[agent], [
-          ...selection.evidence,
+        validateGroundedOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS[item.agent], [
+          ...item.evidence,
         ]),
       ).not.toThrow();
     }
-    const synthesisSelection = selectSynthesisEvidence(snapshot, {
-      specialistClaims,
-    });
     expect(() =>
-      validateGroundedOutput(AAPL_GROUNDED_SYNTHESIS, [
-        ...synthesisSelection.evidence,
-      ]),
+      validateGroundedOutput(AAPL_GROUNDED_SYNTHESIS, [...synthesis.evidence]),
     ).not.toThrow();
   });
 
-  it("supplies at least one filing passage to every model specialist and the cited passage to synthesis", () => {
+  it("supplies at least one filing passage to every model specialist and the cited passages to synthesis", () => {
     for (const item of specialists) {
       const passages = item.evidence.filter(
-        (evidence) => evidence.sourceKind === "SEC_FILING",
+        (evidence) => evidence.metadata.evidenceType === "SEC_FILING_PASSAGE",
       );
       expect(passages.length).toBeGreaterThan(0);
       for (const passage of passages) {
@@ -327,6 +327,52 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
     for (const call of [...specialists, synthesis]) {
       expect(call.serialized).toContain("Evidence of kind SEC_FILING");
     }
+  });
+
+  it("gives the News specialist every listed current report, its coverage statement, and a press-release passage", () => {
+    const news = deferred[0];
+    const types = news.evidence.map((item) => item.metadata.evidenceType);
+    expect(
+      types.filter((type) => type === "SEC_CURRENT_REPORT"),
+    ).toHaveLength(
+      snapshot.evidence.filter(
+        (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT",
+      ).length,
+    );
+    expect(types).toContain("SEC_CURRENT_REPORT_COVERAGE");
+    expect(
+      news.evidence.some(
+        (item) =>
+          item.metadata.evidenceType === "SEC_FILING_PASSAGE" &&
+          item.metadata.sectionKind === "PRESS_RELEASE",
+      ),
+    ).toBe(true);
+    expect(
+      news.evidence.every(
+        (item) =>
+          item.metadata.evidenceType !== "SEC_FILING_PASSAGE" ||
+          item.metadata.sectionKind === "PRESS_RELEASE",
+      ),
+    ).toBe(true);
+    expect(news.input).toContain("What remains unknown");
+    // Synthesis receives the dated 8-K items the News specialist cited, ahead
+    // of the passages, and its own event claim cites one of them.
+    const citedReports = AAPL_RECORDED_SPECIALIST_OUTPUTS.NEWS.claims
+      .flatMap((claim) => claim.evidenceIds)
+      .filter((id) =>
+        snapshot.evidence.some(
+          (item) =>
+            item.id === id && item.metadata.evidenceType === "SEC_CURRENT_REPORT",
+        ),
+      );
+    expect(citedReports.length).toBeGreaterThan(0);
+    for (const id of citedReports) {
+      expect(synthesis.evidence.some((item) => item.id === id)).toBe(true);
+    }
+    const synthesisEventClaims = AAPL_GROUNDED_SYNTHESIS.claims.filter((claim) =>
+      claim.evidenceIds.some((id) => citedReports.includes(id)),
+    );
+    expect(synthesisEventClaims.length).toBeGreaterThan(0);
   });
 
   it("sends no private portfolio, alert, note, email, or user identifier to the provider", () => {

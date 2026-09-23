@@ -8,6 +8,13 @@ export const SPECIALIST_AGENT_NAMES = [
 
 export type SpecialistAgentName = (typeof SPECIALIST_AGENT_NAMES)[number];
 export type ResearchAgentName = SpecialistAgentName | "SYNTHESIS";
+
+/**
+ * Product label of the News specialist. It keeps its enum name but reports
+ * events taken from SEC current reports (M32), never third-party news, so
+ * the label says what it actually covers.
+ */
+export const RECENT_EVENTS_LABEL = "Recent events from filings";
 export type ResearchRating = "BEARISH" | "NEUTRAL" | "BULLISH" | "MIXED";
 export type ResearchRunStatus = "COMPLETED" | "FAILED";
 export type ResearchGenerationMode = "DETERMINISTIC" | "RECORDED" | "EXTERNAL";
@@ -34,6 +41,35 @@ export function scheduledSpecialistAgentNames(
   return generationMode === "DETERMINISTIC"
     ? SPECIALIST_AGENT_NAMES
     : EXTERNAL_SPECIALIST_AGENT_NAMES;
+}
+
+/**
+ * Model specialists whose job is queued only after every other scheduled
+ * specialist has completed. Three concurrent specialist reservations already
+ * fill the per-job token cap, so the News specialist (a model call since
+ * M32) runs as a second stage; the prebuilt path makes no model call and
+ * queues everything at once.
+ */
+export const DEFERRED_EXTERNAL_SPECIALIST_AGENT_NAMES = [
+  "NEWS",
+] as const satisfies readonly SpecialistAgentName[];
+
+export function deferredSpecialistAgentNames(
+  generationMode: ResearchGenerationMode,
+): readonly SpecialistAgentName[] {
+  return generationMode === "DETERMINISTIC"
+    ? []
+    : DEFERRED_EXTERNAL_SPECIALIST_AGENT_NAMES;
+}
+
+/** Specialists queued when the research job is created. */
+export function initialSpecialistAgentNames(
+  generationMode: ResearchGenerationMode,
+): readonly SpecialistAgentName[] {
+  const deferred = deferredSpecialistAgentNames(generationMode);
+  return scheduledSpecialistAgentNames(generationMode).filter(
+    (agentName) => !deferred.includes(agentName),
+  );
 }
 
 export type ResearchFinding = {
@@ -105,6 +141,18 @@ export type ResearchUpcomingEarnings = {
   marketSession: string | null;
 };
 
+/**
+ * A recent company event as described by the News specialist, derived at
+ * read time from its validated claims and the 8-K current report each
+ * claim cites. An event without a cited 8-K never reaches the report.
+ */
+export type ResearchRecentEvent = {
+  filingDate: string;
+  formType: string;
+  accessionNumber: string | null;
+  statement: string;
+};
+
 export type ResearchModelMetadata = {
   provider: string | null;
   model: string | null;
@@ -161,6 +209,7 @@ export type SynthesisReport = {
   whatWouldChange?: string[];
   evidenceCoverage?: ResearchEvidenceCoverage | null;
   upcomingEarnings?: ResearchUpcomingEarnings | null;
+  recentEvents?: ResearchRecentEvent[];
 };
 
 export type StockResearch = {

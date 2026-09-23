@@ -31,9 +31,9 @@ function evidenceTypes(value: ResearchEvidenceSnapshot) {
 
 describe("M29 structured research evidence", () => {
   it("assembles the versioned AAPL snapshot with derived, table, trend, peer, and event evidence", () => {
-    expect(snapshot.schemaVersion).toBe("m31-public-evidence-snapshot-v3");
+    expect(snapshot.schemaVersion).toBe("m32-public-evidence-snapshot-v4");
     expect(snapshot.schemaVersion).toBe(RESEARCH_EVIDENCE_SNAPSHOT_VERSION);
-    expect(snapshot.retrievalVersion).toBe("m31-structured-lexical-v2");
+    expect(snapshot.retrievalVersion).toBe("m32-structured-lexical-v3");
     expect(snapshot.retrievalVersion).toBe(AI_RETRIEVAL_VERSION);
     expect(evidenceTypes(snapshot)).toEqual({
       "COMPANY_PROFILE:PUBLIC_COMPANY_IDENTITY": 1,
@@ -42,6 +42,7 @@ describe("M29 structured research evidence", () => {
       "DERIVED:FINANCIAL_TREND_EXCERPT": 1,
       "DERIVED:PEER_COMPARISON_TABLE": 1,
       "DETERMINISTIC:EXPLICIT_MISSING_METRICS": 1,
+      "DETERMINISTIC:SEC_CURRENT_REPORT_COVERAGE": 1,
       "DETERMINISTIC:UPCOMING_EARNINGS_EVENT": 1,
       "PEER_SET:PUBLIC_PEER_SET": 1,
       "SEC_FACT:SELECTED_SEC_FACT": 70,

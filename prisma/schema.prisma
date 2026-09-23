@@ -186,6 +186,7 @@ enum SecFilingSectionKind {
   BUSINESS
   RISK_FACTORS
   MDA
+  PRESS_RELEASE
 }
 
 enum SecFilingExtractionStatus {
@@ -393,6 +394,9 @@ model SecFiling {
   sourceUrl                  String
   isAmendment                Boolean              @default(false)
   amendsAccessionNumber      String?
+  /// Form 8-K item codes (for example "2.02", "9.01") from the submissions
+  /// feed; empty for 10-K and 10-Q filings.
+  itemCodes                  String[]             @default([])
   createdAt                  DateTime             @default(now())
   updatedAt                  DateTime             @updatedAt
   secEntity                  SecEntity            @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
@@ -499,8 +503,9 @@ model SecIngestionRun {
 }
 
 /// The latest section-extraction attempt for one 10-K or 10-Q primary
-/// document. A failed fetch or parse is recorded here per filing so fact
-/// ingestion and page rendering are never blocked by narrative extraction.
+/// document or one 8-K Exhibit 99.1 press release. A failed fetch or parse is
+/// recorded here per filing so fact ingestion and page rendering are never
+/// blocked by narrative extraction.
 model SecFilingExtraction {
   id                String                    @id @default(cuid())
   filingId          String                    @unique

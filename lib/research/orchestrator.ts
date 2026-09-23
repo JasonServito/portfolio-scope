@@ -33,6 +33,7 @@ import {
   type ReportDiffClaim,
 } from "@/lib/research/ai/report-diff";
 import {
+  hasCurrentReportEvidence,
   prepareResearchEvidenceSnapshot,
   type ResearchEvidenceSnapshot,
 } from "@/lib/research/ai/retrieval";
@@ -41,7 +42,9 @@ import {
   stableHash,
   type ResearchEvidence,
 } from "@/lib/research/ai/schemas";
+import { recentEventsFromResearch } from "@/lib/research/recent-events";
 import {
+  initialSpecialistAgentNames,
   scheduledSpecialistAgentNames,
   SPECIALIST_AGENT_NAMES,
   type AgentResult,
@@ -179,6 +182,12 @@ function shapeResearch(
   const order = new Map(ALL_AGENT_NAMES.map((name, index) => [name, index]));
   const report = job.report;
   const snapshotEvidence = parseSnapshotEvidence(job.sourceSnapshotJson);
+  const agents = job.agentRuns
+    .map(asAgentResult)
+    .sort(
+      (a, b) =>
+        (order.get(a.agentName) ?? 99) - (order.get(b.agentName) ?? 99),
+    );
 
   return {
     jobId: job.id,
@@ -188,12 +197,7 @@ function shapeResearch(
     generatedAt: report.generatedAt.toISOString(),
     expiresAt: report.expiresAt.toISOString(),
     generationMode: job.generationMode,
-    agents: job.agentRuns
-      .map(asAgentResult)
-      .sort(
-        (a, b) =>
-          (order.get(a.agentName) ?? 99) - (order.get(b.agentName) ?? 99),
-      ),
+    agents,
     report: {
       rating: report.rating,
       overview: report.overview,
@@ -206,6 +210,7 @@ function shapeResearch(
       whatWouldChange: jsonArray<string>(report.whatWouldChangeJson),
       evidenceCoverage: shapeEvidenceCoverage(report.evidenceCoverageJson),
       upcomingEarnings: upcomingEarningsFromEvidence(snapshotEvidence),
+      recentEvents: recentEventsFromResearch(agents, snapshotEvidence),
     },
     claims: shapeClaims(report),
     evidenceRegistry: shapeEvidenceRegistry(snapshotEvidence),
@@ -532,11 +537,19 @@ export async function runResearch(
   }
 
   const correlationId = randomUUID();
-  const scheduledSpecialists = scheduledSpecialistAgentNames(
-    config
-      ? ResearchGenerationMode.EXTERNAL
-      : ResearchGenerationMode.DETERMINISTIC,
-  );
+  const generationMode = config
+    ? ResearchGenerationMode.EXTERNAL
+    : ResearchGenerationMode.DETERMINISTIC;
+  const scheduledSpecialists = scheduledSpecialistAgentNames(generationMode);
+  // Every scheduled specialist gets a pending run. News is deferred to a
+  // second stage (queued by the first-stage completions in the background
+  // executor) only when the snapshot holds current reports and it will make
+  // a model call whose reservation must not overlap theirs; otherwise it
+  // short-circuits without a reservation and is queued with the others.
+  const initialSpecialists =
+    snapshot && hasCurrentReportEvidence(snapshot)
+      ? initialSpecialistAgentNames(generationMode)
+      : scheduledSpecialists;
   let job;
   try {
     const transactionResult = await db.$transaction(async (transaction) => {
@@ -692,7 +705,7 @@ export async function runResearch(
 
   try {
     await Promise.all(
-      scheduledSpecialists.map((agentName) =>
+      initialSpecialists.map((agentName) =>
         enqueueBackgroundJob(
           {
             type: BackgroundJobType.RESEARCH_AGENT_RUN,

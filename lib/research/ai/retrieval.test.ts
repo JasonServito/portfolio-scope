@@ -7,16 +7,20 @@ import {
   AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
 } from "@/lib/research/ai/config";
 import {
+  AAPL_FIXTURE_CURRENT_REPORTS,
+  aaplFixtureCurrentReports,
   aaplFixtureFilingPassages,
   buildAaplFixtureSnapshot,
 } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import {
   buildResearchEvidenceSnapshot,
+  hasCurrentReportEvidence,
   prepareResearchEvidenceSnapshot,
   ResearchEvidenceSnapshotError,
   selectEvidence,
   selectSpecialistEvidence,
   selectSynthesisEvidence,
+  type CurrentReportRecord,
   type FilingPassageRecord,
   type PublicPeerRecord,
   type PublicStockEvidenceRecord,
@@ -177,6 +181,7 @@ function repository(
     facts?: SecFactEvidenceRecord[];
     peerRecords?: PublicPeerRecord[];
     filingPassages?: FilingPassageRecord[];
+    currentReports?: CurrentReportRecord[];
     job?: Awaited<
       ReturnType<ResearchEvidenceRepository["findResearchJobStock"]>
     >;
@@ -200,6 +205,7 @@ function repository(
     listPeerSecFactCandidates: vi.fn().mockResolvedValue([]),
     findUpcomingEarnings: vi.fn().mockResolvedValue(null),
     listFilingPassages: vi.fn().mockResolvedValue(input.filingPassages ?? []),
+    listCurrentReports: vi.fn().mockResolvedValue(input.currentReports ?? []),
   };
   return value;
 }
@@ -267,6 +273,7 @@ describe("research evidence preparation", () => {
       "FINANCIAL_TREND_EXCERPT",
       "PUBLIC_PEER_SET",
       "PEER_COMPARISON_TABLE",
+      "SEC_CURRENT_REPORT_COVERAGE",
     ]);
     expect(snapshot.sourceDataVersion).toMatch(/^[a-f0-9]{64}$/);
     expect(snapshot.inputDataVersion).toMatch(/^[a-f0-9]{64}$/);
@@ -615,7 +622,7 @@ describe("M31 filing passage evidence", () => {
     );
 
   it("emits bounded, hash-verifiable passages of the latest 10-K and 10-Q with filing provenance", () => {
-    expect(aapl.schemaVersion).toBe("m31-public-evidence-snapshot-v3");
+    expect(aapl.schemaVersion).toBe("m32-public-evidence-snapshot-v4");
     expect(passages.length).toBeGreaterThan(0);
     const perSection = new Map<string, number[]>();
     for (const item of passages) {
@@ -656,7 +663,7 @@ describe("M31 filing passage evidence", () => {
       expect(ordinals.length).toBeLessThanOrEqual(6);
       expect(ordinals).toContain(0);
     }
-    expect(aapl.evidence.length).toBeLessThanOrEqual(160);
+    expect(aapl.evidence.length).toBeLessThanOrEqual(200);
   });
 
   it("routes sections to agents: Risk Factors to Risk, Business to Competitors, MD&A to Financials and Risk", () => {
@@ -836,5 +843,246 @@ describe("M31 filing passage evidence", () => {
       passages.map((item) => item.id),
     );
     expect(JSON.stringify(snapshot)).not.toMatch(/userId|targetPrice|costBasis/i);
+  });
+});
+
+describe("M32 current-report event evidence", () => {
+  const reports = aaplFixtureCurrentReports();
+  const withReports = buildAaplFixtureSnapshot({ currentReports: reports });
+  const without = buildAaplFixtureSnapshot();
+  const events = withReports.evidence.filter(
+    (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT",
+  );
+  const coverage = withReports.evidence.find(
+    (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT_COVERAGE",
+  )!;
+  const pressPassages = withReports.evidence.filter(
+    (item) => item.metadata.sectionKind === "PRESS_RELEASE",
+  );
+
+  it("emits one dated SEC_FILING item per current report, newest first, citing the filing index page", () => {
+    expect(withReports.schemaVersion).toBe("m32-public-evidence-snapshot-v4");
+    expect(hasCurrentReportEvidence(withReports)).toBe(true);
+    expect(events.map((item) => item.metadata.accessionNumber)).toEqual([
+      AAPL_FIXTURE_CURRENT_REPORTS.results.accessionNumber,
+      AAPL_FIXTURE_CURRENT_REPORTS.resultsWithoutExhibit.accessionNumber,
+      AAPL_FIXTURE_CURRENT_REPORTS.shareholderVote.accessionNumber,
+    ]);
+    const results = events[0];
+    expect(results).toMatchObject({
+      sourceKind: "SEC_FILING",
+      accessionNumber: "0000320193-26-000019",
+      section: "Items 2.02, 9.01",
+      sourceDate: "2026-07-30",
+      secFilingId: "filing-aapl-8k-results-fixture",
+      passageStart: null,
+      passageEnd: null,
+      sha256: null,
+    });
+    expect(results.sourceUrl).toBe(
+      "https://www.sec.gov/Archives/edgar/data/320193/000032019326000019/0000320193-26-000019-index.html",
+    );
+    expect(results.excerpt).toContain("Form 8-K filed 2026-07-30. Items:");
+    expect(events[2].excerpt).toContain(
+      "Form 8-K filed 2026-02-26 for events dated 2026-02-24.",
+    );
+    expect(results.excerpt).toContain(
+      "2.02 (Results of Operations and Financial Condition)",
+    );
+    expect(results.excerpt).toMatch(/Exhibit 99\.1 press release: \d+ passages supplied/);
+    expect(results.metadata).toMatchObject({
+      formType: "8-K",
+      itemCodes: ["2.02", "9.01"],
+      exhibitState: "EXTRACTED",
+      agentNames: ["NEWS", "SYNTHESIS"],
+      mandatoryAgentNames: ["NEWS"],
+    });
+    expect(events[1].metadata).toMatchObject({
+      exhibitState: "NOT_EXTRACTED",
+      exhibitErrorCode: "SEC_FILING_EXHIBIT_NOT_FOUND",
+      exhibitPassagesSupplied: 0,
+    });
+    expect(events[1].excerpt).toContain(
+      "not available (the filing index lists no press-release exhibit)",
+    );
+    expect(events[1].excerpt).not.toContain("SEC_FILING_EXHIBIT_NOT_FOUND");
+    expect(events[2].metadata).toMatchObject({
+      itemCodes: ["5.07"],
+      exhibitState: "NOT_EXPECTED",
+    });
+    expect(events[2].excerpt).toContain("No press-release exhibit is expected");
+    expect(JSON.stringify(withReports)).not.toMatch(/userId|targetPrice|costBasis/i);
+  });
+
+  it("chunks the press release into hash-verifiable passages routed to News and synthesis", () => {
+    expect(pressPassages.length).toBeGreaterThan(0);
+    expect(pressPassages.length).toBeLessThanOrEqual(6);
+    for (const passage of pressPassages) {
+      expect(passage).toMatchObject({
+        sourceKind: "SEC_FILING",
+        accessionNumber: "0000320193-26-000019",
+        section: "Exhibit 99.1 Press Release",
+        sourceDate: "2026-07-30",
+        secFilingId: "filing-aapl-8k-results-fixture",
+        secRawSourceId: "raw-aapl-8k-exhibit-fixture",
+      });
+      expect(passage.sourceUrl).toMatch(
+        /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\/320193\/000032019326000019\/a8-kex991q3202606272026\.htm$/,
+      );
+      expect(passage.metadata).toMatchObject({
+        evidenceType: "SEC_FILING_PASSAGE",
+        formType: "8-K",
+        itemCodes: ["2.02", "9.01"],
+        agentNames: ["NEWS", "SYNTHESIS"],
+      });
+      expect(passage.title).toContain("8-K Exhibit 99.1 Press Release (filed 2026-07-30)");
+    }
+    expect(pressPassages.some((item) => item.metadata.chunkOrdinal === 0)).toBe(true);
+    expect(events[0].metadata.exhibitPassagesSupplied).toBe(pressPassages.length);
+    // The exhibit's passages come only from a listed results filing.
+    expect(
+      withReports.evidence.filter(
+        (item) => item.secFilingId === "filing-aapl-8k-results-pending-fixture",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("states the window coverage explicitly, including when no current report is stored", () => {
+    expect(coverage).toMatchObject({
+      sourceKind: "DETERMINISTIC",
+      section: "Recent events policy",
+      metadata: {
+        agentNames: ["NEWS"],
+        mandatoryAgentNames: ["NEWS"],
+        reportCount: 3,
+        listedCount: 3,
+        resultsFilings: 2,
+        resultsFilingsExtracted: 1,
+        newestFilingDate: "2026-07-30",
+      },
+    });
+    expect(coverage.excerpt).toContain("3 Form 8-K current reports");
+    expect(coverage.excerpt).toContain("nothing after the newest filing date is known");
+
+    expect(hasCurrentReportEvidence(without)).toBe(false);
+    const none = without.evidence.find(
+      (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT_COVERAGE",
+    )!;
+    expect(none.excerpt).toContain("No Form 8-K current report");
+    expect(none.metadata.reportCount).toBe(0);
+    expect(
+      without.evidence.filter((item) => item.metadata.formType === "8-K"),
+    ).toEqual([]);
+  });
+
+  it("keeps the M29 and M31 evidence in place ahead of the current-report items", () => {
+    const types = withReports.evidence.map((item) => item.metadata.evidenceType);
+    const firstEvent = types.indexOf("SEC_CURRENT_REPORT_COVERAGE");
+    expect(firstEvent).toBeGreaterThan(types.indexOf("PEER_COMPARISON_TABLE"));
+    expect(firstEvent).toBeGreaterThan(types.indexOf("UPCOMING_EARNINGS_EVENT"));
+    expect(firstEvent).toBeLessThan(types.indexOf("SEC_FILING_PASSAGE"));
+    const periodic = (snapshot: typeof withReports) =>
+      snapshot.evidence.filter(
+        (item) =>
+          item.metadata.evidenceType !== "SEC_CURRENT_REPORT" &&
+          item.metadata.evidenceType !== "SEC_CURRENT_REPORT_COVERAGE" &&
+          item.metadata.sectionKind !== "PRESS_RELEASE",
+      );
+    expect(periodic(withReports).map((item) => item.id)).toEqual(
+      periodic(without).map((item) => item.id),
+    );
+    expect(withReports.evidence.length).toBeLessThanOrEqual(200);
+  });
+
+  it("gives News every listed report first, then press-release passages, and nothing from the periodic filings", () => {
+    const selection = selectSpecialistEvidence(withReports, "NEWS");
+    const types = selection.evidence.map((item) => item.metadata.evidenceType);
+    expect(selection.mandatoryEvidenceIds).toEqual(
+      expect.arrayContaining([coverage.id, ...events.map((item) => item.id)]),
+    );
+    expect(types.slice(0, 1 + events.length)).toEqual(
+      expect.arrayContaining(["SEC_CURRENT_REPORT_COVERAGE", "SEC_CURRENT_REPORT"]),
+    );
+    expect(
+      selection.evidence.some(
+        (item) => item.metadata.sectionKind === "PRESS_RELEASE",
+      ),
+    ).toBe(true);
+    expect(
+      selection.evidence.every(
+        (item) =>
+          item.metadata.evidenceType !== "SEC_FILING_PASSAGE" ||
+          item.metadata.sectionKind === "PRESS_RELEASE",
+      ),
+    ).toBe(true);
+    expect(selection.contextCharacters).toBeLessThanOrEqual(
+      AI_SPECIALIST_CONTEXT_CHAR_BUDGETS.NEWS,
+    );
+    for (const agent of ["FINANCIALS", "COMPETITORS", "RISK"] as const) {
+      const other = selectSpecialistEvidence(withReports, agent);
+      expect(
+        other.evidence.some(
+          (item) =>
+            item.metadata.evidenceType === "SEC_CURRENT_REPORT" ||
+            item.metadata.sectionKind === "PRESS_RELEASE",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("is deterministic regardless of report ordering, lists at most four reports, and always keeps the newest results filing", () => {
+    const reversed = buildAaplFixtureSnapshot({
+      currentReports: [...reports].reverse(),
+    });
+    expect(reversed.sourceSnapshotSha256).toBe(withReports.sourceSnapshotSha256);
+
+    // Seven later 8-Ks about other items would push the results filing (and
+    // its press release) out of the four newest.
+    const many = Array.from({ length: 7 }, (_, index) => ({
+      ...reports[2],
+      id: `filing-many-${index}`,
+      accessionNumber: `0000320193-26-0001${String(index).padStart(2, "0")}`,
+      filingDate: new Date(Date.UTC(2026, 7, 1 + index)),
+      reportDate: new Date(Date.UTC(2026, 7, 1 + index)),
+    }));
+    const crowded = buildAaplFixtureSnapshot({ currentReports: [...many, reports[0]] });
+    const listed = crowded.evidence.filter(
+      (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT",
+    );
+    expect(listed).toHaveLength(4);
+    expect(listed.map((item) => item.metadata.accessionNumber)).toEqual([
+      many[6].accessionNumber,
+      many[5].accessionNumber,
+      many[4].accessionNumber,
+      reports[0].accessionNumber,
+    ]);
+    expect(
+      crowded.evidence.filter((item) => item.metadata.sectionKind === "PRESS_RELEASE")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      crowded.evidence.find(
+        (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT_COVERAGE",
+      )!.excerpt,
+    ).toContain("The 4 most recent are listed");
+  });
+
+  it("reads current reports through the repository for the twelve-month window and threads them into the prepared snapshot", async () => {
+    const source = repository({ currentReports: reports });
+    const now = () => new Date("2026-09-22T12:00:00.000Z");
+    const prepared = await prepareResearchEvidenceSnapshot(
+      { stockId: publicStock.id, ticker: "AAPL", companyName: "Apple Inc." },
+      { repository: source, now },
+    );
+
+    expect(source.listCurrentReports).toHaveBeenCalledWith({
+      secEntityId: "sec-apple",
+      filedOnOrAfter: new Date("2025-09-22T00:00:00.000Z"),
+    });
+    expect(
+      prepared.evidence.filter(
+        (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT",
+      ),
+    ).toHaveLength(3);
   });
 });

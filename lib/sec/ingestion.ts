@@ -11,8 +11,10 @@ import {
   buildSecCompanyFactsUrl,
   buildSecSubmissionsUrl,
 } from "@/lib/sec/client";
+import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 import { getCachedSecEdgarClient } from "@/lib/sec/cached-client";
 import { getSupportedCompany } from "@/lib/sec/company-registry";
+import { currentReportWindowStart } from "@/lib/sec/current-reports";
 import {
   normalizeCompanyFacts,
   parseRecentFilings,
@@ -115,6 +117,8 @@ type IngestionDependencies = {
   client?: IngestionClient;
   storage?: ObjectStorage;
   storageEnvironment?: Record<string, string | undefined>;
+  /** Feature-flag source; 8-K retention follows `SEC_CURRENT_REPORTS_ENABLED`. */
+  environment?: NodeJS.ProcessEnv;
   now?: () => Date;
   logger?: SecDiagnosticLogger;
 };
@@ -447,7 +451,16 @@ export async function ingestSupportedCompany(
 
     stage = "filing-normalization";
     operation = "parse-recent-filings";
-    const filings = parseRecentFilings(submissions, supportedCompany.cik);
+    // 8-K metadata is retained only where the M32 capability is enabled, so
+    // the original 10-K and 10-Q filing set is unchanged elsewhere.
+    const filings = parseRecentFilings(submissions, supportedCompany.cik, {
+      currentReportsFiledOnOrAfter: isFeatureEnabled(
+        "SEC_CURRENT_REPORTS_ENABLED",
+        dependencies.environment ?? process.env,
+      )
+        ? currentReportWindowStart(startedAt)
+        : null,
+    });
     stage = "filing-database-persistence";
     operation = "save-filings";
     const filingIds = await runDatabaseOperation("save-filings", () =>
