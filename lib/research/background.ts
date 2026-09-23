@@ -1429,7 +1429,14 @@ export async function executeResearchSynthesis(
       partial: true,
     };
   }
-  const evidenceSelection = selectSynthesisEvidence(snapshot);
+  // Synthesis receives the evidence behind the specialists' claims (filing
+  // passages included) after its owned structured evidence, so a claim can
+  // be carried forward with the citation that grounded it.
+  const evidenceSelection = selectSynthesisEvidence(snapshot, {
+    specialistClaims: typedSpecialists.flatMap(
+      (specialist) => specialist.output.claims,
+    ),
+  });
   const evidence = [...evidenceSelection.evidence];
 
   let output: SynthesisModelOutput;

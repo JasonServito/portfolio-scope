@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import {
   assembleResearchEvidenceSnapshot,
+  type FilingPassageRecord,
   type PeerSecFactRecord,
   type PublicPeerRecord,
   type PublicStockEvidenceRecord,
@@ -7,6 +12,8 @@ import {
   type SecFactEvidenceRecord,
   type UpcomingEarningsRecord,
 } from "@/lib/research/ai/retrieval";
+import { buildSecFilingIndexUrl, buildSecFilingUrl } from "@/lib/sec/client";
+import { extractFilingSections } from "@/lib/sec/filing-sections";
 import { normalizeCompanyFacts } from "@/lib/sec/normalization";
 import { secCompanyFactsSchema } from "@/lib/sec/schemas";
 import aaplCompanyFacts from "@/tests/fixtures/sec/aapl-companyfacts-history.json";
@@ -16,7 +23,9 @@ import nvdaCompanyFacts from "@/tests/fixtures/sec/nvda-companyfacts-history.jso
 /**
  * A deterministic AAPL research evidence snapshot assembled offline from the
  * checked-in, clipped SEC Company Facts fixtures (public EDGAR data captured
- * 2026-09-22). No database, network, or provider is involved.
+ * 2026-09-22) and the synthetic recorded-shape 10-K and 10-Q primary-document
+ * fixtures parsed by the real section parser. No database, network, or
+ * provider is involved.
  */
 
 const OBSERVED_AT = new Date("2026-09-22T00:00:00.000Z");
@@ -135,6 +144,97 @@ export const AAPL_FIXTURE_UPCOMING_EARNINGS: UpcomingEarningsRecord = {
   fetchedAt: RETRIEVED_AT,
 };
 
+export type FilingPassageFixtureIds = {
+  filingId: string;
+  rawSourceId: string;
+  accessionNumber: string;
+};
+
+/** Filing identity for each fixture document; tests may re-key them per run. */
+export const AAPL_FIXTURE_FILING_DOCUMENTS = {
+  "10-K": {
+    file: "aapl-10k-primary-document-clipped.htm",
+    filingId: "filing-aapl-10k-fixture",
+    rawSourceId: "raw-aapl-10k-document-fixture",
+    accessionNumber: "0000320193-25-000079",
+    filingDate: "2025-10-31",
+    reportDate: "2025-09-27",
+    primaryDocument: "aapl-20250927.htm",
+  },
+  "10-Q": {
+    file: "aapl-10q-primary-document-clipped.htm",
+    filingId: "filing-aapl-10q-fixture",
+    rawSourceId: "raw-aapl-10q-document-fixture",
+    accessionNumber: "0000320193-26-000020",
+    filingDate: "2026-07-31",
+    reportDate: "2026-06-27",
+    primaryDocument: "aapl-20260627.htm",
+  },
+} as const;
+
+export function aaplFixtureFilingPassages(
+  overrides: Partial<
+    Record<keyof typeof AAPL_FIXTURE_FILING_DOCUMENTS, FilingPassageFixtureIds>
+  > = {},
+): FilingPassageRecord[] {
+  return (
+    Object.keys(AAPL_FIXTURE_FILING_DOCUMENTS) as Array<
+      keyof typeof AAPL_FIXTURE_FILING_DOCUMENTS
+    >
+  ).flatMap((formType) => {
+    const fixture = AAPL_FIXTURE_FILING_DOCUMENTS[formType];
+    const ids = overrides[formType] ?? fixture;
+    const html = readFileSync(
+      join(process.cwd(), "tests", "fixtures", "sec", fixture.file),
+      "utf8",
+    );
+    const body = Buffer.from(html, "utf8");
+    const documentSha256 = createHash("sha256").update(body).digest("hex");
+    const extraction = extractFilingSections(html, formType);
+    const filing = {
+      id: ids.filingId,
+      accessionNumber: ids.accessionNumber,
+      formType,
+      filingDate: new Date(`${fixture.filingDate}T00:00:00.000Z`),
+      reportDate: new Date(`${fixture.reportDate}T00:00:00.000Z`),
+      primaryDocument: fixture.primaryDocument,
+      sourceUrl: buildSecFilingIndexUrl("0000320193", ids.accessionNumber),
+    };
+    const rawSource = {
+      id: ids.rawSourceId,
+      kind: "FILING_DOCUMENT",
+      sourceUrl: buildSecFilingUrl(
+        "0000320193",
+        ids.accessionNumber,
+        fixture.primaryDocument,
+      ),
+      objectKey: `sec/0000320193/filings/${documentSha256}.htm`,
+      sha256: documentSha256,
+      contentType: "text/html",
+      byteLength: String(body.byteLength),
+      firstRetrievedAt: RETRIEVED_AT,
+      lastRetrievedAt: RETRIEVED_AT,
+    };
+    return extraction.sections.flatMap((section) =>
+      section.chunks.map((chunk) => ({
+        id: `${ids.filingId}-${section.kind.toLowerCase()}-${chunk.ordinal}`,
+        filingId: ids.filingId,
+        rawSourceId: ids.rawSourceId,
+        sectionKind: section.kind,
+        sectionLabel: section.label,
+        ordinal: chunk.ordinal,
+        passageStart: chunk.passageStart,
+        passageEnd: chunk.passageEnd,
+        sha256: chunk.sha256,
+        text: chunk.text,
+        parserVersion: extraction.parserVersion,
+        filing,
+        rawSource,
+      })),
+    );
+  });
+}
+
 function normalized(fixture: unknown, cik: string) {
   return normalizeCompanyFacts(secCompanyFactsSchema.parse(fixture), {
     cik,
@@ -229,6 +329,7 @@ export function buildAaplFixtureSnapshot(
     upcomingEarnings: UpcomingEarningsRecord | null;
     peerRecords: PublicPeerRecord[];
     peerFactCandidates: PeerSecFactRecord[];
+    filingPassages: FilingPassageRecord[];
   }> = {},
 ): ResearchEvidenceSnapshot {
   return assembleResearchEvidenceSnapshot({
@@ -241,12 +342,13 @@ export function buildAaplFixtureSnapshot(
       overrides.upcomingEarnings === undefined
         ? AAPL_FIXTURE_UPCOMING_EARNINGS
         : overrides.upcomingEarnings,
+    filingPassages: overrides.filingPassages ?? aaplFixtureFilingPassages(),
   });
 }
 
 export function findFixtureEvidence(
   snapshot: ResearchEvidenceSnapshot,
-  metadata: Record<string, string>,
+  metadata: Record<string, string | number>,
 ) {
   const found = snapshot.evidence.find((item) =>
     Object.entries(metadata).every(

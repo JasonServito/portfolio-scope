@@ -1,8 +1,10 @@
 import { z } from "zod";
 
+import type { SpecialistAgentName } from "@/lib/research/types";
+
 export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
-export const AI_PROMPT_VERSION = "m30-research-v2";
-export const AI_RETRIEVAL_VERSION = "m29-structured-lexical-v1";
+export const AI_PROMPT_VERSION = "m31-research-v3";
+export const AI_RETRIEVAL_VERSION = "m31-structured-lexical-v2";
 export const AI_OUTPUT_SCHEMA_VERSION = "m30-claims-v2";
 export const AI_REPORT_VERSION = "m30-report-v2";
 export const AI_SPECIALIST_AGENT_VERSION = "m30-specialist-v2";
@@ -20,8 +22,28 @@ export const AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL = 2_000;
 // contract, so the evidence context was lowered from 8,000 characters; the
 // owned structured evidence still fits in full.
 export const AI_SPECIALIST_CONTEXT_CHAR_BUDGET = 7_200;
+// M31 rebalances the three model specialists so each can receive at least one
+// filing passage after its owned structured evidence: Financials' owned
+// tables filled its budget, while Competitors owns little structured
+// evidence. The sum (20,900) is below three uniform budgets because the M31
+// filing-passage prompt rule and purposes spend part of the concurrent
+// reservation envelope checked in prompt-budget.test.ts; Financials' budget
+// holds its owned evidence plus one MD&A passage with room for longer tickers
+// and titles.
+export const AI_SPECIALIST_CONTEXT_CHAR_BUDGETS: Record<
+  SpecialistAgentName,
+  number
+> = {
+  FINANCIALS: 8_500,
+  COMPETITORS: 5_600,
+  RISK: 6_800,
+  NEWS: AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+  POLITICAL_ACTIVITY: AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+};
 export const AI_SPECIALIST_MAX_EVIDENCE_ITEMS = 16;
-export const AI_SYNTHESIS_CONTEXT_CHAR_BUDGET = 7_000;
+// Synthesis runs after the specialists settle, so its budget can carry the
+// filing passages the specialists cited; the envelope test bounds it.
+export const AI_SYNTHESIS_CONTEXT_CHAR_BUDGET = 8_600;
 export const AI_SYNTHESIS_MAX_EVIDENCE_ITEMS = 16;
 // Serialized specialist outputs forwarded to synthesis. All validated claims
 // are forwarded unless the payload would push the job past its token cap; the

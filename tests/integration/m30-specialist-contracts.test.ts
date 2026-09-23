@@ -18,10 +18,12 @@ import {
 } from "@/lib/research/ai/config";
 import { computeEvidenceCoverage } from "@/lib/research/ai/evidence-coverage";
 import {
+  AAPL_FIXTURE_FILING_DOCUMENTS,
   AAPL_FIXTURE_PEERS,
   AAPL_FIXTURE_STOCK,
   AAPL_FIXTURE_UPCOMING_EARNINGS,
   aaplFixtureFactCandidates,
+  aaplFixtureFilingPassages,
   aaplFixturePeerFactCandidates,
 } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import {
@@ -50,8 +52,37 @@ const ids = {
   faultUser: `${prefix}-fault-user`,
   legacyUser: `${prefix}-legacy-user`,
   stock: `${prefix}-stock`,
+  subjectCompany: `${prefix}-subject-company`,
+  subjectEntity: `${prefix}-subject-entity`,
+  filing10k: `${prefix}-filing-10k`,
+  filing10q: `${prefix}-filing-10q`,
+  raw10k: `${prefix}-raw-10k`,
+  raw10q: `${prefix}-raw-10q`,
 };
 const fixtureUserIds = [ids.user, ids.faultUser, ids.legacyUser];
+const subjectCik = String(
+  (Number.parseInt(runId.slice(8, 16), 16) % 1_000_000_000) + 2,
+).padStart(10, "0");
+// Run-specific accession numbers keep the fixture filings unique per run.
+const accessionSuffix = String(
+  Number.parseInt(runId.slice(16, 22), 16) % 1_000_000,
+).padStart(6, "0");
+const accessions = {
+  "10-K": `0000320193-93-${accessionSuffix}`,
+  "10-Q": `0000320193-92-${accessionSuffix}`,
+} as const;
+const filingPassages = aaplFixtureFilingPassages({
+  "10-K": {
+    filingId: ids.filing10k,
+    rawSourceId: ids.raw10k,
+    accessionNumber: accessions["10-K"],
+  },
+  "10-Q": {
+    filingId: ids.filing10q,
+    rawSourceId: ids.raw10q,
+    accessionNumber: accessions["10-Q"],
+  },
+});
 
 const environment = {
   NODE_ENV: "test",
@@ -84,6 +115,7 @@ const snapshot = assembleResearchEvidenceSnapshot({
   peerRecords: AAPL_FIXTURE_PEERS,
   peerFactCandidates: aaplFixturePeerFactCandidates(),
   upcomingEarnings: AAPL_FIXTURE_UPCOMING_EARNINGS,
+  filingPassages,
 });
 
 const evidenceIdByReference = new Map(
@@ -93,7 +125,17 @@ const fixtureReferenceById = new Map(
   CURATED_AAPL_SNAPSHOT.evidence.map((item) => [item.id, item.sourceReference]),
 );
 function rekey(id: string) {
-  const reference = fixtureReferenceById.get(id)!.replaceAll("AAPL", ticker);
+  const reference = fixtureReferenceById
+    .get(id)!
+    .replaceAll("AAPL", ticker)
+    .replaceAll(
+      AAPL_FIXTURE_FILING_DOCUMENTS["10-K"].accessionNumber,
+      accessions["10-K"],
+    )
+    .replaceAll(
+      AAPL_FIXTURE_FILING_DOCUMENTS["10-Q"].accessionNumber,
+      accessions["10-Q"],
+    );
   const mapped = evidenceIdByReference.get(reference);
   if (!mapped) throw new Error(`No run evidence for ${reference}`);
   return mapped;
@@ -191,6 +233,7 @@ async function cleanup() {
   });
   await db.user.deleteMany({ where: { id: { in: fixtureUserIds } } });
   await db.stock.deleteMany({ where: { id: ids.stock } });
+  await db.company.deleteMany({ where: { id: ids.subjectCompany } });
 }
 
 beforeAll(async () => {
@@ -215,6 +258,51 @@ beforeAll(async () => {
       sector: snapshot.stock.sector,
       industry: snapshot.stock.industry,
       exchange: snapshot.stock.exchange,
+    },
+  });
+  // Filing and raw-document rows behind the fixture passages, so persisted
+  // passage citations can hold their filing and object-store foreign keys.
+  const passageFilings = (["10-K", "10-Q"] as const).map(
+    (formType) =>
+      filingPassages.find((passage) => passage.filing.formType === formType)!,
+  );
+  await db.company.create({
+    data: {
+      id: ids.subjectCompany,
+      slug: `${prefix}-subject`,
+      name: "Subject Filing Fixture",
+      isSupported: true,
+      secEntity: {
+        create: {
+          id: ids.subjectEntity,
+          cik: subjectCik,
+          legalName: "Subject Filing Fixture Inc.",
+          filings: {
+            create: passageFilings.map((record) => ({
+              id: record.filing.id,
+              accessionNumber: record.filing.accessionNumber,
+              formType: record.filing.formType,
+              filingDate: record.filing.filingDate as Date,
+              reportDate: record.filing.reportDate as Date,
+              primaryDocument: record.filing.primaryDocument,
+              sourceUrl: record.filing.sourceUrl,
+            })),
+          },
+          rawSources: {
+            create: passageFilings.map((record) => ({
+              id: record.rawSource.id,
+              kind: "FILING_DOCUMENT" as const,
+              sourceUrl: record.rawSource.sourceUrl,
+              objectKey: `sec/${subjectCik}/filings/${record.rawSource.sha256}.htm`,
+              sha256: record.rawSource.sha256,
+              contentType: "text/html",
+              byteLength: Number(String(record.rawSource.byteLength)),
+              firstRetrievedAt: record.rawSource.firstRetrievedAt as Date,
+              lastRetrievedAt: record.rawSource.lastRetrievedAt as Date,
+            })),
+          },
+        },
+      },
     },
   });
 });
@@ -534,7 +622,23 @@ describe("M30 specialist contracts and calibration", () => {
       },
     });
 
-    const provider = recordedProvider([recordedOutputs.SYNTHESIS]);
+    // Legacy specialists forward no claims, so synthesis receives no filing
+    // passage and the replayed output must not cite one.
+    const passageIds = new Set(
+      snapshot.evidence
+        .filter((item) => item.sourceKind === "SEC_FILING")
+        .map((item) => item.id),
+    );
+    const legacySynthesis = {
+      ...recordedOutputs.SYNTHESIS,
+      claims: recordedOutputs.SYNTHESIS.claims.filter(
+        (claim) =>
+          ![...claim.evidenceIds, ...claim.counterEvidenceIds].some((id) =>
+            passageIds.has(id),
+          ),
+      ),
+    };
+    const provider = recordedProvider([legacySynthesis]);
     const generate = vi.spyOn(provider, "generate");
     await executeResearchSynthesis(
       { researchJobId: queued.jobId, userId: ids.legacyUser },

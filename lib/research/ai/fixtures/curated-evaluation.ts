@@ -12,12 +12,13 @@ import {
 
 /**
  * Curated offline evaluation cases rebuilt for M29 from the checked-in AAPL
- * SEC fixtures and re-recorded for the M30 specialist contract (claim kinds,
- * availability, and "what would change"). The evidence is the exact
- * deterministic snapshot the runtime would build; the outputs are reviewed
- * recorded responses (a grounded report and a deliberately flawed one). Usage
- * and latency are recorded estimates for the m29 context and output limits,
- * not provider-billed measurements.
+ * SEC fixtures, re-recorded for the M30 specialist contract (claim kinds,
+ * availability, and "what would change"), and extended for M31 with claims
+ * that cite filing passages from the synthetic recorded-shape 10-K and 10-Q
+ * fixtures. The evidence is the exact deterministic snapshot the runtime
+ * would build; the outputs are reviewed recorded responses (a grounded report
+ * and a deliberately flawed one). Usage and latency are recorded estimates
+ * for the m29 context and output limits, not provider-billed measurements.
  */
 
 export const CURATED_AAPL_SNAPSHOT = buildAaplFixtureSnapshot();
@@ -46,6 +47,20 @@ const annualFreeCashFlowMargin = derived("FREE_CASH_FLOW_MARGIN", "ANNUAL");
 const netCash = derived("NET_CASH", "INSTANT");
 const debtToEquity = derived("DEBT_TO_EQUITY", "INSTANT");
 const currentRatio = derived("CURRENT_RATIO", "INSTANT");
+// Filing passages each specialist actually receives from the fixture 10-K:
+// the Risk Factors summary and the MD&A net-sales-by-category passage.
+const riskFactorsSummaryPassage = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
+  evidenceType: "SEC_FILING_PASSAGE",
+  formType: "10-K",
+  sectionKind: "RISK_FACTORS",
+  chunkOrdinal: 1,
+});
+const salesByCategoryPassage = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
+  evidenceType: "SEC_FILING_PASSAGE",
+  formType: "10-K",
+  sectionKind: "MDA",
+  chunkOrdinal: 1,
+});
 
 // Each specialist may only cite evidence inside its own retrieval selection,
 // so the recorded outputs cite the structured items that agent owns.
@@ -134,6 +149,30 @@ const trendCoverageClaim: ModelClaim = {
   assumptions: [],
 };
 
+const regulatoryDisclosureClaim: ModelClaim = {
+  category: "RISK",
+  kind: "FACT",
+  statement:
+    "The 10-K risk factors summary discloses legal and regulatory compliance risks, including antitrust and digital-market regulation affecting the Company's app distribution and payment practices, evolving data protection laws, and unfavorable outcomes of legal proceedings and government investigations.",
+  confidence: 0.8,
+  evidenceIds: [riskFactorsSummaryPassage.id],
+  counterEvidenceIds: [],
+  assumptions: [
+    "The passage is the company's own disclosure, not an independent assessment of the exposure.",
+  ],
+};
+
+const salesDriverClaim: ModelClaim = {
+  category: "SUPPORTIVE",
+  kind: "FACT",
+  statement:
+    "Management attributes the 2025 increase in smartphone net sales primarily to higher net sales of the latest models, partially offset by lower net sales of prior-generation models, and the increase in services net sales primarily to advertising, the digital content store and cloud services.",
+  confidence: 0.78,
+  evidenceIds: [salesByCategoryPassage.id],
+  counterEvidenceIds: [],
+  assumptions: [],
+};
+
 const eventClaim: ModelClaim = {
   category: "RISK",
   kind: "FACT",
@@ -149,7 +188,7 @@ export const AAPL_GROUNDED_SYNTHESIS: SynthesisModelOutput = {
   rating: "MIXED",
   confidence: 0.74,
   summary:
-    "Derived growth, margins, and cash generation from the selected SEC facts are strong, while derived net cash is negative and peer operating margins are higher. Quarterly cash-flow coverage is incomplete and no licensed news evidence is available. This is educational research, not financial advice.",
+    "Derived growth, margins, and cash generation from the selected SEC facts are strong, while derived net cash is negative and peer operating margins are higher. The 10-K risk factors disclose antitrust and digital-market regulation affecting app distribution and payments. Quarterly cash-flow coverage is incomplete and no licensed news evidence is available. This is educational research, not financial advice.",
   claims: [
     growthClaim,
     cashGenerationClaim,
@@ -157,6 +196,7 @@ export const AAPL_GROUNDED_SYNTHESIS: SynthesisModelOutput = {
     peerClaim,
     trendCoverageClaim,
     eventClaim,
+    regulatoryDisclosureClaim,
   ],
   warnings: [
     "Derived values are calculated from cited SEC facts and are not reported by the filer.",
@@ -183,10 +223,11 @@ export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
     confidence: 0.82,
     availability: "COMPLETE",
     summary:
-      "Selected SEC facts and derived metrics show growing revenue, expanding margins, and strong cash generation for the latest annual and quarterly periods, with quarterly cash-flow data available only for some quarters.",
+      "Selected SEC facts and derived metrics show growing revenue, expanding margins, and strong cash generation for the latest annual and quarterly periods, with the 10-K attributing the sales increase to the latest smartphone models and services, and quarterly cash-flow data available only for some quarters.",
     claims: [
       financialsGrowthClaim,
       financialsCashGenerationClaim,
+      salesDriverClaim,
       trendCoverageClaim,
     ],
     warnings: [
@@ -209,11 +250,16 @@ export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
     confidence: 0.76,
     availability: "COMPLETE",
     summary:
-      "Balance-sheet evidence shows negative derived net cash and a current ratio near one, quarterly cash-flow coverage is incomplete, and an upcoming earnings event is scheduled. No regulatory, governance, or political evidence is supplied.",
-    claims: [riskLeverageClaim, liquidityClaim, eventClaim],
+      "Balance-sheet evidence shows negative derived net cash and a current ratio near one, quarterly cash-flow coverage is incomplete, an upcoming earnings event is scheduled, and the 10-K risk factors disclose antitrust and digital-market regulatory exposure.",
+    claims: [
+      riskLeverageClaim,
+      liquidityClaim,
+      eventClaim,
+      regulatoryDisclosureClaim,
+    ],
     warnings: [],
     missingData: [
-      "No regulatory, governance, or political-exposure evidence is supplied.",
+      "No political-activity evidence beyond the company's own risk factor disclosure is supplied.",
     ],
   },
 };

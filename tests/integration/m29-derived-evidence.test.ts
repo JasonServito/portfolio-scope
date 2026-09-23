@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { ResearchGenerationMode, ResearchStatus } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -11,10 +11,12 @@ import {
   getAiResearchConfig,
 } from "@/lib/research/ai/config";
 import {
+  AAPL_FIXTURE_FILING_DOCUMENTS,
   AAPL_FIXTURE_PEERS,
   AAPL_FIXTURE_STOCK,
   AAPL_FIXTURE_UPCOMING_EARNINGS,
   aaplFixtureFactCandidates,
+  aaplFixtureFilingPassages,
   aaplFixturePeerFactCandidates,
   findFixtureEvidence,
 } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
@@ -49,10 +51,39 @@ const ids = {
   peerCompany: `${prefix}-peer-company`,
   peerEntity: `${prefix}-peer-entity`,
   peerRawSource: `${prefix}-peer-raw`,
+  subjectCompany: `${prefix}-subject-company`,
+  subjectEntity: `${prefix}-subject-entity`,
+  filing10k: `${prefix}-filing-10k`,
+  filing10q: `${prefix}-filing-10q`,
+  raw10k: `${prefix}-raw-10k`,
+  raw10q: `${prefix}-raw-10q`,
 };
 const peerCik = String(Number.parseInt(runId.slice(0, 8), 16) % 1_000_000_000)
   .padStart(10, "0");
+const subjectCik = String(
+  (Number.parseInt(runId.slice(8, 16), 16) % 1_000_000_000) + 1,
+).padStart(10, "0");
 const peerRetrievedAt = new Date("2026-09-21T12:00:00.000Z");
+// Run-specific accession numbers keep the fixture filings unique per run.
+const accessionSuffix = String(
+  Number.parseInt(runId.slice(16, 22), 16) % 1_000_000,
+).padStart(6, "0");
+const accessions = {
+  "10-K": `0000320193-95-${accessionSuffix}`,
+  "10-Q": `0000320193-94-${accessionSuffix}`,
+} as const;
+const filingPassages = aaplFixtureFilingPassages({
+  "10-K": {
+    filingId: ids.filing10k,
+    rawSourceId: ids.raw10k,
+    accessionNumber: accessions["10-K"],
+  },
+  "10-Q": {
+    filingId: ids.filing10q,
+    rawSourceId: ids.raw10q,
+    accessionNumber: accessions["10-Q"],
+  },
+});
 
 function peerFact(input: {
   metric: string;
@@ -122,10 +153,12 @@ const snapshot = assembleResearchEvidenceSnapshot({
   peerRecords: AAPL_FIXTURE_PEERS,
   peerFactCandidates: aaplFixturePeerFactCandidates(),
   upcomingEarnings: AAPL_FIXTURE_UPCOMING_EARNINGS,
+  filingPassages,
 });
 
-// Evidence ids hash the source reference, which embeds the ticker, so the
-// recorded AAPL outputs are re-keyed to this run's snapshot by reference.
+// Evidence ids hash the source reference, which embeds the ticker (and, for
+// filing passages, the accession), so the recorded AAPL outputs are re-keyed
+// to this run's snapshot by reference.
 const evidenceIdByReference = new Map(
   snapshot.evidence.map((item) => [item.sourceReference, item.id]),
 );
@@ -133,10 +166,32 @@ const fixtureReferenceById = new Map(
   CURATED_AAPL_SNAPSHOT.evidence.map((item) => [item.id, item.sourceReference]),
 );
 function rekey(id: string) {
-  const reference = fixtureReferenceById.get(id)!.replaceAll("AAPL", ticker);
+  const reference = fixtureReferenceById
+    .get(id)!
+    .replaceAll("AAPL", ticker)
+    .replaceAll(
+      AAPL_FIXTURE_FILING_DOCUMENTS["10-K"].accessionNumber,
+      accessions["10-K"],
+    )
+    .replaceAll(
+      AAPL_FIXTURE_FILING_DOCUMENTS["10-Q"].accessionNumber,
+      accessions["10-Q"],
+    );
   const mapped = evidenceIdByReference.get(reference);
   if (!mapped) throw new Error(`No run evidence for ${reference}`);
   return mapped;
+}
+const escaped = (value: string) => JSON.stringify(value).slice(1, -1);
+// Filing passages are public disclosure text and may legitimately contain
+// words such as "portfolio"; the private-data check excludes their excerpts.
+const passageExcerpts = snapshot.evidence
+  .filter((item) => item.sourceKind === "SEC_FILING")
+  .map((item) => escaped(item.excerpt));
+function withoutPassages(input: string) {
+  return passageExcerpts.reduce(
+    (text, excerpt) => text.replaceAll(excerpt, ""),
+    input,
+  );
 }
 function rekeyOutput<T extends GroundedModelOutput>(output: T): T {
   return {
@@ -196,7 +251,9 @@ async function cleanup() {
   await db.secFinancialFact.deleteMany({
     where: { secEntityId: ids.peerEntity },
   });
-  await db.company.deleteMany({ where: { id: ids.peerCompany } });
+  await db.company.deleteMany({
+    where: { id: { in: [ids.peerCompany, ids.subjectCompany] } },
+  });
 }
 
 beforeAll(async () => {
@@ -292,6 +349,51 @@ beforeAll(async () => {
       peerFact({ metric: "STOCKHOLDERS_EQUITY", periodKind: "INSTANT", periodStart: null, periodEnd: "2024-06-30", value: 400 }),
     ],
   });
+  // Filing and raw-document rows behind the fixture passages, so persisted
+  // passage citations can hold their filing and object-store foreign keys.
+  const passageFilings = (["10-K", "10-Q"] as const).map(
+    (formType) =>
+      filingPassages.find((passage) => passage.filing.formType === formType)!,
+  );
+  await db.company.create({
+    data: {
+      id: ids.subjectCompany,
+      slug: `${prefix}-subject`,
+      name: "Subject Filing Fixture",
+      isSupported: true,
+      secEntity: {
+        create: {
+          id: ids.subjectEntity,
+          cik: subjectCik,
+          legalName: "Subject Filing Fixture Inc.",
+          filings: {
+            create: passageFilings.map((record) => ({
+              id: record.filing.id,
+              accessionNumber: record.filing.accessionNumber,
+              formType: record.filing.formType,
+              filingDate: record.filing.filingDate as Date,
+              reportDate: record.filing.reportDate as Date,
+              primaryDocument: record.filing.primaryDocument,
+              sourceUrl: record.filing.sourceUrl,
+            })),
+          },
+          rawSources: {
+            create: passageFilings.map((record) => ({
+              id: record.rawSource.id,
+              kind: "FILING_DOCUMENT" as const,
+              sourceUrl: record.rawSource.sourceUrl,
+              objectKey: `sec/${subjectCik}/filings/${record.rawSource.sha256}.htm`,
+              sha256: record.rawSource.sha256,
+              contentType: "text/html",
+              byteLength: Number(String(record.rawSource.byteLength)),
+              firstRetrievedAt: record.rawSource.firstRetrievedAt as Date,
+              lastRetrievedAt: record.rawSource.lastRetrievedAt as Date,
+            })),
+          },
+        },
+      },
+    },
+  });
 });
 
 afterAll(cleanup);
@@ -361,19 +463,27 @@ describe("M29 derived and structured research evidence", () => {
       evidenceType: "DERIVED_METRIC",
       metricId: "DEBT_TO_EQUITY",
     });
-    const escaped = (value: string) => JSON.stringify(value).slice(1, -1);
+    const riskFactorsPassage = findFixtureEvidence(snapshot, {
+      evidenceType: "SEC_FILING_PASSAGE",
+      sectionKind: "RISK_FACTORS",
+      chunkOrdinal: 1,
+    });
     expect(requests[0].input).toContain(escaped(summaryTable.excerpt));
     expect(requests[1].input).toContain(escaped(peerTable.excerpt));
     expect(requests[2].input).toContain(escaped(debtToEquity.excerpt));
+    expect(requests[2].input).toContain(escaped(riskFactorsPassage.excerpt));
     expect(requests[3].input).toContain(escaped(summaryTable.excerpt));
     expect(requests[3].input).toContain(escaped(peerTable.excerpt));
+    expect(requests[3].input).toContain(escaped(riskFactorsPassage.excerpt));
     for (const request of requests) {
       expect(request.instructions).toContain("never calculate");
       expect(request.input).not.toContain(privateMarker);
       expect(request.input).not.toContain("321.654");
       expect(request.input).not.toContain("111.222");
       expect(request.input).not.toContain("543.21");
-      expect(request.input).not.toMatch(/userId|portfolio|holding|alert/i);
+      expect(withoutPassages(request.input)).not.toMatch(
+        /userId|portfolio|holding|alert/i,
+      );
     }
 
     const stored = await db.researchJob.findUniqueOrThrow({
@@ -397,9 +507,9 @@ describe("M29 derived and structured research evidence", () => {
     expect(stored.report).toMatchObject({
       provider: "recorded",
       promptVersion: AI_PROMPT_VERSION,
-      retrievalVersion: "m29-structured-lexical-v1",
+      retrievalVersion: AI_RETRIEVAL_VERSION,
     });
-    expect(stored.report?.claims).toHaveLength(6);
+    expect(stored.report?.claims).toHaveLength(7);
     const evidenceRows = stored.report!.claims.flatMap((claim) => claim.evidence);
     expect(evidenceRows.filter((row) => row.sourceKind === "DERIVED").length).toBe(
       7,
@@ -416,8 +526,30 @@ describe("M29 derived and structured research evidence", () => {
         "FINANCIAL_TREND_EXCERPT",
         "PEER_COMPARISON_TABLE",
         "UPCOMING_EARNINGS_EVENT",
+        "SEC_FILING_PASSAGE",
       ]),
     );
+    // A cited filing passage keeps its filing and raw-document keys, opens to
+    // the filing document URL, and its excerpt matches the stored chunk hash.
+    const passageRows = evidenceRows.filter(
+      (row) => row.sourceKind === "SEC_FILING",
+    );
+    expect(passageRows.length).toBeGreaterThan(0);
+    for (const row of passageRows) {
+      expect(row).toMatchObject({
+        secFilingId: ids.filing10k,
+        secRawSourceId: ids.raw10k,
+        accessionNumber: accessions["10-K"],
+        section: "Item 1A. Risk Factors",
+      });
+      expect(row.sourceUrl).toMatch(
+        /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\/320193\/\d{18}\/aapl-20250927\.htm$/,
+      );
+      expect(row.passageEnd).toBeGreaterThan(row.passageStart!);
+      expect(
+        createHash("sha256").update(row.excerpt, "utf8").digest("hex"),
+      ).toBe(row.sha256);
+    }
     const snapshotIds = new Set(snapshot.evidence.map((item) => item.id));
     expect(evidenceRows.every((row) => snapshotIds.has(row.referenceKey))).toBe(
       true,
@@ -484,6 +616,10 @@ describe("M29 derived and structured research evidence", () => {
     await expect(
       repository.findUpcomingEarnings(`${prefix}-missing-stock`),
     ).resolves.toBeNull();
+    // Filings without an extraction contribute no passages.
+    await expect(
+      repository.listFilingPassages({ secEntityId: ids.subjectEntity }),
+    ).resolves.toEqual([]);
     await expect(
       repository.listPeerSecFactCandidates({
         secEntityIds: [`${prefix}-no-entity`],

@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { BackgroundJobType } from "@prisma/client";
+import {
+  BackgroundJobType,
+  type SecFilingExtractionStatus,
+} from "@prisma/client";
 
 import { cachePolicies, ephemeralStore } from "@/lib/cache/redis";
 import { db } from "@/lib/db";
@@ -8,12 +11,20 @@ import { isBackgroundFeatureEnabled } from "@/lib/jobs/config";
 import { JobExecutionError, JobRequestError, JobErrorCode } from "@/lib/jobs/errors";
 import type { JobPublisher } from "@/lib/jobs/qstash";
 import { enqueueBackgroundJob } from "@/lib/jobs/service";
+import { logger } from "@/lib/observability/logger";
 import {
+  SecClientError,
   SecEdgarClient,
-  buildSecFilingUrl,
   getSecEdgarClient,
 } from "@/lib/sec/client";
 import { getSupportedCompany } from "@/lib/sec/company-registry";
+import {
+  decodeFilingDocument,
+  expectedFilingSectionKinds,
+  extractFilingSections,
+  FILING_TEXT_FORM_TYPES,
+  SEC_FILING_SECTION_PARSER_VERSION,
+} from "@/lib/sec/filing-sections";
 import {
   SecIngestionError,
   ingestSupportedCompany,
@@ -25,6 +36,14 @@ import {
   R2ObjectStorage,
   type ObjectStorage,
 } from "@/lib/storage/object-storage";
+
+// A document whose expected headings the current parser cannot find fails
+// the same way on every attempt, so it waits for a parser update or an
+// administrator retry instead of being fetched again on every refresh.
+const DETERMINISTIC_EXTRACTION_ERROR_CODES = new Set([
+  "SEC_FILING_SECTIONS_NOT_FOUND",
+  "SEC_FILING_EXTRACTION_FAILED",
+]);
 
 function sixHourBucket(date: Date) {
   const bucket = new Date(date);
@@ -75,13 +94,130 @@ export async function queueSecIngestion(
   );
 }
 
-export async function executeSecIngestionJob(input: {
+/**
+ * Queues one `SEC_FILING_FETCH` job for the latest 10-K and the latest 10-Q
+ * whose sections are not current: no extraction with the current parser
+ * version, or a failed one whose error was transient (fetch or storage). Jobs
+ * are keyed per filing, parser version, and six-hour bucket, so a refresh that
+ * finds every latest filing current queues nothing, a new filing queues one
+ * fetch, and a filing left failed by a transient outage is queued again by a
+ * later refresh rather than waiting for an administrator. The feature stays
+ * off until `SEC_FILING_TEXT_ENABLED` is set.
+ */
+export async function queueSecFilingDocumentFetches(input: {
   ticker: string;
-  requestedByUserId: string | null;
-  companyId: string;
   correlationId: string;
-  timeoutMs: number;
+  publisher?: JobPublisher;
+  environment?: NodeJS.ProcessEnv;
+  now?: () => Date;
 }) {
+  const environment = input.environment ?? process.env;
+  if (!isBackgroundFeatureEnabled("SEC_FILING_TEXT_ENABLED", environment)) {
+    return {
+      queued: [],
+      current: [],
+      skipped: "SEC filing text evidence is disabled.",
+    };
+  }
+  const supported = getSupportedCompany(input.ticker);
+  if (!supported) {
+    throw new SecIngestionError(
+      "SEC_UNSUPPORTED_TICKER",
+      400,
+      "Ticker is not in the supported SEC universe.",
+    );
+  }
+
+  const filings = await db.secFiling.findMany({
+    where: {
+      secEntity: { cik: supported.cik },
+      formType: { in: [...FILING_TEXT_FORM_TYPES] },
+      primaryDocument: { not: null },
+    },
+    orderBy: [{ filingDate: "desc" }, { accessionNumber: "desc" }],
+    take: 24,
+    select: {
+      id: true,
+      accessionNumber: true,
+      formType: true,
+      primaryDocument: true,
+      extraction: {
+        select: { status: true, parserVersion: true, errorCode: true },
+      },
+    },
+  });
+  const bucket = sixHourBucket(input.now?.() ?? new Date());
+  const latestByForm = new Map<string, (typeof filings)[number]>();
+  for (const filing of filings) {
+    if (!latestByForm.has(filing.formType)) latestByForm.set(filing.formType, filing);
+  }
+
+  const queued: Array<{
+    jobId: string;
+    formType: string;
+    accessionNumber: string;
+    reused: boolean;
+  }> = [];
+  const current: Array<{
+    formType: string;
+    accessionNumber: string;
+    status: SecFilingExtractionStatus;
+  }> = [];
+  for (const formType of FILING_TEXT_FORM_TYPES) {
+    const filing = latestByForm.get(formType);
+    if (!filing?.primaryDocument) continue;
+    const extraction = filing.extraction;
+    if (
+      extraction?.parserVersion === SEC_FILING_SECTION_PARSER_VERSION &&
+      (extraction.status !== "FAILED" ||
+        DETERMINISTIC_EXTRACTION_ERROR_CODES.has(extraction.errorCode ?? ""))
+    ) {
+      current.push({
+        formType,
+        accessionNumber: filing.accessionNumber,
+        status: extraction.status,
+      });
+      continue;
+    }
+    // No company binding: the active-scope reuse in the job repository is per
+    // company and type, and the 10-K and 10-Q fetches must both be queued.
+    const job = await enqueueBackgroundJob(
+      {
+        type: BackgroundJobType.SEC_FILING_FETCH,
+        idempotencyKey: `sec-filing:${filing.id}:${SEC_FILING_SECTION_PARSER_VERSION}:${bucket}`,
+        correlationId: input.correlationId,
+        payload: {
+          ticker: supported.ticker,
+          accessionNumber: filing.accessionNumber,
+          primaryDocument: filing.primaryDocument,
+        },
+      },
+      { publisher: input.publisher, environment },
+    );
+    queued.push({
+      jobId: job.jobId,
+      formType,
+      accessionNumber: filing.accessionNumber,
+      reused: job.reused,
+    });
+  }
+  return { queued, current };
+}
+
+export async function executeSecIngestionJob(
+  input: {
+    ticker: string;
+    requestedByUserId: string | null;
+    companyId: string;
+    correlationId: string;
+    timeoutMs: number;
+  },
+  dependencies: {
+    publisher?: JobPublisher;
+    environment?: NodeJS.ProcessEnv;
+    now?: () => Date;
+  } = {},
+) {
   const lock = await ephemeralStore.acquireLock(
     "sec-company",
     input.companyId,
@@ -110,7 +246,35 @@ export async function executeSecIngestionJob(input: {
         cachePolicies.dataFreshness.ttlSeconds,
       ),
     ]);
-    return result;
+    // Filing-document fetches are follow-up work: a queueing failure is
+    // recorded on the completed ingestion result rather than failing the
+    // fact refresh that already succeeded.
+    const filingDocuments = await queueSecFilingDocumentFetches({
+      ticker: input.ticker,
+      correlationId: input.correlationId,
+      publisher: dependencies.publisher,
+      environment: dependencies.environment,
+      now: dependencies.now,
+    }).catch((error: unknown) => {
+      logger.warn(
+        "sec.filing-text.queue-failed",
+        {
+          correlationId: input.correlationId,
+          ticker: input.ticker,
+          errorCode:
+            error instanceof JobRequestError || error instanceof JobExecutionError
+              ? error.code
+              : undefined,
+        },
+        error,
+      );
+      return {
+        queued: [],
+        current: [],
+        error: "SEC filing document fetches could not be queued.",
+      };
+    });
+    return { ...result, filingDocuments };
   } catch (error) {
     if (error instanceof SecIngestionError) {
       throw new JobExecutionError(
@@ -196,6 +360,54 @@ export async function renormalizeStoredCompanyFacts(
   return { rawSourceId: rawSource.id, ...counts };
 }
 
+function documentExtension(primaryDocument: string, contentType: string) {
+  const declared = /\.(htm|html|txt|xml)$/i.exec(primaryDocument)?.[1];
+  if (declared) return declared.toLowerCase();
+  return contentType === "text/plain" ? "txt" : "htm";
+}
+
+async function recordFilingExtractionFailure(input: {
+  filingId: string;
+  formType: string;
+  rawSourceId: string | null;
+  errorCode: string;
+  errorMessage: string;
+  attemptedAt: Date;
+}) {
+  const state = {
+    rawSourceId: input.rawSourceId,
+    status: "FAILED" as const,
+    parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+    expectedSections: expectedFilingSectionKinds(input.formType),
+    extractedSections: [],
+    truncatedSections: [],
+    chunkCount: 0,
+    errorCode: input.errorCode,
+    errorMessage: input.errorMessage.slice(0, 500),
+    attemptedAt: input.attemptedAt,
+  };
+  await db.$transaction([
+    db.secFilingChunk.deleteMany({ where: { filingId: input.filingId } }),
+    db.secFilingExtraction.upsert({
+      where: { filingId: input.filingId },
+      update: state,
+      create: { filingId: input.filingId, ...state },
+    }),
+  ]);
+}
+
+/**
+ * Fetches one filing's primary document through the identified SEC client,
+ * stores it content-addressed in private R2 as a `FILING_DOCUMENT` raw
+ * source, extracts the expected sections, and replaces the filing's passages
+ * in PostgreSQL. A failure after the filing lookup is recorded on the filing's
+ * extraction state before it is rethrown, so the state is explicit and never
+ * blocks fact ingestion or page rendering. One exception keeps evidence
+ * available: when no new document was obtained (fetch or storage failure) and
+ * an earlier extraction still holds passages, that extraction is left as it
+ * is, the job row records the failure, and a later refresh queues the fetch
+ * again because the earlier extraction is not current.
+ */
 export async function fetchSecFilingDocument(
   input: {
     ticker: string;
@@ -205,6 +417,7 @@ export async function fetchSecFilingDocument(
   dependencies: {
     client?: Pick<SecEdgarClient, "getFilingDocument">;
     storage?: ObjectStorage;
+    now?: () => Date;
   } = {},
 ) {
   const supported = getSupportedCompany(input.ticker);
@@ -219,9 +432,9 @@ export async function fetchSecFilingDocument(
     where: {
       accessionNumber: input.accessionNumber,
       primaryDocument: input.primaryDocument,
-      secEntity: { company: { securities: { some: { ticker: supported.ticker } } } },
+      secEntity: { cik: supported.cik },
     },
-    select: { secEntityId: true },
+    select: { id: true, secEntityId: true, formType: true },
   });
   if (!filing) {
     throw new JobExecutionError(
@@ -231,40 +444,187 @@ export async function fetchSecFilingDocument(
     );
   }
 
+  const attemptedAt = (dependencies.now ?? (() => new Date()))();
   const client = dependencies.client ?? getSecEdgarClient();
   const storage = dependencies.storage ?? new R2ObjectStorage();
-  const document = await client.getFilingDocument(
-    supported.cik,
-    input.accessionNumber,
-    input.primaryDocument,
-  );
+  const fail = async (
+    rawSourceId: string | null,
+    error: JobExecutionError,
+  ): Promise<never> => {
+    const preserveEarlierPassages =
+      rawSourceId === null &&
+      ((
+        await db.secFilingExtraction.findUnique({
+          where: { filingId: filing.id },
+          select: { chunkCount: true },
+        })
+      )?.chunkCount ?? 0) > 0;
+    if (!preserveEarlierPassages) {
+      await recordFilingExtractionFailure({
+        filingId: filing.id,
+        formType: filing.formType,
+        rawSourceId,
+        errorCode: error.code,
+        errorMessage: error.message,
+        attemptedAt,
+      });
+    }
+    throw error;
+  };
+
+  let document: Awaited<ReturnType<SecEdgarClient["getFilingDocument"]>>;
+  try {
+    document = await client.getFilingDocument(
+      supported.cik,
+      input.accessionNumber,
+      input.primaryDocument,
+    );
+  } catch (error) {
+    return fail(
+      null,
+      error instanceof SecClientError
+        ? new JobExecutionError(error.code, error.retryable, error.message, false, {
+            cause: error,
+          })
+        : new JobExecutionError(
+            "SEC_FILING_FETCH_FAILED",
+            true,
+            "The SEC filing document could not be retrieved.",
+            false,
+            { cause: error },
+          ),
+    );
+  }
+
   const digest = createHash("sha256").update(document.body).digest("hex");
-  const objectKey = `sec/${supported.cik}/filings/${input.accessionNumber}/${input.primaryDocument}`;
-  const stored = await storage.put({
-    key: objectKey,
-    body: document.body,
-    contentType: document.contentType,
-    metadata: { sha256: digest, source: "sec-edgar" },
-  });
-  const retrievedAt = new Date();
-  const rawSource = await db.secRawSource.upsert({
-    where: { objectKey },
-    update: { lastRetrievedAt: retrievedAt, sha256: digest },
-    create: {
-      secEntityId: filing.secEntityId,
-      kind: "FILING_DOCUMENT",
-      sourceUrl: buildSecFilingUrl(
-        supported.cik,
-        input.accessionNumber,
-        input.primaryDocument,
+  const objectKey = `sec/${supported.cik}/filings/${digest}.${documentExtension(
+    input.primaryDocument,
+    document.contentType,
+  )}`;
+  let stored: Awaited<ReturnType<ObjectStorage["put"]>>;
+  try {
+    stored = await storage.put({
+      key: objectKey,
+      body: document.body,
+      contentType: document.contentType,
+      metadata: {
+        cik: supported.cik,
+        source: "sec-edgar",
+        sha256: digest,
+        accessionNumber: input.accessionNumber,
+      },
+    });
+  } catch (error) {
+    return fail(
+      null,
+      new JobExecutionError(
+        "SEC_STORAGE_ERROR",
+        true,
+        "Raw SEC filing document storage failed.",
+        false,
+        { cause: error },
       ),
-      objectKey,
-      sha256: digest,
-      contentType: stored.contentType,
-      byteLength: BigInt(stored.byteLength),
-      firstRetrievedAt: retrievedAt,
-      lastRetrievedAt: retrievedAt,
-    },
+    );
+  }
+  const rawSource = await prismaSecRepository.saveRawSource({
+    secEntityId: filing.secEntityId,
+    kind: "FILING_DOCUMENT",
+    sourceUrl: document.url,
+    objectKey: stored.key,
+    sha256: digest,
+    contentType: stored.contentType,
+    byteLength: stored.byteLength,
+    retrievedAt: attemptedAt,
   });
-  return { rawSourceId: rawSource.id, objectKey: stored.key };
+
+  let extraction: ReturnType<typeof extractFilingSections>;
+  try {
+    extraction = extractFilingSections(
+      decodeFilingDocument(document.body, document.contentType),
+      filing.formType,
+    );
+  } catch (error) {
+    return fail(
+      rawSource.id,
+      new JobExecutionError(
+        "SEC_FILING_EXTRACTION_FAILED",
+        false,
+        "The SEC filing document could not be parsed into sections.",
+        true,
+        { cause: error },
+      ),
+    );
+  }
+
+  const status: SecFilingExtractionStatus =
+    extraction.sections.length === 0
+      ? "FAILED"
+      : extraction.missingSections.length > 0
+        ? "PARTIALLY_COMPLETED"
+        : "COMPLETED";
+  const chunks = extraction.sections.flatMap((section) =>
+    section.chunks.map((chunk) => ({
+      filingId: filing.id,
+      rawSourceId: rawSource.id,
+      sectionKind: section.kind,
+      sectionLabel: section.label,
+      ordinal: chunk.ordinal,
+      passageStart: chunk.passageStart,
+      passageEnd: chunk.passageEnd,
+      sha256: chunk.sha256,
+      text: chunk.text,
+    })),
+  );
+  const extractedSections = extraction.sections.map((section) => section.kind);
+  const state = {
+    rawSourceId: rawSource.id,
+    status,
+    parserVersion: extraction.parserVersion,
+    expectedSections: extraction.expectedSections,
+    extractedSections,
+    truncatedSections: extraction.truncatedSections,
+    chunkCount: chunks.length,
+    errorCode: status === "FAILED" ? "SEC_FILING_SECTIONS_NOT_FOUND" : null,
+    errorMessage:
+      status === "FAILED"
+        ? "No expected section heading was found in the filing document."
+        : null,
+    attemptedAt,
+  };
+  await db.$transaction(async (transaction) => {
+    const record = await transaction.secFilingExtraction.upsert({
+      where: { filingId: filing.id },
+      update: state,
+      create: { filingId: filing.id, ...state },
+      select: { id: true },
+    });
+    await transaction.secFilingChunk.deleteMany({
+      where: { filingId: filing.id },
+    });
+    if (chunks.length > 0) {
+      await transaction.secFilingChunk.createMany({
+        data: chunks.map((chunk) => ({ ...chunk, extractionId: record.id })),
+      });
+    }
+  });
+  if (status === "FAILED") {
+    throw new JobExecutionError(
+      "SEC_FILING_SECTIONS_NOT_FOUND",
+      false,
+      "No expected section heading was found in the SEC filing document.",
+      true,
+    );
+  }
+  return {
+    filingId: filing.id,
+    rawSourceId: rawSource.id,
+    objectKey: stored.key,
+    sha256: digest,
+    extractionStatus: status,
+    parserVersion: extraction.parserVersion,
+    extractedSections,
+    missingSections: extraction.missingSections,
+    truncatedSections: extraction.truncatedSections,
+    chunkCount: chunks.length,
+  };
 }

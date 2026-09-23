@@ -182,6 +182,18 @@ enum SecFactSelection {
   AMBIGUOUS
 }
 
+enum SecFilingSectionKind {
+  BUSINESS
+  RISK_FACTORS
+  MDA
+}
+
+enum SecFilingExtractionStatus {
+  COMPLETED
+  PARTIALLY_COMPLETED
+  FAILED
+}
+
 enum EarningsMarketSession {
   BEFORE_MARKET
   AFTER_MARKET
@@ -369,44 +381,48 @@ model SecEntity {
 }
 
 model SecFiling {
-  id                         String              @id @default(cuid())
+  id                         String               @id @default(cuid())
   secEntityId                String
-  accessionNumber            String              @unique
+  accessionNumber            String               @unique
   formType                   String
-  filingDate                 DateTime            @db.Date
-  reportDate                 DateTime?           @db.Date
+  filingDate                 DateTime             @db.Date
+  reportDate                 DateTime?            @db.Date
   acceptanceDateTime         DateTime?
   primaryDocument            String?
   primaryDocumentDescription String?
   sourceUrl                  String
-  isAmendment                Boolean             @default(false)
+  isAmendment                Boolean              @default(false)
   amendsAccessionNumber      String?
-  createdAt                  DateTime            @default(now())
-  updatedAt                  DateTime            @updatedAt
-  secEntity                  SecEntity           @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
+  secEntity                  SecEntity            @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
   financialFacts             SecFinancialFact[]
   evidenceReferences         EvidenceReference[]
+  extraction                 SecFilingExtraction?
+  chunks                     SecFilingChunk[]
 
   @@index([secEntityId, filingDate])
   @@index([secEntityId, reportDate, formType])
 }
 
 model SecRawSource {
-  id                 String              @id @default(cuid())
+  id                 String                @id @default(cuid())
   secEntityId        String
   kind               SecRawSourceKind
   sourceUrl          String
-  objectKey          String              @unique
+  objectKey          String                @unique
   sha256             String
   contentType        String
   byteLength         BigInt
   firstRetrievedAt   DateTime
   lastRetrievedAt    DateTime
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  secEntity          SecEntity           @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  secEntity          SecEntity             @relation(fields: [secEntityId], references: [id], onDelete: Cascade)
   financialFacts     SecFinancialFact[]
   evidenceReferences EvidenceReference[]
+  filingExtractions  SecFilingExtraction[]
+  filingChunks       SecFilingChunk[]
 
   @@unique([secEntityId, kind, sha256])
   @@index([secEntityId, kind, lastRetrievedAt])
@@ -480,6 +496,57 @@ model SecIngestionRun {
   @@index([secEntityId, startedAt])
   @@index([requestedByUserId, startedAt])
   @@index([status, startedAt])
+}
+
+/// The latest section-extraction attempt for one 10-K or 10-Q primary
+/// document. A failed fetch or parse is recorded here per filing so fact
+/// ingestion and page rendering are never blocked by narrative extraction.
+model SecFilingExtraction {
+  id                String                    @id @default(cuid())
+  filingId          String                    @unique
+  rawSourceId       String?
+  status            SecFilingExtractionStatus
+  parserVersion     String
+  expectedSections  SecFilingSectionKind[]
+  extractedSections SecFilingSectionKind[]
+  truncatedSections SecFilingSectionKind[]
+  chunkCount        Int                       @default(0)
+  errorCode         String?
+  errorMessage      String?
+  attemptedAt       DateTime
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  filing            SecFiling                 @relation(fields: [filingId], references: [id], onDelete: Cascade)
+  rawSource         SecRawSource?             @relation(fields: [rawSourceId], references: [id], onDelete: SetNull)
+  chunks            SecFilingChunk[]
+
+  @@index([status, attemptedAt])
+  @@index([rawSourceId])
+}
+
+/// A bounded passage of an extracted filing section. The passage range is a
+/// character offset range in the parser's normalized document text, and the
+/// hash covers exactly the stored text so a cited excerpt can be verified.
+model SecFilingChunk {
+  id           String               @id @default(cuid())
+  extractionId String
+  filingId     String
+  rawSourceId  String
+  sectionKind  SecFilingSectionKind
+  sectionLabel String
+  ordinal      Int
+  passageStart Int
+  passageEnd   Int
+  sha256       String
+  text         String               @db.Text
+  createdAt    DateTime             @default(now())
+  extraction   SecFilingExtraction  @relation(fields: [extractionId], references: [id], onDelete: Cascade)
+  filing       SecFiling            @relation(fields: [filingId], references: [id], onDelete: Cascade)
+  rawSource    SecRawSource         @relation(fields: [rawSourceId], references: [id], onDelete: Restrict)
+
+  @@unique([filingId, sectionKind, ordinal])
+  @@index([extractionId])
+  @@index([rawSourceId])
 }
 
 model StockPrice {

@@ -55,6 +55,10 @@ describe("AI research prompts", () => {
     expect(prompt.instructions).toContain("purchasing, acquiring");
     expect(prompt.instructions).toContain("stock-price target");
     expect(prompt.instructions).toContain("future price or direction");
+    expect(prompt.instructions).toContain(
+      "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q",
+    );
+    expect(prompt.instructions).toContain("including Risk Factors and MD&A passages");
     expect(prompt.input).toContain(evidence.id);
     expect(prompt.input).not.toMatch(/portfolioWeight|activeAlerts|userId/);
   });
@@ -129,6 +133,9 @@ describe("AI research prompts", () => {
       "not the specialists' opinions",
     );
     expect(prompt.instructions).toContain("never treat it as a neutral view");
+    expect(prompt.instructions).toContain(
+      "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q",
+    );
     expect(prompt.instructions).toContain("whatWouldChange");
     expect(prompt.instructions).toContain("Never personalize an action");
     expect(prompt.instructions).toContain("purchasing, acquiring");

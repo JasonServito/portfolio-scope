@@ -89,13 +89,9 @@ export async function executeBackgroundJobHandler(
         BackgroundJobType.SEC_FILING_FETCH,
         job.payloadJson,
       );
-      if (!job.companyId) {
-        throw new JobExecutionError(
-          JobErrorCode.INVALID_PAYLOAD,
-          false,
-          "The filing job is missing its company binding.",
-        );
-      }
+      // Filing fetches are keyed per filing and parser version rather than
+      // bound to a company, so the latest 10-K and 10-Q can be queued
+      // together; the handler verifies the filing belongs to the ticker.
       return fetchSecFilingDocument(payload);
     }
 

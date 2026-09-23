@@ -31,9 +31,9 @@ function evidenceTypes(value: ResearchEvidenceSnapshot) {
 
 describe("M29 structured research evidence", () => {
   it("assembles the versioned AAPL snapshot with derived, table, trend, peer, and event evidence", () => {
-    expect(snapshot.schemaVersion).toBe("m29-public-evidence-snapshot-v2");
+    expect(snapshot.schemaVersion).toBe("m31-public-evidence-snapshot-v3");
     expect(snapshot.schemaVersion).toBe(RESEARCH_EVIDENCE_SNAPSHOT_VERSION);
-    expect(snapshot.retrievalVersion).toBe("m29-structured-lexical-v1");
+    expect(snapshot.retrievalVersion).toBe("m31-structured-lexical-v2");
     expect(snapshot.retrievalVersion).toBe(AI_RETRIEVAL_VERSION);
     expect(evidenceTypes(snapshot)).toEqual({
       "COMPANY_PROFILE:PUBLIC_COMPANY_IDENTITY": 1,
@@ -45,6 +45,7 @@ describe("M29 structured research evidence", () => {
       "DETERMINISTIC:UPCOMING_EARNINGS_EVENT": 1,
       "PEER_SET:PUBLIC_PEER_SET": 1,
       "SEC_FACT:SELECTED_SEC_FACT": 70,
+      "SEC_FILING:SEC_FILING_PASSAGE": 22,
     });
     expect(snapshot.missingMetrics).toEqual([]);
     expect(snapshot.ambiguousMetrics).toEqual([]);
@@ -56,7 +57,15 @@ describe("M29 structured research evidence", () => {
     expect(snapshot.evidence.every((item) => item.excerpt.length <= 4_000)).toBe(
       true,
     );
-    expect(JSON.stringify(snapshot)).not.toMatch(
+    // Filing passages are public disclosure text and may contain words such
+    // as "portfolio"; the private-data check excludes their verbatim excerpts.
+    const withoutPassages = snapshot.evidence
+      .filter((item) => item.sourceKind === "SEC_FILING")
+      .reduce(
+        (text, item) => text.replaceAll(JSON.stringify(item.excerpt).slice(1, -1), ""),
+        JSON.stringify(snapshot),
+      );
+    expect(withoutPassages).not.toMatch(
       /userId|portfolio|holding|alert|targetPrice/i,
     );
     expect(JSON.stringify(snapshot)).not.toContain(": 0 USD");

@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import {
   AI_RETRIEVAL_VERSION,
-  AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+  AI_SPECIALIST_CONTEXT_CHAR_BUDGETS,
   AI_SPECIALIST_MAX_EVIDENCE_ITEMS,
   AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
   AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
@@ -10,6 +10,7 @@ import {
   evidenceId,
   researchEvidenceSchema,
   stableHash,
+  type ModelClaim,
   type ResearchEvidence,
 } from "@/lib/research/ai/schemas";
 import {
@@ -31,11 +32,12 @@ import {
   samePeriod as sameBoundaries,
   type PeriodBoundaries,
 } from "@/lib/sec/derived-metrics";
+import { FILING_TEXT_FORM_TYPES } from "@/lib/sec/filing-sections";
 import { expectedMetricNames } from "@/lib/sec/normalization";
 import { z } from "zod";
 
 export const RESEARCH_EVIDENCE_SNAPSHOT_VERSION =
-  "m29-public-evidence-snapshot-v2";
+  "m31-public-evidence-snapshot-v3";
 
 const ALL_RESEARCH_AGENTS: readonly ResearchAgentName[] = [
   "NEWS",
@@ -75,7 +77,28 @@ const TREND_METRICS = new Set([
 const PEER_ANNUAL_LOOKBACK_DAYS = 2 * 365 + 60;
 const PEER_INSTANT_LOOKBACK_DAYS = 400;
 const MAX_PEER_FACT_ROWS = 1_000;
+// The structured evidence (about 100 items at the default limits) comes first
+// and the filing passages (at most 24) last, so the cap only ever clips
+// passages, and only if the structured evidence alone approaches it.
 const MAX_SNAPSHOT_EVIDENCE = 160;
+// Filing passages come from the latest 10-K and latest 10-Q whose sections
+// were extracted. Each section contributes its opening passage plus the
+// passages that best match the owning agents' research questions, so a long
+// Risk Factors section still surfaces its regulatory discussion.
+const MAX_FILING_PASSAGES_PER_SECTION = 6;
+const FILING_SECTION_ORDER = ["BUSINESS", "RISK_FACTORS", "MDA"] as const;
+const FILING_SECTION_AGENTS: Record<string, readonly ResearchAgentName[]> = {
+  BUSINESS: ["COMPETITORS", "FINANCIALS", "SYNTHESIS"],
+  RISK_FACTORS: ["RISK", "SYNTHESIS"],
+  MDA: ["FINANCIALS", "RISK", "SYNTHESIS"],
+};
+const FILING_SECTION_QUERIES: Record<string, string> = {
+  BUSINESS:
+    "products services markets customers competition competitors segments distribution strategy",
+  RISK_FACTORS:
+    "risk regulatory regulation legal litigation government political tariff trade supply competition liquidity debt demand",
+  MDA: "net sales revenue increased decreased growth margin operating income expenses cash flow liquidity capital debt outlook",
+};
 
 const DEFAULT_MAX_RESULTS = 12;
 const DEFAULT_CONTEXT_CHAR_BUDGET = 12_000;
@@ -208,6 +231,30 @@ export type SecFactEvidenceRecord = {
   rawSource: RawSourceRecord;
 };
 
+export type FilingPassageRecord = {
+  id: string;
+  filingId: string;
+  rawSourceId: string;
+  sectionKind: string;
+  sectionLabel: string;
+  ordinal: number;
+  passageStart: number;
+  passageEnd: number;
+  sha256: string;
+  text: string;
+  parserVersion: string;
+  filing: {
+    id: string;
+    accessionNumber: string;
+    formType: string;
+    filingDate: DateValue;
+    reportDate: DateValue | null;
+    primaryDocument: string | null;
+    sourceUrl: string;
+  };
+  rawSource: RawSourceRecord;
+};
+
 export type ResearchJobStockIdentity = {
   stockId: string;
   ticker: string;
@@ -238,11 +285,16 @@ export interface ResearchEvidenceRepository {
     take: number;
   }): Promise<PeerSecFactRecord[]>;
   findUpcomingEarnings(stockId: string): Promise<UpcomingEarningsRecord | null>;
+  listFilingPassages(input: { secEntityId: string }): Promise<FilingPassageRecord[]>;
 }
 
 export type ResearchEvidenceDatabase = Pick<
   typeof db,
-  "researchJob" | "stock" | "secFinancialFact" | "upcomingEarningsState"
+  | "researchJob"
+  | "stock"
+  | "secFinancialFact"
+  | "secFiling"
+  | "upcomingEarningsState"
 >;
 
 export type EvidenceSnapshotLimits = {
@@ -316,6 +368,8 @@ export type EvidenceSelectionRequest = Readonly<{
   agent?: ResearchAgentName;
   sourceKinds?: readonly EvidenceSourceKind[];
   metadata?: Readonly<Record<string, MetadataFilterValue>>;
+  /** Eligible items included right after the mandatory evidence, in order, before lexical fill. */
+  preferredEvidenceIds?: readonly string[];
   maxResults?: number;
   contextCharBudget?: number;
 }>;
@@ -672,6 +726,95 @@ export function createPrismaResearchEvidenceRepository(
         },
       });
     },
+
+    async listFilingPassages({ secEntityId }) {
+      // The latest filing of each form is authoritative: if its sections
+      // were not extracted, no older filing's narrative stands in for it.
+      const filings = await database.secFiling.findMany({
+        where: {
+          secEntityId,
+          formType: { in: [...FILING_TEXT_FORM_TYPES] },
+          primaryDocument: { not: null },
+        },
+        orderBy: [{ filingDate: "desc" }, { accessionNumber: "desc" }],
+        take: 12,
+        select: {
+          id: true,
+          accessionNumber: true,
+          formType: true,
+          filingDate: true,
+          reportDate: true,
+          primaryDocument: true,
+          sourceUrl: true,
+          extraction: {
+            select: {
+              status: true,
+              parserVersion: true,
+              rawSource: {
+                select: {
+                  id: true,
+                  kind: true,
+                  sourceUrl: true,
+                  objectKey: true,
+                  sha256: true,
+                  contentType: true,
+                  byteLength: true,
+                  firstRetrievedAt: true,
+                  lastRetrievedAt: true,
+                },
+              },
+              chunks: {
+                orderBy: [{ sectionKind: "asc" }, { ordinal: "asc" }],
+                select: {
+                  id: true,
+                  filingId: true,
+                  rawSourceId: true,
+                  sectionKind: true,
+                  sectionLabel: true,
+                  ordinal: true,
+                  passageStart: true,
+                  passageEnd: true,
+                  sha256: true,
+                  text: true,
+                },
+              },
+            },
+          },
+        },
+      });
+      const seenForms = new Set<string>();
+      const passages: FilingPassageRecord[] = [];
+      for (const filing of filings) {
+        if (seenForms.has(filing.formType)) continue;
+        seenForms.add(filing.formType);
+        const extraction = filing.extraction;
+        if (
+          !extraction?.rawSource ||
+          (extraction.status !== "COMPLETED" &&
+            extraction.status !== "PARTIALLY_COMPLETED")
+        ) {
+          continue;
+        }
+        const filingRecord = {
+          id: filing.id,
+          accessionNumber: filing.accessionNumber,
+          formType: filing.formType,
+          filingDate: filing.filingDate,
+          reportDate: filing.reportDate,
+          primaryDocument: filing.primaryDocument,
+          sourceUrl: filing.sourceUrl,
+        };
+        for (const chunk of extraction.chunks) {
+          passages.push({
+            ...chunk,
+            parserVersion: extraction.parserVersion,
+            filing: filingRecord,
+            rawSource: extraction.rawSource,
+          });
+        }
+      }
+      return passages;
+    },
   };
 }
 
@@ -997,6 +1140,112 @@ function makeMissingMetricsEvidence(
   });
 }
 
+function scorePassageText(passage: string, terms: readonly string[]) {
+  const normalized = normalizeSearchText(passage);
+  return terms.reduce((sum, term) => sum + occurrences(normalized, term), 0);
+}
+
+function makeFilingPassageEvidence(
+  stock: ResearchEvidenceStock,
+  record: FilingPassageRecord,
+) {
+  const filingDate = dateOnly(record.filing.filingDate);
+  const sourceReference = `sec-filing:${record.filing.accessionNumber}:${record.sectionKind.toLowerCase()}:${record.ordinal}:${record.sha256.slice(0, 12)}`;
+  return validatedEvidence({
+    id: evidenceId({ sourceKind: "SEC_FILING", sourceReference }),
+    sourceKind: "SEC_FILING",
+    title: text(
+      `${stock.ticker} ${record.filing.formType} ${record.sectionLabel} (filed ${filingDate}), passage ${record.ordinal + 1}`,
+      240,
+    ),
+    sourceReference,
+    sourceUrl: record.rawSource.sourceUrl,
+    accessionNumber: record.filing.accessionNumber,
+    section: text(record.sectionLabel, 240),
+    objectKey: text(record.rawSource.objectKey, 1_000),
+    sha256: record.sha256,
+    sourceDate: filingDate,
+    retrievedAt: date(record.rawSource.lastRetrievedAt),
+    excerpt: text(record.text, 4_000),
+    passageStart: record.passageStart,
+    passageEnd: record.passageEnd,
+    secFilingId: record.filing.id,
+    secRawSourceId: record.rawSource.id,
+    secFinancialFactId: null,
+    metadata: {
+      evidenceType: "SEC_FILING_PASSAGE",
+      agentNames: [...(FILING_SECTION_AGENTS[record.sectionKind] ?? [])],
+      ticker: stock.ticker,
+      cik: stock.cik,
+      formType: record.filing.formType,
+      sectionKind: record.sectionKind,
+      sectionLabel: record.sectionLabel,
+      accessionNumber: record.filing.accessionNumber,
+      filingDate,
+      reportDate: dateOnly(record.filing.reportDate),
+      primaryDocument: record.filing.primaryDocument,
+      filingIndexUrl: record.filing.sourceUrl,
+      chunkOrdinal: record.ordinal,
+      passageStart: record.passageStart,
+      passageEnd: record.passageEnd,
+      parserVersion: record.parserVersion,
+      documentSha256: record.rawSource.sha256,
+      rawContentType: record.rawSource.contentType,
+      rawByteLength: stringValue(record.rawSource.byteLength),
+      rawFirstRetrievedAt: date(record.rawSource.firstRetrievedAt),
+      rawLastRetrievedAt: date(record.rawSource.lastRetrievedAt),
+    },
+  });
+}
+
+/**
+ * Bounds each extracted section to its opening passage plus the passages
+ * that best match the owning agents' research questions, in a deterministic
+ * order independent of repository ordering.
+ */
+function selectFilingPassageEvidence(
+  stock: ResearchEvidenceStock,
+  records: readonly FilingPassageRecord[],
+) {
+  const groups = new Map<string, FilingPassageRecord[]>();
+  for (const record of records) {
+    if (!FILING_SECTION_AGENTS[record.sectionKind]) continue;
+    const key = `${record.filing.id}:${record.sectionKind}`;
+    const group = groups.get(key) ?? [];
+    group.push(record);
+    groups.set(key, group);
+  }
+  const selected: FilingPassageRecord[] = [];
+  for (const group of groups.values()) {
+    const [opening, ...rest] = [...group].sort(
+      (left, right) => left.ordinal - right.ordinal,
+    );
+    const terms = queryTerms(FILING_SECTION_QUERIES[opening.sectionKind] ?? "");
+    const ranked = rest
+      .map((record) => ({ record, score: scorePassageText(record.text, terms) }))
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.record.ordinal - right.record.ordinal,
+      )
+      .slice(0, MAX_FILING_PASSAGES_PER_SECTION - 1)
+      .map((entry) => entry.record);
+    selected.push(opening, ...ranked);
+  }
+  const sectionRank = (kind: string) =>
+    (FILING_SECTION_ORDER as readonly string[]).indexOf(kind);
+  return selected
+    .sort(
+      (left, right) =>
+        (date(right.filing.filingDate) ?? "").localeCompare(
+          date(left.filing.filingDate) ?? "",
+        ) ||
+        left.filing.accessionNumber.localeCompare(right.filing.accessionNumber) ||
+        sectionRank(left.sectionKind) - sectionRank(right.sectionKind) ||
+        left.ordinal - right.ordinal,
+    )
+    .map((record) => makeFilingPassageEvidence(stock, record));
+}
+
 type SelectableFact = {
   externalKey: string;
   canonicalMetric: string;
@@ -1294,6 +1543,8 @@ export type ResearchEvidenceSnapshotInput = {
   peerRecords: readonly PublicPeerRecord[];
   peerFactCandidates: readonly PeerSecFactRecord[];
   upcomingEarnings: UpcomingEarningsRecord | null;
+  /** Passages of the latest extracted 10-K and 10-Q; absent when none were extracted. */
+  filingPassages?: readonly FilingPassageRecord[];
   limits?: Partial<EvidenceSnapshotLimits>;
 };
 
@@ -1370,6 +1621,7 @@ export function assembleResearchEvidenceSnapshot(
         ),
       ),
       ...(earnings ? [validatedEvidence(earnings)] : []),
+      ...selectFilingPassageEvidence(stock, input.filingPassages ?? []),
     ].slice(0, MAX_SNAPSHOT_EVIDENCE),
   );
 
@@ -1417,7 +1669,8 @@ export async function prepareResearchEvidenceSnapshot(
     );
   }
   const secEntityId = record.company?.secEntity?.id ?? null;
-  const [factCandidates, peerRecords, upcomingEarnings] = await Promise.all([
+  const [factCandidates, peerRecords, upcomingEarnings, filingPassages] =
+    await Promise.all([
     secEntityId && limits.factsPerMetric > 0
       ? repository.listSecFactCandidates({
           secEntityId,
@@ -1435,6 +1688,9 @@ export async function prepareResearchEvidenceSnapshot(
       take: limits.maxPeers,
     }),
     repository.findUpcomingEarnings(record.id),
+    secEntityId
+      ? repository.listFilingPassages({ secEntityId })
+      : Promise.resolve([]),
   ]);
   const lookbacks = peerFactLookbacks(
     selectFacts(factCandidates, limits.factsPerMetric, {
@@ -1461,6 +1717,7 @@ export async function prepareResearchEvidenceSnapshot(
     peerRecords,
     peerFactCandidates,
     upcomingEarnings,
+    filingPassages,
     limits: dependencies.limits,
   });
 }
@@ -1721,8 +1978,18 @@ export function selectEvidence(
         .map((item) => ({ item, ...scoreEvidence(item, terms, phrase) }))
     : [];
   const mandatoryIds = new Set(mandatory.map((entry) => entry.item.id));
+  // Evidence the caller asks for by id (for synthesis, the items the
+  // specialists cited) follows the mandatory items regardless of its lexical
+  // score, so a specialist claim can be carried forward with its citation.
+  const preferred = [...new Set(request.preferredEvidenceIds ?? [])]
+    .filter((id) => !mandatoryIds.has(id))
+    .flatMap((id) => {
+      const item = eligible.find((candidate) => candidate.id === id);
+      return item ? [{ item, ...scoreEvidence(item, terms, phrase) }] : [];
+    });
+  const preferredIds = new Set(preferred.map((entry) => entry.item.id));
   const ranked = eligible
-    .filter((item) => !mandatoryIds.has(item.id))
+    .filter((item) => !mandatoryIds.has(item.id) && !preferredIds.has(item.id))
     .map((item) => ({ item, ...scoreEvidence(item, terms, phrase) }))
     .filter((item) => terms.length === 0 || item.score > 0)
     .sort(
@@ -1752,8 +2019,6 @@ export function selectEvidence(
     const separator = blocks.length === 0 ? 0 : 2;
     const rendered = renderContext(candidate.item, budget - used - separator);
     if (!rendered) return false;
-    // A partially rendered derived value could drop its formula, inputs, or
-    // derived marker, so lexical fill includes derived evidence whole or not at all.
     if (options.wholeOnly && rendered.truncated) return false;
     if (separator) used += separator;
     blocks.push(rendered.text);
@@ -1770,15 +2035,19 @@ export function selectEvidence(
     return true;
   };
 
+  // A partially rendered derived value could drop its formula, inputs, or
+  // derived marker, and a cut filing passage would misquote the filing, so
+  // neither enters the context unless it fits whole.
+  const wholeOnly = (item: ResearchEvidence) =>
+    item.sourceKind === "DERIVED" || item.sourceKind === "SEC_FILING";
   for (const candidate of mandatory) include(candidate, { wholeOnly: false });
-  for (const candidate of ranked) {
+  for (const candidate of [...preferred, ...ranked]) {
     if (selected.length >= maxResults) break;
-    include(candidate, {
-      wholeOnly: candidate.item.sourceKind === "DERIVED",
-    });
+    include(candidate, { wholeOnly: wholeOnly(candidate.item) });
   }
 
-  const omittedEvidenceCount = mandatory.length + ranked.length - selected.length;
+  const omittedEvidenceCount =
+    mandatory.length + preferred.length + ranked.length - selected.length;
   const context = blocks.join("\n\n");
   return deepFreeze({
     query,
@@ -1799,14 +2068,16 @@ export function selectEvidence(
 
 export const retrieveResearchEvidence = selectEvidence;
 
+// Query terms follow each specialist's M30 research questions so filing
+// passages about those topics rank ahead of unrelated ones in the fill.
 function specialistQuery(agentName: SpecialistAgentName) {
   switch (agentName) {
     case "FINANCIALS":
-      return "revenue income cash flow margin growth derived summary trend assets liabilities equity financial period annual quarterly";
+      return "revenue income cash flow margin growth derived summary trend assets liabilities equity financial period annual quarterly net sales increased decreased management discussion";
     case "COMPETITORS":
-      return "company sector industry exchange peer competitors comparison derived";
+      return "company sector industry exchange peer competitors comparison derived competition products services markets business";
     case "RISK":
-      return "liabilities debt equity cash leverage liquidity ratio revenue concentration ambiguity missing risk filing derived";
+      return "liabilities debt equity cash leverage liquidity ratio revenue concentration ambiguity missing risk filing derived regulatory regulation legal litigation government political tariff supply";
     case "NEWS":
       return "licensed current company news";
     case "POLITICAL_ACTIVITY":
@@ -1814,24 +2085,73 @@ function specialistQuery(agentName: SpecialistAgentName) {
   }
 }
 
-/** Specialist retrieval: owned structured evidence first, lexical fill after. */
+// The best-matching filing passages for a specialist's questions are placed
+// ahead of the general lexical fill, each included only if it fits whole. The
+// structured tables are keyword-dense and would otherwise outrank the only
+// narrative source every time; offering a few candidates lets a shorter
+// passage take the slot when the top match does not fit the remaining budget.
+const SPECIALIST_NARRATIVE_SLOTS = 3;
+
+/** Specialist retrieval: owned structured evidence first, relevant filing passages, lexical fill after. */
 export function selectSpecialistEvidence(
   snapshot: ResearchEvidenceSnapshot,
   agentName: SpecialistAgentName,
 ) {
-  return selectEvidence(snapshot, {
-    query: specialistQuery(agentName),
+  const query = specialistQuery(agentName);
+  const narrative = selectEvidence(snapshot, {
+    query,
     agent: agentName,
+    sourceKinds: ["SEC_FILING"],
+    maxResults: SPECIALIST_NARRATIVE_SLOTS,
+    contextCharBudget: MAX_CONTEXT_CHAR_BUDGET,
+  });
+  return selectEvidence(snapshot, {
+    query,
+    agent: agentName,
+    preferredEvidenceIds: narrative.evidenceIds,
     maxResults: AI_SPECIALIST_MAX_EVIDENCE_ITEMS,
-    contextCharBudget: AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+    contextCharBudget: AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[agentName],
   });
 }
 
-export function selectSynthesisEvidence(snapshot: ResearchEvidenceSnapshot) {
+/**
+ * Evidence ids cited by validated specialist claims, filing passages first
+ * and then the highest-confidence claims' items, so synthesis receives the
+ * narrative behind the claims it weighs before cheaper derived items that the
+ * summary table already restates.
+ */
+export function synthesisPreferredEvidenceIds(
+  snapshot: ResearchEvidenceSnapshot,
+  specialistClaims: readonly ModelClaim[],
+) {
+  const kinds = new Map(snapshot.evidence.map((item) => [item.id, item.sourceKind]));
+  const ordered = [...specialistClaims].sort(
+    (left, right) => right.confidence - left.confidence,
+  );
+  const cited: string[] = [];
+  for (const claim of ordered) {
+    for (const id of [...claim.evidenceIds, ...claim.counterEvidenceIds]) {
+      if (!cited.includes(id)) cited.push(id);
+    }
+  }
+  return [
+    ...cited.filter((id) => kinds.get(id) === "SEC_FILING"),
+    ...cited.filter((id) => kinds.get(id) !== "SEC_FILING"),
+  ];
+}
+
+export function selectSynthesisEvidence(
+  snapshot: ResearchEvidenceSnapshot,
+  options: { specialistClaims?: readonly ModelClaim[] } = {},
+) {
   return selectEvidence(snapshot, {
     query:
       "company financial performance derived summary trend peers competitors risk evidence counterpoint",
     agent: "SYNTHESIS",
+    preferredEvidenceIds: synthesisPreferredEvidenceIds(
+      snapshot,
+      options.specialistClaims ?? [],
+    ),
     maxResults: AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
     contextCharBudget: AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
   });

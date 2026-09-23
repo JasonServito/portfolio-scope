@@ -8,6 +8,7 @@ import {
 export const backgroundFeatureNames = [
   "BACKGROUND_JOBS_ENABLED",
   "SEC_INGESTION_ENABLED",
+  "SEC_FILING_TEXT_ENABLED",
   "RESEARCH_GENERATION_ENABLED",
 ] as const;
 

@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+  AI_SPECIALIST_CONTEXT_CHAR_BUDGETS,
   AI_SPECIALIST_MAX_EVIDENCE_ITEMS,
   AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
   AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
 } from "@/lib/research/ai/config";
-import { buildAaplFixtureSnapshot } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
+import {
+  aaplFixtureFilingPassages,
+  buildAaplFixtureSnapshot,
+} from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import {
   buildResearchEvidenceSnapshot,
   prepareResearchEvidenceSnapshot,
@@ -14,6 +17,7 @@ import {
   selectEvidence,
   selectSpecialistEvidence,
   selectSynthesisEvidence,
+  type FilingPassageRecord,
   type PublicPeerRecord,
   type PublicStockEvidenceRecord,
   type ResearchEvidenceRepository,
@@ -172,6 +176,7 @@ function repository(
   input: {
     facts?: SecFactEvidenceRecord[];
     peerRecords?: PublicPeerRecord[];
+    filingPassages?: FilingPassageRecord[];
     job?: Awaited<
       ReturnType<ResearchEvidenceRepository["findResearchJobStock"]>
     >;
@@ -194,6 +199,7 @@ function repository(
     listPublicPeers: vi.fn().mockResolvedValue(input.peerRecords ?? peers),
     listPeerSecFactCandidates: vi.fn().mockResolvedValue([]),
     findUpcomingEarnings: vi.fn().mockResolvedValue(null),
+    listFilingPassages: vi.fn().mockResolvedValue(input.filingPassages ?? []),
   };
   return value;
 }
@@ -469,7 +475,7 @@ describe("M29 structured-first retrieval", () => {
         );
       }
       expect(selection.contextCharacters).toBeLessThanOrEqual(
-        AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+        AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[agent],
       );
       expect(selection.evidence.length).toBeGreaterThan(mandatory.length);
       expect(selection.evidence.length).toBeLessThanOrEqual(
@@ -482,20 +488,23 @@ describe("M29 structured-first retrieval", () => {
     },
   );
 
-  it("gives financials the summary table, trend excerpt, derived metrics, and the earnings event", () => {
-    const types = selectSpecialistEvidence(aapl, "FINANCIALS").evidence.map(
-      (item) => item.metadata.evidenceType,
-    );
-    expect(types).toEqual(
+  it("gives financials the summary table, trend excerpt, derived metrics, the earnings event, and an MD&A passage", () => {
+    const financials = selectSpecialistEvidence(aapl, "FINANCIALS").evidence;
+    expect(financials.map((item) => item.metadata.evidenceType)).toEqual(
       expect.arrayContaining([
         "FINANCIAL_SUMMARY_TABLE",
         "FINANCIAL_TREND_EXCERPT",
         "DERIVED_METRIC",
         "UPCOMING_EARNINGS_EVENT",
         "EXPLICIT_MISSING_METRICS",
-        "SELECTED_SEC_FACT",
+        "SEC_FILING_PASSAGE",
       ]),
     );
+    expect(
+      financials
+        .filter((item) => item.sourceKind === "SEC_FILING")
+        .map((item) => item.metadata.sectionKind),
+    ).toEqual(["MDA"]);
     const competitors = selectSpecialistEvidence(aapl, "COMPETITORS").evidence;
     expect(competitors.map((item) => item.metadata.evidenceType)).toEqual(
       expect.arrayContaining(["PEER_COMPARISON_TABLE", "PUBLIC_PEER_SET"]),
@@ -592,5 +601,240 @@ describe("M29 structured-first retrieval", () => {
     const scores = selection.matches.map((match) => match.score);
     const fillScores = scores.slice(firstMandatoryCount);
     expect([...fillScores].sort((a, b) => b - a)).toEqual(fillScores);
+  });
+});
+
+describe("M31 filing passage evidence", () => {
+  const aapl = buildAaplFixtureSnapshot();
+  const passages = aapl.evidence.filter(
+    (item) => item.sourceKind === "SEC_FILING",
+  );
+  const passagesFor = (agent: SpecialistAgentName | "SYNTHESIS") =>
+    selectSpecialistEvidence(aapl, agent as SpecialistAgentName).evidence.filter(
+      (item) => item.sourceKind === "SEC_FILING",
+    );
+
+  it("emits bounded, hash-verifiable passages of the latest 10-K and 10-Q with filing provenance", () => {
+    expect(aapl.schemaVersion).toBe("m31-public-evidence-snapshot-v3");
+    expect(passages.length).toBeGreaterThan(0);
+    const perSection = new Map<string, number[]>();
+    for (const item of passages) {
+      expect(item).toMatchObject({
+        sourceKind: "SEC_FILING",
+        secFinancialFactId: null,
+      });
+      expect(item.sourceUrl).toMatch(
+        /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\/320193\/\d{18}\/aapl-\d{8}\.htm$/,
+      );
+      expect(item.accessionNumber).toMatch(/^\d{10}-\d{2}-\d{6}$/);
+      expect(item.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(item.objectKey).toMatch(/^sec\/0000320193\/filings\/[a-f0-9]{64}\.htm$/);
+      expect(item.passageStart).not.toBeNull();
+      expect(item.passageEnd!).toBeGreaterThan(item.passageStart!);
+      expect(item.secFilingId).toMatch(/^filing-aapl-10[kq]-fixture$/);
+      expect(item.secRawSourceId).toMatch(/^raw-aapl-10[kq]-document-fixture$/);
+      expect(item.section).toMatch(/^Item \d+A?\. /);
+      expect(item.sourceDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(item.excerpt.length).toBeLessThanOrEqual(1_600);
+      expect(item.metadata).toMatchObject({
+        evidenceType: "SEC_FILING_PASSAGE",
+        parserVersion: "sec-filing-sections-v1",
+      });
+      const key = `${item.metadata.formType}:${item.metadata.sectionKind}`;
+      perSection.set(key, [
+        ...(perSection.get(key) ?? []),
+        item.metadata.chunkOrdinal as number,
+      ]);
+    }
+    expect([...perSection.keys()].sort()).toEqual([
+      "10-K:BUSINESS",
+      "10-K:MDA",
+      "10-K:RISK_FACTORS",
+      "10-Q:MDA",
+    ]);
+    for (const ordinals of perSection.values()) {
+      expect(ordinals.length).toBeLessThanOrEqual(6);
+      expect(ordinals).toContain(0);
+    }
+    expect(aapl.evidence.length).toBeLessThanOrEqual(160);
+  });
+
+  it("routes sections to agents: Risk Factors to Risk, Business to Competitors, MD&A to Financials and Risk", () => {
+    const agentsFor = (sectionKind: string) =>
+      new Set(
+        passages
+          .filter((item) => item.metadata.sectionKind === sectionKind)
+          .flatMap((item) => item.metadata.agentNames as string[]),
+      );
+    expect(agentsFor("RISK_FACTORS")).toEqual(new Set(["RISK", "SYNTHESIS"]));
+    expect(agentsFor("BUSINESS")).toEqual(
+      new Set(["COMPETITORS", "FINANCIALS", "SYNTHESIS"]),
+    );
+    expect(agentsFor("MDA")).toEqual(
+      new Set(["FINANCIALS", "RISK", "SYNTHESIS"]),
+    );
+
+    for (const agent of ["FINANCIALS", "COMPETITORS", "RISK"] as const) {
+      expect(passagesFor(agent).length).toBeGreaterThan(0);
+    }
+    expect(
+      passagesFor("RISK").every((item) =>
+        ["RISK_FACTORS", "MDA"].includes(String(item.metadata.sectionKind)),
+      ),
+    ).toBe(true);
+    expect(
+      passagesFor("COMPETITORS").every(
+        (item) => item.metadata.sectionKind === "BUSINESS",
+      ),
+    ).toBe(true);
+    expect(
+      selectEvidence(aapl, {
+        query: "competition products markets",
+        agent: "RISK",
+        sourceKinds: ["SEC_FILING"],
+        metadata: { sectionKind: "BUSINESS" },
+      }).evidence,
+    ).toEqual([]);
+  });
+
+  it("keeps the M29 structured evidence first and renders a passage whole or not at all", () => {
+    for (const agent of ["FINANCIALS", "COMPETITORS", "RISK"] as const) {
+      const selection = selectSpecialistEvidence(aapl, agent);
+      const mandatory = aapl.evidence.filter(
+        (item) =>
+          Array.isArray(item.metadata.mandatoryAgentNames) &&
+          (item.metadata.mandatoryAgentNames as string[]).includes(agent),
+      );
+      expect(selection.evidenceIds.slice(0, mandatory.length)).toEqual(
+        mandatory.map((item) => item.id),
+      );
+      for (const item of selection.evidence) {
+        if (item.sourceKind !== "SEC_FILING") continue;
+        expect(selection.context).toContain(item.excerpt);
+      }
+      expect(selection.contextCharacters).toBeLessThanOrEqual(
+        AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[agent],
+      );
+    }
+    const tight = selectEvidence(aapl, {
+      query: "regulatory legal risk",
+      agent: "RISK",
+      sourceKinds: ["SEC_FILING"],
+      contextCharBudget: 500,
+    });
+    expect(tight.evidence).toEqual([]);
+    expect(tight.omittedEvidenceCount).toBeGreaterThan(0);
+    expect(tight.context).not.toContain("[excerpt truncated");
+  });
+
+  it("includes evidence the specialists cited, passages first, right after the synthesis mandatory items", () => {
+    const riskPassage = passagesFor("RISK")[0];
+    const summary = aapl.evidence.find(
+      (item) => item.metadata.evidenceType === "FINANCIAL_SUMMARY_TABLE",
+    )!;
+    const currentRatio = aapl.evidence.find(
+      (item) =>
+        item.metadata.evidenceType === "DERIVED_METRIC" &&
+        item.metadata.metricId === "CURRENT_RATIO",
+    )!;
+    const claim = (evidenceIds: string[], confidence: number) => ({
+      category: "RISK" as const,
+      kind: "FACT" as const,
+      statement: "A claim.",
+      confidence,
+      evidenceIds,
+      counterEvidenceIds: [],
+      assumptions: [],
+    });
+    const selection = selectSynthesisEvidence(aapl, {
+      specialistClaims: [
+        claim([currentRatio.id, summary.id], 0.9),
+        claim([riskPassage.id], 0.6),
+      ],
+    });
+    const mandatoryCount = selection.mandatoryEvidenceIds.length;
+    expect(mandatoryCount).toBeGreaterThan(0);
+    expect(selection.mandatoryEvidenceIds).toContain(summary.id);
+    expect(selection.evidenceIds[mandatoryCount]).toBe(riskPassage.id);
+    expect(selection.evidenceIds).toContain(currentRatio.id);
+    expect(selection.context).toContain(riskPassage.excerpt);
+    expect(selection.contextCharacters).toBeLessThanOrEqual(
+      AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
+    );
+
+    const withoutClaims = selectSynthesisEvidence(aapl);
+    expect(withoutClaims.evidenceIds).not.toContain(riskPassage.id);
+  });
+
+  it("is deterministic regardless of passage ordering and skips unknown sections", () => {
+    const records = aaplFixtureFilingPassages();
+    const reordered = buildAaplFixtureSnapshot({
+      filingPassages: [...records].reverse(),
+    });
+    expect(reordered.evidence.map((item) => item.id)).toEqual(
+      aapl.evidence.map((item) => item.id),
+    );
+    expect(reordered.sourceSnapshotSha256).toBe(aapl.sourceSnapshotSha256);
+
+    const unknown = buildAaplFixtureSnapshot({
+      filingPassages: records.map((record) => ({
+        ...record,
+        sectionKind: "EXHIBITS",
+      })),
+    });
+    expect(
+      unknown.evidence.some((item) => item.sourceKind === "SEC_FILING"),
+    ).toBe(false);
+  });
+
+  it("caps a long section to its opening passage plus the best matches for the owning agents' questions", () => {
+    const base = aaplFixtureFilingPassages().find(
+      (record) => record.sectionKind === "RISK_FACTORS",
+    )!;
+    const filler =
+      "The Company describes general matters in this paragraph of the filing without any specific topic. ".repeat(
+        4,
+      );
+    const regulatory =
+      "Regulatory and legal matters: antitrust litigation, government regulation, and political trade tariff disputes may affect the Company. ".repeat(
+        3,
+      );
+    const many = Array.from({ length: 12 }, (_, ordinal) => ({
+      ...base,
+      id: `${base.filingId}-synthetic-${ordinal}`,
+      ordinal,
+      passageStart: ordinal * 1_000,
+      passageEnd: ordinal * 1_000 + 500,
+      text: ordinal === 9 ? regulatory : `${filler}${ordinal}`,
+      sha256: ordinal.toString(16).padStart(64, "0"),
+    }));
+    const snapshot = buildAaplFixtureSnapshot({ filingPassages: many });
+    const ordinals = snapshot.evidence
+      .filter((item) => item.sourceKind === "SEC_FILING")
+      .map((item) => item.metadata.chunkOrdinal as number);
+
+    expect(ordinals).toHaveLength(6);
+    expect(ordinals[0]).toBe(0);
+    expect(ordinals).toContain(9);
+  });
+
+  it("reads passages through the repository and threads them into the prepared snapshot", async () => {
+    const source = repository({ filingPassages: aaplFixtureFilingPassages() });
+    const snapshot = await prepareResearchEvidenceSnapshot(
+      { stockId: publicStock.id, ticker: "AAPL", companyName: "Apple Inc." },
+      { repository: source },
+    );
+
+    expect(source.listFilingPassages).toHaveBeenCalledWith({
+      secEntityId: "sec-apple",
+    });
+    const passageEvidence = snapshot.evidence.filter(
+      (item) => item.sourceKind === "SEC_FILING",
+    );
+    expect(passageEvidence.length).toBeGreaterThan(0);
+    expect(passageEvidence.map((item) => item.id)).toEqual(
+      passages.map((item) => item.id),
+    );
+    expect(JSON.stringify(snapshot)).not.toMatch(/userId|targetPrice|costBasis/i);
   });
 });

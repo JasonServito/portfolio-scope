@@ -4,6 +4,7 @@ export const featureFlagNames = [
   "AUTH_GOOGLE_ENABLED",
   "BACKGROUND_JOBS_ENABLED",
   "SEC_INGESTION_ENABLED",
+  "SEC_FILING_TEXT_ENABLED",
   "PUBLIC_STOCK_PAGES_ENABLED",
   "RESEARCH_GENERATION_ENABLED",
   "AI_RESEARCH_ENABLED",
@@ -20,6 +21,9 @@ const localDefaults: Record<FeatureFlagName, boolean> = {
   AUTH_GOOGLE_ENABLED: true,
   BACKGROUND_JOBS_ENABLED: true,
   SEC_INGESTION_ENABLED: true,
+  // Filing-document retrieval extends SEC Archives usage and R2 storage, so
+  // it stays an explicit opt-in in every environment.
+  SEC_FILING_TEXT_ENABLED: false,
   PUBLIC_STOCK_PAGES_ENABLED: true,
   RESEARCH_GENERATION_ENABLED: true,
   AI_RESEARCH_ENABLED: false,

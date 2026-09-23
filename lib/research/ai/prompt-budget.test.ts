@@ -5,6 +5,7 @@ import {
   AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
   AI_HARD_MAX_COST_PER_JOB_USD,
   AI_HARD_MAX_TOKENS_PER_JOB,
+  AI_SPECIALIST_CONTEXT_CHAR_BUDGETS,
   getSupportedResearchModels,
 } from "@/lib/research/ai/config";
 import { buildAaplFixtureSnapshot } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
@@ -30,26 +31,45 @@ import {
 /**
  * Reservations treat every serialized provider-input byte as a token, so the
  * m29 context and output limits plus the m30 research questions and claim
- * contract must keep three concurrent specialist reservations, and synthesis
- * after their settlement, inside the 50,000-token and $0.25 job caps. Settled
- * specialist usage is approximated conservatively at three bytes per input
- * token plus the full output allowance.
+ * contract and the m31 filing passages must keep three concurrent specialist
+ * reservations, and synthesis after their settlement, inside the 50,000-token
+ * and $0.25 job caps. Settled specialist usage is approximated conservatively
+ * at three bytes per input token plus the full output allowance.
  */
 
 const CONSERVATIVE_BYTES_PER_INPUT_TOKEN = 3;
 // Headroom kept under the job cap for larger registries, longer company
 // names, and multi-byte characters that the AAPL fixture does not exercise.
 const CONCURRENT_SPECIALIST_HEADROOM_TOKENS = 2_000;
+// Everything in a specialist reservation other than its evidence context:
+// instructions, research questions, registry, output schema, envelope, and
+// output allowance.
+const SPECIALIST_RESERVATION_OVERHEAD_TOKENS = 9_500;
 // Applied to the evidence payload (prompt input), not the safety instructions,
-// which legitimately name the user data the model must never receive.
+// which legitimately name the user data the model must never receive. Filing
+// passages are public disclosure text and may contain words such as
+// "portfolio", so their verbatim excerpts are removed before the check.
 const PRIVATE_DATA_PATTERN =
   /userId|portfolio|holding|alert|targetPrice|costBasis|quantity|email|@/i;
 
 const snapshot = buildAaplFixtureSnapshot();
 const modelAgents = ["FINANCIALS", "COMPETITORS", "RISK"] as const;
+const specialistClaims = modelAgents.flatMap(
+  (agent) => AAPL_RECORDED_SPECIALIST_OUTPUTS[agent].claims,
+);
 
 function bytes(value: string) {
   return Buffer.byteLength(value, "utf8");
+}
+
+function escaped(value: string) {
+  return JSON.stringify(value).slice(1, -1);
+}
+
+function withoutFilingPassages(input: string, evidence: readonly { sourceKind: string; excerpt: string }[]) {
+  return evidence
+    .filter((item) => item.sourceKind === "SEC_FILING")
+    .reduce((text, item) => text.replaceAll(escaped(item.excerpt), ""), input);
 }
 
 function specialistSerialized(agent: (typeof modelAgents)[number]) {
@@ -63,6 +83,7 @@ function specialistSerialized(agent: (typeof modelAgents)[number]) {
     evidenceContext: selection.context,
   });
   return {
+    evidence: selection.evidence,
     input: prompt.input,
     serialized: serializeProviderInput(
       prompt,
@@ -73,7 +94,7 @@ function specialistSerialized(agent: (typeof modelAgents)[number]) {
 }
 
 function synthesisSerialized() {
-  const selection = selectSynthesisEvidence(snapshot);
+  const selection = selectSynthesisEvidence(snapshot, { specialistClaims });
   const prompt = synthesisPrompt({
     ticker: snapshot.stock.ticker,
     companyName: snapshot.stock.companyName,
@@ -103,6 +124,7 @@ function synthesisSerialized() {
     ],
   });
   return {
+    evidence: selection.evidence,
     input: prompt.input,
     serialized: serializeProviderInput(
       prompt,
@@ -136,8 +158,19 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
       AI_HARD_MAX_TOKENS_PER_JOB - CONCURRENT_SPECIALIST_HEADROOM_TOKENS,
     );
     for (const item of specialists) {
-      expect(reservation(item.serialized)).toBeLessThan(16_200);
+      expect(reservation(item.serialized)).toBeLessThan(
+        AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[item.agent] +
+          SPECIALIST_RESERVATION_OVERHEAD_TOKENS,
+      );
     }
+    // The rebalanced per-agent budgets stay within three uniform
+    // 7,200-character budgets; the M31 prompt rule spends the difference.
+    expect(
+      modelAgents.reduce(
+        (sum, agent) => sum + AI_SPECIALIST_CONTEXT_CHAR_BUDGETS[agent],
+        0,
+      ),
+    ).toBeLessThanOrEqual(3 * 7_200);
   });
 
   it("leaves room for synthesis after the specialists settle, including one repair", () => {
@@ -180,7 +213,7 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
         missingData: ["m".repeat(200)],
       },
     });
-    const selection = selectSynthesisEvidence(snapshot);
+    const selection = selectSynthesisEvidence(snapshot, { specialistClaims });
     const prompt = synthesisPrompt({
       ticker: snapshot.stock.ticker,
       companyName: snapshot.stock.companyName,
@@ -252,7 +285,9 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
         ]),
       ).not.toThrow();
     }
-    const synthesisSelection = selectSynthesisEvidence(snapshot);
+    const synthesisSelection = selectSynthesisEvidence(snapshot, {
+      specialistClaims,
+    });
     expect(() =>
       validateGroundedOutput(AAPL_GROUNDED_SYNTHESIS, [
         ...synthesisSelection.evidence,
@@ -260,9 +295,45 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
     ).not.toThrow();
   });
 
+  it("supplies at least one filing passage to every model specialist and the cited passage to synthesis", () => {
+    for (const item of specialists) {
+      const passages = item.evidence.filter(
+        (evidence) => evidence.sourceKind === "SEC_FILING",
+      );
+      expect(passages.length).toBeGreaterThan(0);
+      for (const passage of passages) {
+        expect(item.input).toContain(escaped(passage.excerpt));
+      }
+    }
+    const citedPassages = specialistClaims
+      .flatMap((claim) => claim.evidenceIds)
+      .filter((id) =>
+        snapshot.evidence.some(
+          (item) => item.id === id && item.sourceKind === "SEC_FILING",
+        ),
+      );
+    expect(citedPassages.length).toBeGreaterThan(0);
+    const synthesisPassages = synthesis.evidence.filter(
+      (item) => item.sourceKind === "SEC_FILING",
+    );
+    expect(synthesisPassages.length).toBeGreaterThan(0);
+    expect(
+      AAPL_GROUNDED_SYNTHESIS.claims.some((claim) =>
+        claim.evidenceIds.some((id) =>
+          synthesisPassages.some((item) => item.id === id),
+        ),
+      ),
+    ).toBe(true);
+    for (const call of [...specialists, synthesis]) {
+      expect(call.serialized).toContain("Evidence of kind SEC_FILING");
+    }
+  });
+
   it("sends no private portfolio, alert, note, email, or user identifier to the provider", () => {
     for (const call of [...specialists, synthesis]) {
-      expect(call.input).not.toMatch(PRIVATE_DATA_PATTERN);
+      expect(withoutFilingPassages(call.input, call.evidence)).not.toMatch(
+        PRIVATE_DATA_PATTERN,
+      );
       expect(call.serialized).toContain("DERIVED");
       expect(call.serialized).toContain("never calculate");
     }

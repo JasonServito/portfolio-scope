@@ -28,7 +28,7 @@ historical gate context.
 | Better Stack         | Homepage and health uptime checks                     | Free                                    |                      $0 |
 | Auth.js              | GitHub/Google OAuth and database session management   | Open source                             |                      $0 |
 | Cloudflare           | Domain registration and DNS                           | Domain registration only                |  About $1–2, annualized |
-| Cloudflare R2        | Private raw SEC submissions and Company Facts         | Free allowance                          |             $0 expected |
+| Cloudflare R2        | Private raw SEC JSON and 10-K/10-Q primary documents  | Free allowance                          |             $0 expected |
 | SEC EDGAR            | Authoritative submissions, filings, and Company Facts | Public access                           |                      $0 |
 | TradingView          | Attributed public market chart widget                 | Free public widget                      |                      $0 |
 | EarningsAPI.com      | Guarded normalized upcoming-earnings observations     | Free, published 1,000 requests/month    |             $0 expected |
@@ -83,6 +83,7 @@ Configure each environment independently. Never copy production database credent
 | `VERCEL_AUTOMATION_BYPASS_SECRET`                                     | Blank                                                           | Required automation bypass for protected Preview | Blank; ignored by job publishing             |                            Yes |
 | `BACKGROUND_JOBS_ENABLED`                                             | `false` until configured                                        | `false` until callback proof                     | `true`                                       |                             No |
 | `SEC_INGESTION_ENABLED`                                               | `false` until configured                                        | Independent opt-in                               | `true`                                       |                             No |
+| `SEC_FILING_TEXT_ENABLED`                                             | `false` unless validating filing text                           | `false` until the M31 approval is recorded       | `false` until the M31 approval is recorded   |                             No |
 | `PUBLIC_STOCK_PAGES_ENABLED`                                          | Explicit local choice                                           | Independent opt-in                               | Independent opt-in                           |                             No |
 | `RESEARCH_GENERATION_ENABLED`                                         | `false` until configured                                        | Independent opt-in                               | `true`                                       |                             No |
 | `AI_RESEARCH_ENABLED`                                                 | `false`                                                         | `false` until controlled proof                   | `true`                                       |                             No |
@@ -563,6 +564,45 @@ schedule or broad-backfill endpoint; after M15 activation, the bounded
 freshness schedule queues at most five stale companies per pass. Keep the
 schedule disabled until this controlled path is proven.
 
+### 5. Enable filing text evidence (M31)
+
+`SEC_FILING_TEXT_ENABLED` extends SEC usage to each supported company's latest
+10-K and 10-Q primary document on SEC Archives and stores those documents in
+the private R2 bucket. Enabling it in an environment is the Level 2 decision
+recorded in `docs/task-backlog-part-3.md` (M31 prerequisites): record the
+approval for the Archives usage, the additive
+`20260922230000_m31_filing_text_evidence` migration, and the expected R2
+growth before setting the flag.
+
+1. Apply the migration with the approved remote procedure and keep the flag
+   `false`. The migration is additive and needs no backfill.
+2. Set `SEC_FILING_TEXT_ENABLED=true` only where `SEC_INGESTION_ENABLED` and
+   signed background delivery are already proven.
+3. Trigger one ingestion for one ticker (the same admin request as step 3).
+   After the fact refresh completes, its result lists at most two queued
+   `SEC_FILING_FETCH` jobs, one per latest 10-K and 10-Q. Follow them in
+   `/admin`; each completes with the extracted section kinds and passage count,
+   or ends `PARTIALLY_COMPLETED`/`FAILED` with a sanitized code such as
+   `SEC_FILING_SECTIONS_NOT_FOUND` when a heading could not be located.
+4. Inspect the filing state without exposing object keys:
+
+   ```bash
+   docker compose exec postgres psql -U portfolio_scope -d portfolio_scope -c 'SELECT f."accessionNumber", f."formType", e.status, e."parserVersion", e."extractedSections", e."truncatedSections", e."chunkCount", e."errorCode", e."attemptedAt" FROM "SecFilingExtraction" e JOIN "SecFiling" f ON f.id = e."filingId" ORDER BY e."attemptedAt" DESC LIMIT 10;'
+   ```
+
+5. Confirm one new `FILING_DOCUMENT` object per fetched filing in R2 and
+   record the stored bytes. Then let the twice-daily stale-SEC schedule queue
+   the remaining companies (at most five per pass); a company whose latest
+   filings are already extracted queues nothing.
+
+A failed fetch is retried through the job's bounded attempts, and a filing
+left failed by a transient outage is queued again by a later refresh (at most
+one job per filing per six-hour bucket); a document whose expected headings
+cannot be found stays failed until a parser update or an administrator retry.
+Neither blocks fact ingestion or page rendering. To stop the capability, set
+the flag back to `false`: no page reads SEC or R2, and stored passages remain
+usable by research until they are deliberately removed.
+
 ### Failure and recovery
 
 - Missing SEC/R2 configuration fails the run without exposing variable names or
@@ -698,9 +738,9 @@ before any usage can exceed the free allowances.
   its queued/retrying siblings and parent request coherently. A running child
   must observe the cancelled parent or finish safely; permanent writes are not
   interrupted halfway.
-- For rollback, disable SEC and research first, then background publishing;
-  pause the two named schedules; preserve job rows; and forward-fix the
-  additive schema.
+- For rollback, disable SEC and research first (including
+  `SEC_FILING_TEXT_ENABLED`), then background publishing; pause the two named
+  schedules; preserve job rows; and forward-fix the additive schema.
 
 ## M27 Preview-only validation of M18 external AI
 

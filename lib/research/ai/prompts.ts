@@ -136,12 +136,12 @@ export const SPECIALIST_RESEARCH_QUESTIONS: Record<
 const agentPurpose: Record<SpecialistAgentName, string> = {
   NEWS: "Licensed current-news evidence is not configured, so answer the question by reporting the gap. Do not infer current events from filings.",
   FINANCIALS:
-    "Answer from the reported financial facts, the financial summary table, the quarterly trend excerpt, and the derived growth, margin, cash-generation, and leverage values, always with their periods and units. Keep explicit gaps explicit and never invent valuation inputs.",
+    "Answer from the reported financial facts, the financial summary table, the quarterly trend excerpt, and the derived growth, margin, cash-generation, and leverage values, always with their periods and units; use MD&A passages only for the drivers the filing gives. Keep explicit gaps explicit and never invent valuation inputs.",
   COMPETITORS:
-    "Compare the company with the supplied peer comparison table and peer set using only supplied values and periods. Do not claim market share, rankings, or peer facts that are not supplied.",
+    "Compare the company with the supplied peer comparison table and peer set using only supplied values and periods, and use Business passages for how the filing describes competition. Do not claim market share, rankings, or peer facts that are not supplied.",
   POLITICAL_ACTIVITY:
     "Report that verified political-activity evidence is unavailable unless it is explicitly supplied.",
-  RISK: "Identify company-level reporting, balance-sheet, leverage, liquidity, trend, concentration, event-timing, and evidence-quality risks from the supplied evidence. Do not use personal portfolio context.",
+  RISK: "Identify company-level reporting, balance-sheet, leverage, liquidity, trend, concentration, event-timing, evidence-quality, and disclosed regulatory or governance risks from the supplied evidence, including Risk Factors and MD&A passages. Do not use personal portfolio context.",
 };
 
 function evidenceRegistry(evidence: ResearchEvidence[]) {
@@ -165,6 +165,10 @@ function defaultEvidenceContext(evidence: ResearchEvidence[]) {
 const numericRules = [
   "State a number only when that exact value, period, unit, and sign appear in cited supporting evidence; a runtime check rejects any number absent from the cited excerpts.",
   "Evidence of kind DERIVED holds values this application calculated deterministically from cited SEC facts; you may quote such a value exactly as supplied with its period and unit and must describe it as derived, but you must never calculate, re-derive, extrapolate, or annualize any ratio, growth rate, difference, or average yourself.",
+];
+
+const sourceKindRules = [
+  "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q (form, section, and filing date given); attribute it to that filing as the company's disclosure, not independent verification, and read forward-looking language as expectation, not fact.",
 ];
 
 const claimKindRules = [
@@ -201,6 +205,7 @@ export function specialistPrompt(input: {
     "Every claim must cite at least one supplied evidence id, and counterEvidenceIds may only identify supplied evidence that weakens the claim.",
     "Keep missing information explicit and preserve contradictory evidence.",
     ...numericRules,
+    ...sourceKindRules,
     ...claimKindRules,
     ...specialistContractRules,
     ...safetyRules,
@@ -236,6 +241,7 @@ export function synthesisPrompt(input: {
     "Weigh the specialists' claims and their cited evidence, not the specialists' opinions. A specialist whose availability is NOT_AVAILABLE contributed no evidence: report its gap in missingData and never treat it as a neutral view.",
     "Every final claim must cite supplied evidence ids directly, surface counter-evidence and disagreements, and preserve missing information.",
     ...numericRules,
+    ...sourceKindRules,
     ...claimKindRules,
     `Keep the kind of any claim you carry forward and label your own conclusions INTERPRETATION. ${ratingRule}`,
     "In whatWouldChange, list up to six concrete developments grounded in the supplied evidence that would change this analysis, such as a specific derived metric moving in the next filing or a missing metric becoming available. Do not mention share prices.",
