@@ -1,4 +1,8 @@
 import {
+  numericTokens,
+  unsupportedNumericTokens,
+} from "@/lib/research/ai/consistency";
+import {
   claimKey,
   getModelOutputSafetyIssue,
   researchEvidenceSchema,
@@ -65,6 +69,8 @@ export type ResearchEvaluationResult = {
     unsupportedClaims: number;
     numericalClaims: number;
     numericallySupportedClaims: number;
+    /** Kind mix: a report that only restates facts has no derived or interpretation claims. */
+    claimKinds: { fact: number; derived: number; interpretation: number };
   };
   latencyMs: number;
   usage: EvaluationUsage & { totalTokens: number };
@@ -94,9 +100,6 @@ export type ResearchEvaluationSummary = {
     totalEstimatedCostUsd: number;
   };
 };
-
-const NUMBER_PATTERN =
-  /[-+]?(?:[$€£])?\d[\d,]*(?:\.\d+)?(?:\s*(?:%|percent|thousand|million|billion|trillion|k|m|bn|b|tn))?/gi;
 
 function round(value: number, places = 6) {
   const factor = 10 ** places;
@@ -166,52 +169,22 @@ function missingDataHonesty(actual: string[], expected: string[] | undefined) {
     : round((2 * precision * recall) / (precision + recall));
 }
 
-function canonicalUnit(raw: string) {
-  const value = raw.toLowerCase().replaceAll(/\s+/g, "");
-  if (value.endsWith("%") || value.endsWith("percent")) return "%";
-  if (value.endsWith("thousand") || value.endsWith("k")) return "thousand";
-  if (value.endsWith("million") || value.endsWith("m")) return "million";
-  if (
-    value.endsWith("billion") ||
-    value.endsWith("bn") ||
-    value.endsWith("b")
-  ) {
-    return "billion";
-  }
-  if (value.endsWith("trillion") || value.endsWith("tn")) return "trillion";
-  return "";
-}
-
-function numericTokens(value: string) {
-  const tokens = new Set<string>();
-  for (const match of value.matchAll(NUMBER_PATTERN)) {
-    const raw = match[0];
-    const numeric = raw
-      .replaceAll(/[$€£,]/g, "")
-      .match(/[-+]?\d+(?:\.\d+)?/)?.[0];
-    if (!numeric) continue;
-    const number = Number(numeric);
-    if (!Number.isFinite(number)) continue;
-    tokens.add(`${number}${canonicalUnit(raw)}`);
-  }
-  return tokens;
-}
-
+/** Null when the claim states no number; otherwise the runtime numeric-agreement rule. */
 function numericalClaimSupported(
   claim: ModelClaim,
   evidenceById: Map<string, ResearchEvidence>,
 ) {
-  const claimNumbers = numericTokens(claim.statement);
-  if (claimNumbers.size === 0) return null;
+  if (numericTokens(claim.statement).size === 0) return null;
+  return unsupportedNumericTokens(claim, evidenceById).length === 0;
+}
 
-  const citedNumbers = new Set<string>();
-  for (const evidenceId of claim.evidenceIds) {
-    const evidence = evidenceById.get(evidenceId);
-    if (!evidence) continue;
-    for (const token of numericTokens(evidence.excerpt))
-      citedNumbers.add(token);
-  }
-  return [...claimNumbers].every((token) => citedNumbers.has(token));
+function claimKindCounts(claims: readonly ModelClaim[]) {
+  return {
+    fact: claims.filter((claim) => claim.kind === "FACT").length,
+    derived: claims.filter((claim) => claim.kind === "DERIVED").length,
+    interpretation: claims.filter((claim) => claim.kind === "INTERPRETATION")
+      .length,
+  };
 }
 
 function expectedCitationSets(expectation: ClaimCitationExpectation) {
@@ -425,6 +398,7 @@ export function evaluateResearchOutput(
       unsupportedClaims: citations.unsupportedClaims,
       numericalClaims: numericalResults.length,
       numericallySupportedClaims,
+      claimKinds: claimKindCounts(output?.claims ?? []),
     },
     latencyMs: input.latencyMs,
     usage: {

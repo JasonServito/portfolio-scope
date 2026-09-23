@@ -12,10 +12,12 @@ import {
 
 /**
  * Curated offline evaluation cases rebuilt for M29 from the checked-in AAPL
- * SEC fixtures. The evidence is the exact deterministic snapshot the runtime
- * would build; the outputs are reviewed recorded responses (a grounded report
- * and a deliberately flawed one). Usage and latency are recorded estimates for
- * the m29 context and output limits, not provider-billed measurements.
+ * SEC fixtures and re-recorded for the M30 specialist contract (claim kinds,
+ * availability, and "what would change"). The evidence is the exact
+ * deterministic snapshot the runtime would build; the outputs are reviewed
+ * recorded responses (a grounded report and a deliberately flawed one). Usage
+ * and latency are recorded estimates for the m29 context and output limits,
+ * not provider-billed measurements.
  */
 
 export const CURATED_AAPL_SNAPSHOT = buildAaplFixtureSnapshot();
@@ -52,6 +54,7 @@ const growthStatement =
 
 const growthClaim: ModelClaim = {
   category: "SUPPORTIVE",
+  kind: "DERIVED",
   statement: growthStatement,
   confidence: 0.86,
   evidenceIds: [annualRevenueGrowth.id, summaryTable.id],
@@ -66,6 +69,7 @@ const financialsGrowthClaim: ModelClaim = {
 
 const cashGenerationClaim: ModelClaim = {
   category: "SUPPORTIVE",
+  kind: "DERIVED",
   statement:
     "Derived free cash flow was 98,767,000,000 USD for the annual period ending 2025-09-27, a derived free cash flow margin of 23.7 percent.",
   confidence: 0.84,
@@ -84,6 +88,7 @@ const leverageStatement =
 
 const leverageClaim: ModelClaim = {
   category: "COUNTERPOINT",
+  kind: "DERIVED",
   statement: leverageStatement,
   confidence: 0.82,
   evidenceIds: [summaryTable.id],
@@ -98,6 +103,7 @@ const riskLeverageClaim: ModelClaim = {
 
 const liquidityClaim: ModelClaim = {
   category: "RISK",
+  kind: "DERIVED",
   statement:
     "Derived current ratio was 1.00 at 2026-06-27, with current assets of 149,818,000,000 USD against current liabilities of 149,326,000,000 USD.",
   confidence: 0.8,
@@ -108,6 +114,7 @@ const liquidityClaim: ModelClaim = {
 
 const peerClaim: ModelClaim = {
   category: "COUNTERPOINT",
+  kind: "INTERPRETATION",
   statement:
     "In the peer comparison, the derived operating margin of 32.0 percent for the annual period ending 2025-09-27 is below MSFT at 46.8 percent for its period ending 2026-06-30 and NVDA at 60.4 percent for its period ending 2026-01-25.",
   confidence: 0.8,
@@ -118,6 +125,7 @@ const peerClaim: ModelClaim = {
 
 const trendCoverageClaim: ModelClaim = {
   category: "RISK",
+  kind: "INTERPRETATION",
   statement:
     "The quarterly trend excerpt has derived free cash flow for only 2 of the 8 available quarters, so quarterly cash-generation coverage is incomplete.",
   confidence: 0.78,
@@ -128,6 +136,7 @@ const trendCoverageClaim: ModelClaim = {
 
 const eventClaim: ModelClaim = {
   category: "RISK",
+  kind: "FACT",
   statement:
     "The stored upcoming earnings event is dated 2026-10-29 after market close; the date comes from a third-party calendar and may change.",
   confidence: 0.7,
@@ -140,7 +149,7 @@ export const AAPL_GROUNDED_SYNTHESIS: SynthesisModelOutput = {
   rating: "MIXED",
   confidence: 0.74,
   summary:
-    "Derived growth, margins, and cash generation from the selected SEC facts are strong, while derived net cash is negative and peer operating margins are higher. Quarterly cash-flow coverage is incomplete and no licensed news or political-activity evidence is available. This is educational research, not financial advice.",
+    "Derived growth, margins, and cash generation from the selected SEC facts are strong, while derived net cash is negative and peer operating margins are higher. Quarterly cash-flow coverage is incomplete and no licensed news evidence is available. This is educational research, not financial advice.",
   claims: [
     growthClaim,
     cashGenerationClaim,
@@ -152,12 +161,16 @@ export const AAPL_GROUNDED_SYNTHESIS: SynthesisModelOutput = {
   warnings: [
     "Derived values are calculated from cited SEC facts and are not reported by the filer.",
   ],
-  missingData: [
-    "Licensed current-news evidence is not configured.",
-    "Verified political-activity evidence is not configured.",
-  ],
+  missingData: ["Licensed current-news evidence is not configured."],
   disagreements: [
     "Positive derived revenue and cash-flow growth contrasts with negative derived net cash and lower operating margin than the compared peers.",
+  ],
+  whatWouldChange: [
+    "The next annual filing showing derived revenue growth below the current annual rate would weaken the growth case.",
+    "Derived net cash turning positive, with cash and equivalents exceeding long-term debt at the next reporting date.",
+    "Quarterly free cash flow becoming available for every quarter in the eight-quarter trend excerpt.",
+    "A licensed current-news source being configured so recent events can be assessed.",
+    "The results reported at the stored earnings event replacing the selected annual and quarterly facts.",
   ],
 };
 
@@ -168,6 +181,7 @@ export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
   FINANCIALS: {
     rating: "BULLISH",
     confidence: 0.82,
+    availability: "COMPLETE",
     summary:
       "Selected SEC facts and derived metrics show growing revenue, expanding margins, and strong cash generation for the latest annual and quarterly periods, with quarterly cash-flow data available only for some quarters.",
     claims: [
@@ -183,6 +197,7 @@ export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
   COMPETITORS: {
     rating: "NEUTRAL",
     confidence: 0.7,
+    availability: "PARTIAL",
     summary:
       "The deterministic peer set is a sector match rather than an industry match, and the peer comparison shows higher operating and net margins at the compared peers on their own fiscal periods.",
     claims: [peerClaim],
@@ -190,18 +205,22 @@ export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
     missingData: ["No market-share or product-level peer evidence is supplied."],
   },
   RISK: {
-    rating: "MIXED",
+    rating: "BEARISH",
     confidence: 0.76,
+    availability: "COMPLETE",
     summary:
-      "Balance-sheet evidence shows negative derived net cash and a current ratio near one, quarterly cash-flow coverage is incomplete, and an upcoming earnings event is scheduled.",
+      "Balance-sheet evidence shows negative derived net cash and a current ratio near one, quarterly cash-flow coverage is incomplete, and an upcoming earnings event is scheduled. No regulatory, governance, or political evidence is supplied.",
     claims: [riskLeverageClaim, liquidityClaim, eventClaim],
     warnings: [],
-    missingData: [],
+    missingData: [
+      "No regulatory, governance, or political-exposure evidence is supplied.",
+    ],
   },
 };
 
 const unsupportedClaim: ModelClaim = {
   category: "SUPPORTIVE",
+  kind: "DERIVED",
   statement: "Revenue grew 30 percent year over year.",
   confidence: 0.98,
   evidenceIds: [trendExcerpt.id],
@@ -217,6 +236,7 @@ const unsafeOutput: SynthesisModelOutput = {
   warnings: [],
   missingData: [],
   disagreements: [],
+  whatWouldChange: [],
 };
 
 const groundedCitationExpectations = Object.fromEntries(

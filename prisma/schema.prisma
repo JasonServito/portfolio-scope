@@ -134,6 +134,18 @@ enum AgentRating {
   MIXED
 }
 
+enum AgentAvailability {
+  COMPLETE
+  PARTIAL
+  NOT_AVAILABLE
+}
+
+enum ResearchClaimKind {
+  FACT
+  DERIVED
+  INTERPRETATION
+}
+
 enum UserRole {
   USER
   ADMIN
@@ -286,23 +298,23 @@ model WatchlistItem {
 }
 
 model Stock {
-  id             String           @id @default(cuid())
-  companyId      String?
-  ticker         String           @unique
-  companyName    String
-  sector         String
-  industry       String
-  exchange       String
-  currency       String           @default("USD")
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  company        Company?         @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  holdings       Holding[]
-  watchlistItems WatchlistItem[]
-  prices         StockPrice[]
-  alerts         Alert[]
-  researchJobs   ResearchJob[]
-  reports        ResearchReport[]
+  id               String                 @id @default(cuid())
+  companyId        String?
+  ticker           String                 @unique
+  companyName      String
+  sector           String
+  industry         String
+  exchange         String
+  currency         String                 @default("USD")
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  company          Company?               @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  holdings         Holding[]
+  watchlistItems   WatchlistItem[]
+  prices           StockPrice[]
+  alerts           Alert[]
+  researchJobs     ResearchJob[]
+  reports          ResearchReport[]
   upcomingEarnings UpcomingEarningsState?
 
   @@index([companyId])
@@ -648,12 +660,12 @@ model BackgroundJobAttempt {
 }
 
 model AgentRun {
-  id                  String          @id @default(cuid())
+  id                  String             @id @default(cuid())
   researchJobId       String
   agentName           AgentName
-  status              AgentStatus     @default(PENDING)
+  status              AgentStatus        @default(PENDING)
   rating              AgentRating?
-  confidence          Decimal?        @db.Decimal(4, 3)
+  confidence          Decimal?           @db.Decimal(4, 3)
   summary             String
   findingsJson        Json
   sourcesJson         Json
@@ -666,9 +678,10 @@ model AgentRun {
   promptVersion       String?
   outputSchemaVersion String?
   agentVersion        String?
-  startedAt           DateTime        @default(now())
+  availability        AgentAvailability?
+  startedAt           DateTime           @default(now())
   completedAt         DateTime?
-  researchJob         ResearchJob     @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
+  researchJob         ResearchJob        @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
   claims              ResearchClaim[]
   aiUsage             AiUsage[]
 
@@ -701,6 +714,8 @@ model ResearchReport {
   outputTokens         Int?
   estimatedCostUsd     Decimal?        @db.Decimal(12, 6)
   reportVersion        String?
+  evidenceCoverageJson Json?
+  whatWouldChangeJson  Json?
   generatedAt          DateTime        @default(now())
   expiresAt            DateTime
   researchJob          ResearchJob     @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
@@ -783,6 +798,7 @@ model ResearchClaim {
   sourceDate      DateTime?             @db.Date
   asOfDate        DateTime              @db.Date
   isMaterial      Boolean               @default(true)
+  kind            ResearchClaimKind?
   ordinal         Int
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt

@@ -96,12 +96,25 @@ const externalResearch: StockResearch = {
     missingData: ["Current cash-flow statement"],
     confidence: 0.61,
     disagreements: ["Revenue and margin trends diverged."],
+    whatWouldChange: ["A margin recovery in the next quarterly filing."],
+    evidenceCoverage: {
+      version: "m30-evidence-coverage-v1",
+      score: 0.78,
+      expectedMetrics: { present: 13, total: 14 },
+      derivedMetrics: { available: 17, total: 20 },
+      structuredEvidence: { present: 4, total: 4, missing: [] },
+      newestFilingDate: "2026-08-01",
+      newestFilingAgeDays: 10,
+      freshness: 1,
+    },
+    upcomingEarnings: { eventDate: "2026-10-29", marketSession: "AFTER_MARKET" },
   },
   claims: [
     {
       id: "claim-1",
       claimKey: "revenue-growth",
       category: "SUPPORTIVE",
+      kind: "DERIVED",
       statement: "Revenue increased while margin compressed.",
       confidence: 0.68,
       assumptions: ["SEC facts are period-comparable."],
@@ -263,7 +276,19 @@ describe("research UI", () => {
     expect(markup).toContain(">Strengths<");
     expect(markup).toContain(">Risks<");
     expect(markup).toContain(">What to Watch<");
+    expect(markup).toContain("Evidence coverage 78%");
+    expect(markup).toContain("Newest filing");
+    expect(markup).toContain("8/1/2026");
     expect(markup).toContain("61% reported confidence");
+    expect(markup.indexOf("Evidence coverage 78%")).toBeLessThan(
+      markup.indexOf("61% reported confidence"),
+    );
+    expect(markup).toContain("What would change this analysis");
+    expect(markup).toContain("A margin recovery in the next quarterly filing.");
+    expect(markup).toContain("Upcoming earnings");
+    expect(markup).toContain("10/29/2026");
+    expect(markup).toContain("after market close");
+    expect(markup).toContain("derived value");
     expect(markup).toContain("Evidence-grounded overview.");
     expect(markup).toContain("Revenue increased.");
     expect(markup).toContain("Evidence remains incomplete.");
@@ -285,12 +310,41 @@ describe("research UI", () => {
     expect(markup.match(/sec-fact:revenue/g)).toHaveLength(1);
     expect(markup.match(/sec-fact:margin/g)).toHaveLength(1);
     expect(markup).not.toContain('role="tablist"');
-    expect(markup).not.toContain("Evidence coverage");
     expect(markup).not.toContain("Political Activity");
     expect(markup).not.toContain("Report: report-v2");
     expect(markup).not.toContain("$0.0023");
     expect(markup).not.toContain(">mixed<");
     expect(markup).toContain("This report is partial");
     expect(markup).not.toContain("Regenerate report");
+  });
+
+  it("keeps the prebuilt report free of a coverage headline and labels unknown claim kinds only when known", () => {
+    const markup = renderToStaticMarkup(
+      <ResearchTabs
+        initialResearch={{
+          ...externalResearch,
+          generationMode: "DETERMINISTIC",
+          report: {
+            ...externalResearch.report,
+            whatWouldChange: undefined,
+            evidenceCoverage: null,
+            upcomingEarnings: null,
+          },
+          claims: externalResearch.claims?.map((claim) => ({
+            ...claim,
+            kind: null,
+          })),
+        }}
+        readOnly
+        ticker="AAPL"
+      />,
+    );
+
+    expect(markup).not.toContain("Evidence coverage");
+    expect(markup).not.toContain("Newest filing");
+    expect(markup).not.toContain("What would change this analysis");
+    expect(markup).not.toContain("Upcoming earnings");
+    expect(markup).not.toContain("derived value");
+    expect(markup).toContain("61% reported confidence");
   });
 });

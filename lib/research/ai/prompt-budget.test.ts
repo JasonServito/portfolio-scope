@@ -29,13 +29,17 @@ import {
 
 /**
  * Reservations treat every serialized provider-input byte as a token, so the
- * raised m29 context and output limits must keep three concurrent specialist
- * reservations, and synthesis after their settlement, inside the 50,000-token
- * and $0.25 job caps. Settled specialist usage is approximated conservatively
- * at three bytes per input token plus the full output allowance.
+ * m29 context and output limits plus the m30 research questions and claim
+ * contract must keep three concurrent specialist reservations, and synthesis
+ * after their settlement, inside the 50,000-token and $0.25 job caps. Settled
+ * specialist usage is approximated conservatively at three bytes per input
+ * token plus the full output allowance.
  */
 
 const CONSERVATIVE_BYTES_PER_INPUT_TOKEN = 3;
+// Headroom kept under the job cap for larger registries, longer company
+// names, and multi-byte characters that the AAPL fixture does not exercise.
+const CONCURRENT_SPECIALIST_HEADROOM_TOKENS = 2_000;
 // Applied to the evidence payload (prompt input), not the safety instructions,
 // which legitimately name the user data the model must never receive.
 const PRIVATE_DATA_PATTERN =
@@ -86,26 +90,13 @@ function synthesisSerialized() {
         output: {
           rating: "NEUTRAL" as const,
           confidence: 0,
+          availability: "NOT_AVAILABLE" as const,
           summary:
             "Licensed current-news evidence is not configured; filings are not treated as current news.",
           claims: [],
           warnings: [],
           missingData: [
             "Licensed current-news evidence is not configured; filings are not treated as current news.",
-          ],
-        },
-      },
-      {
-        agentName: "POLITICAL_ACTIVITY" as const,
-        output: {
-          rating: "NEUTRAL" as const,
-          confidence: 0,
-          summary:
-            "Verified political-activity evidence is not configured for this company.",
-          claims: [],
-          warnings: [],
-          missingData: [
-            "Verified political-activity evidence is not configured for this company.",
           ],
         },
       },
@@ -141,9 +132,11 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
       (sum, item) => sum + reservation(item.serialized),
       0,
     );
-    expect(total).toBeLessThanOrEqual(AI_HARD_MAX_TOKENS_PER_JOB);
+    expect(total).toBeLessThanOrEqual(
+      AI_HARD_MAX_TOKENS_PER_JOB - CONCURRENT_SPECIALIST_HEADROOM_TOKENS,
+    );
     for (const item of specialists) {
-      expect(reservation(item.serialized)).toBeLessThan(16_000);
+      expect(reservation(item.serialized)).toBeLessThan(16_200);
     }
   });
 
@@ -172,9 +165,11 @@ describe("m29 prompt envelope with the AAPL fixture", () => {
       output: {
         rating: "MIXED" as const,
         confidence: 0.6,
+        availability: "COMPLETE" as const,
         summary: "s".repeat(1_500),
         claims: Array.from({ length: 12 }, (_, index) => ({
           category: "SUPPORTIVE" as const,
+          kind: "INTERPRETATION" as const,
           statement: `${"c".repeat(380)} ${index}`,
           confidence: 0.5 + index / 100,
           evidenceIds: [snapshot.evidence[0].id],

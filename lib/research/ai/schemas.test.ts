@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getModelOutputSafetyIssue,
+  ModelOutputConsistencyError,
   ModelOutputSafetyError,
   stableHash,
   validateGroundedOutput,
@@ -30,14 +31,19 @@ const evidence: ResearchEvidence = {
   metadata: {},
 };
 
-function output(summary: string): SpecialistModelOutput {
+function output(
+  summary: string,
+  overrides: Partial<SpecialistModelOutput> = {},
+): SpecialistModelOutput {
   return {
-    rating: "MIXED",
+    rating: "NEUTRAL",
     confidence: 0.7,
+    availability: "COMPLETE",
     summary,
     claims: [
       {
         category: "SUPPORTIVE",
+        kind: "FACT",
         statement:
           "Management projects company revenue could reach $500 billion in FY2028.",
         confidence: 0.7,
@@ -48,7 +54,17 @@ function output(summary: string): SpecialistModelOutput {
     ],
     warnings: [],
     missingData: [],
+    ...overrides,
   };
+}
+
+const supportedSummary =
+  "Management projects company revenue could reach $500 billion in FY2028.";
+
+function claimWith(
+  overrides: Partial<SpecialistModelOutput["claims"][number]>,
+) {
+  return { ...output(supportedSummary).claims[0], ...overrides };
 }
 
 describe("stableHash", () => {
@@ -117,7 +133,7 @@ describe("model output safety", () => {
     "allows financial projections and historical source facts: %s",
     (summary) => {
       expect(validateGroundedOutput(output(summary), [evidence])).toMatchObject(
-        { rating: "MIXED" },
+        { rating: "NEUTRAL" },
       );
     },
   );
@@ -129,5 +145,138 @@ describe("model output safety", () => {
     cyclic.self = cyclic;
 
     expect(getModelOutputSafetyIssue(cyclic)).toMatch(/investment action/i);
+  });
+});
+
+describe("model output consistency gate", () => {
+  const derivedEvidence: ResearchEvidence = {
+    ...evidence,
+    id: "ev_1111111111111111",
+    sourceKind: "DERIVED",
+    title: "Derived margin",
+    sourceReference: "derived-metric:example:OPERATING_MARGIN",
+    excerpt: "Operating margin, annual period ending 2028-12-31: 31.5 percent.",
+  };
+
+  it("rejects a number absent from the cited supporting excerpts", () => {
+    const wrongValue = output(supportedSummary, {
+      claims: [
+        claimWith({
+          statement: "Management projects revenue could reach $600 billion in FY2028.",
+        }),
+      ],
+    });
+    const wrongUnit = output(supportedSummary, {
+      claims: [
+        claimWith({
+          statement: "Management projects revenue could reach $500 million in FY2028.",
+        }),
+      ],
+    });
+    // The number appears only in counter-evidence, not in supporting evidence.
+    const counterOnly = output(supportedSummary, {
+      claims: [
+        claimWith({
+          kind: "DERIVED",
+          statement: "Operating margin was 31.5 percent in FY2028.",
+          evidenceIds: [evidence.id],
+          counterEvidenceIds: [derivedEvidence.id],
+        }),
+      ],
+    });
+
+    for (const candidate of [wrongValue, wrongUnit, counterOnly]) {
+      expect(() =>
+        validateGroundedOutput(candidate, [evidence, derivedEvidence]),
+      ).toThrow(ModelOutputConsistencyError);
+    }
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, {
+          claims: [
+            claimWith({
+              kind: "DERIVED",
+              statement: "Derived operating margin was 31.5 percent in FY2028.",
+              evidenceIds: [derivedEvidence.id],
+            }),
+          ],
+        }),
+        [evidence, derivedEvidence],
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects a rating that contradicts the claim categories", () => {
+    const risk = claimWith({ category: "RISK" });
+    const supportive = claimWith({
+      statement: "Management projects revenue could reach $500 billion in FY2028 on new products.",
+    });
+
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, { rating: "BULLISH", claims: [risk] }),
+        [evidence],
+      ),
+    ).toThrow(/BULLISH rating does not agree/);
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, { rating: "BEARISH", claims: [supportive] }),
+        [evidence],
+      ),
+    ).toThrow(ModelOutputConsistencyError);
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, { rating: "MIXED", claims: [supportive] }),
+        [evidence],
+      ),
+    ).toThrow(ModelOutputConsistencyError);
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, {
+          rating: "MIXED",
+          claims: [supportive, risk],
+        }),
+        [evidence],
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, { rating: "BULLISH", claims: [supportive] }),
+        [evidence],
+      ),
+    ).not.toThrow();
+  });
+
+  it("keeps availability and claims in agreement", () => {
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, { availability: "NOT_AVAILABLE" }),
+        [evidence],
+      ),
+    ).toThrow(/NOT_AVAILABLE specialist must not return claims/);
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, { availability: "COMPLETE", claims: [] }),
+        [evidence],
+      ),
+    ).toThrow(/must report NOT_AVAILABLE/);
+    expect(() =>
+      validateGroundedOutput(
+        output("No licensed evidence is supplied.", {
+          availability: "NOT_AVAILABLE",
+          claims: [],
+        }),
+        [evidence],
+      ),
+    ).not.toThrow();
+  });
+
+  it("requires a DERIVED claim to cite a derived evidence item", () => {
+    expect(() =>
+      validateGroundedOutput(
+        output(supportedSummary, { claims: [claimWith({ kind: "DERIVED" })] }),
+        [evidence, derivedEvidence],
+      ),
+    ).toThrow(/labeled DERIVED does not cite a derived evidence item/);
   });
 });

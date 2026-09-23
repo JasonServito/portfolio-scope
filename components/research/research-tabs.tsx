@@ -50,6 +50,19 @@ function generationLabel(research: StockResearch) {
   return "Prebuilt sample";
 }
 
+function claimKindLabel(kind: ResearchClaim["kind"]) {
+  if (kind === "FACT") return "reported fact";
+  if (kind === "DERIVED") return "derived value";
+  if (kind === "INTERPRETATION") return "interpretation";
+  return null;
+}
+
+function earningsSessionLabel(marketSession: string | null) {
+  if (marketSession === "BEFORE_MARKET") return " before market open";
+  if (marketSession === "AFTER_MARKET") return " after market close";
+  return "";
+}
+
 function generationDescription(research: StockResearch) {
   const date = new Date(research.generatedAt).toLocaleDateString("en-US");
   if (research.generationMode === "EXTERNAL") {
@@ -75,15 +88,21 @@ function ClaimCard({
     (reference) => reference.role === "COUNTER",
   );
 
+  const kindLabel = claimKindLabel(claim.kind);
+
   return (
     <article className="rounded-lg border p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">{claim.category.toLowerCase()}</Badge>
-        <Badge variant="secondary">
-          {Math.round(claim.confidence * 100)}% reported confidence
-        </Badge>
+        {kindLabel ? (
+          <Badge variant={claim.kind === "INTERPRETATION" ? "secondary" : "default"}>
+            {kindLabel}
+          </Badge>
+        ) : null}
         <span className="text-xs text-muted-foreground">
           As of {formatDate(claim.asOfDate) ?? claim.asOfDate}
+          {" · "}
+          {Math.round(claim.confidence * 100)}% reported confidence
         </span>
       </div>
       <p className="mt-3 leading-7">{claim.statement}</p>
@@ -185,7 +204,20 @@ function ReportListSection({
 }
 
 function WhatToWatch({ research }: { research: StockResearch }) {
+  const earnings = research.report.upcomingEarnings;
   const groups = [
+    {
+      label: "What would change this analysis",
+      items: research.report.whatWouldChange ?? [],
+    },
+    {
+      label: "Upcoming earnings",
+      items: earnings
+        ? [
+            `An earnings event is recorded for ${formatDate(earnings.eventDate) ?? earnings.eventDate}${earningsSessionLabel(earnings.marketSession)}. The date comes from a third-party calendar and may change.`,
+          ]
+        : [],
+    },
     { label: "Counterpoints", items: research.report.bearCase },
     { label: "Missing information", items: research.report.missingData },
     {
@@ -230,6 +262,7 @@ function WhatToWatch({ research }: { research: StockResearch }) {
 
 function ReportSummary({ research }: { research: StockResearch }) {
   const report = research.report;
+  const coverage = report.evidenceCoverage ?? null;
   const failedAgents = research.agents.filter(
     (agent) => agent.status === "FAILED",
   );
@@ -242,10 +275,24 @@ function ReportSummary({ research }: { research: StockResearch }) {
             <CardTitle aria-level={3} role="heading">
               Summary
             </CardTitle>
-            <Badge variant="secondary">
-              {Math.round(report.confidence * 100)}% reported confidence
-            </Badge>
+            {coverage ? (
+              <Badge variant="secondary">
+                Evidence coverage {Math.round(coverage.score * 100)}%
+              </Badge>
+            ) : null}
           </div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {coverage ? (
+              <>
+                Newest filing{" "}
+                {coverage.newestFilingDate
+                  ? formatDate(coverage.newestFilingDate)
+                  : "date unavailable"}
+                {" · "}
+              </>
+            ) : null}
+            {Math.round(report.confidence * 100)}% reported confidence
+          </p>
         </CardHeader>
         <CardContent>
           <p className="leading-7 text-muted-foreground">{report.overview}</p>

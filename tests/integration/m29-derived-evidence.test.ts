@@ -23,7 +23,7 @@ import {
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
   CURATED_AAPL_SNAPSHOT,
 } from "@/lib/research/ai/fixtures/curated-evaluation";
-import type { SpecialistModelOutput } from "@/lib/research/ai/schemas";
+import type { GroundedModelOutput } from "@/lib/research/ai/schemas";
 import { RecordedResearchModelProvider } from "@/lib/research/ai/providers";
 import {
   assembleResearchEvidenceSnapshot,
@@ -138,7 +138,7 @@ function rekey(id: string) {
   if (!mapped) throw new Error(`No run evidence for ${reference}`);
   return mapped;
 }
-function rekeyOutput<T extends SpecialistModelOutput>(output: T): T {
+function rekeyOutput<T extends GroundedModelOutput>(output: T): T {
   return {
     ...output,
     claims: output.claims.map((claim) => ({
@@ -329,13 +329,7 @@ describe("M29 derived and structured research evidence", () => {
       restored?.evidence.filter((item) => item.sourceKind === "DERIVED").length,
     ).toBe(20);
 
-    for (const agentName of [
-      "FINANCIALS",
-      "COMPETITORS",
-      "RISK",
-      "NEWS",
-      "POLITICAL_ACTIVITY",
-    ] as const) {
+    for (const agentName of ["FINANCIALS", "COMPETITORS", "RISK", "NEWS"] as const) {
       await executeResearchAgent(
         {
           researchJobId: queued.jobId,

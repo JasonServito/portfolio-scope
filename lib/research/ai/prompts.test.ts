@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   boundSpecialistOutputs,
+  SPECIALIST_RESEARCH_QUESTIONS,
   specialistPrompt,
   synthesisPrompt,
+  synthesisSpecialistView,
 } from "./prompts";
 import type { ResearchEvidence, SpecialistModelOutput } from "./schemas";
 
@@ -28,6 +30,16 @@ const evidence: ResearchEvidence = {
   metadata: {},
 };
 
+const notAvailableNews: SpecialistModelOutput = {
+  rating: "NEUTRAL",
+  confidence: 0,
+  availability: "NOT_AVAILABLE",
+  summary: "Licensed current-news evidence is not configured.",
+  claims: [],
+  warnings: [],
+  missingData: ["Licensed current-news evidence is not configured."],
+};
+
 describe("AI research prompts", () => {
   it("contains only bounded public evidence and explicit safety rules", () => {
     const prompt = specialistPrompt({
@@ -47,15 +59,77 @@ describe("AI research prompts", () => {
     expect(prompt.input).not.toMatch(/portfolioWeight|activeAlerts|userId/);
   });
 
-  it("applies the explicit action and stock-price prohibitions to synthesis", () => {
+  it.each([
+    ["FINANCIALS", 6],
+    ["COMPETITORS", 5],
+    ["RISK", 6],
+    ["NEWS", 1],
+  ] as const)(
+    "poses the %s specialist's bounded research questions and contract",
+    (agentName, questionCount) => {
+      const prompt = specialistPrompt({
+        agentName,
+        ticker: "AAPL",
+        companyName: "Apple Inc.",
+        asOfDate: "2026-01-02",
+        evidence: [evidence],
+      });
+      const input = JSON.parse(prompt.input) as {
+        researchQuestions: string[];
+      };
+
+      expect(input.researchQuestions).toEqual(
+        SPECIALIST_RESEARCH_QUESTIONS[agentName],
+      );
+      expect(input.researchQuestions).toHaveLength(questionCount);
+      expect(prompt.instructions).toContain(
+        "Each claim should answer a question rather than restate an evidence excerpt",
+      );
+      expect(prompt.instructions).toContain(
+        "NOT_AVAILABLE requires zero claims and a NEUTRAL rating",
+      );
+      expect(prompt.instructions).toContain("Label every claim with a kind");
+      expect(prompt.instructions).toContain(
+        "a runtime check rejects any number absent from the cited excerpts",
+      );
+    },
+  );
+
+  it("routes regulatory, governance, and political exposure to Risk as an evidence-gated question", () => {
+    expect(SPECIALIST_RESEARCH_QUESTIONS.RISK.at(-1)).toMatch(
+      /Regulatory, governance, and political exposure: answer only if supplied evidence/,
+    );
+    expect(SPECIALIST_RESEARCH_QUESTIONS.NEWS[0]).toContain("NOT_AVAILABLE");
+  });
+
+  it("forwards a NOT_AVAILABLE specialist to synthesis as a gap, never as a neutral opinion", () => {
     const prompt = synthesisPrompt({
       ticker: "AAPL",
       companyName: "Apple Inc.",
       asOfDate: "2026-01-02",
       evidence: [evidence],
-      specialists: [],
+      specialists: [{ agentName: "NEWS", output: notAvailableNews }],
     });
+    const input = JSON.parse(prompt.input) as {
+      specialists: Array<Record<string, unknown>>;
+    };
 
+    expect(input.specialists).toHaveLength(1);
+    expect(input.specialists[0]).toEqual({
+      agentName: "NEWS",
+      availability: "NOT_AVAILABLE",
+      summary: notAvailableNews.summary,
+      claims: [],
+      warnings: [],
+      missingData: notAvailableNews.missingData,
+    });
+    expect(input.specialists[0]).not.toHaveProperty("rating");
+    expect(input.specialists[0]).not.toHaveProperty("confidence");
+    expect(prompt.instructions).toContain(
+      "not the specialists' opinions",
+    );
+    expect(prompt.instructions).toContain("never treat it as a neutral view");
+    expect(prompt.instructions).toContain("whatWouldChange");
     expect(prompt.instructions).toContain("Never personalize an action");
     expect(prompt.instructions).toContain("purchasing, acquiring");
     expect(prompt.instructions).toContain("stock-price target");
@@ -65,6 +139,7 @@ describe("AI research prompts", () => {
   it("forwards every validated specialist claim until the payload budget is reached", () => {
     const claim = (confidence: number, statement: string) => ({
       category: "SUPPORTIVE" as const,
+      kind: "INTERPRETATION" as const,
       statement,
       confidence,
       evidenceIds: [evidence.id],
@@ -74,6 +149,7 @@ describe("AI research prompts", () => {
     const output: SpecialistModelOutput = {
       rating: "NEUTRAL",
       confidence: 0.6,
+      availability: "COMPLETE",
       summary: "Summary.",
       claims: [
         claim(0.9, "High confidence claim."),
@@ -90,18 +166,20 @@ describe("AI research prompts", () => {
     expect(unbounded.specialists[0].output.claims).toHaveLength(3);
     expect(unbounded.specialists[0].output.claims[0].assumptions).toHaveLength(1);
 
-    // The budget that exactly fits the claims once assumptions are dropped.
+    // The budget that exactly fits the forwarded view once assumptions are dropped.
     const strippedSize = JSON.stringify(
-      specialists.map((specialist) => ({
-        ...specialist,
-        output: {
-          ...specialist.output,
-          claims: specialist.output.claims.map((item) => ({
-            ...item,
-            assumptions: [],
-          })),
-        },
-      })),
+      specialists.map((specialist) =>
+        synthesisSpecialistView({
+          ...specialist,
+          output: {
+            ...specialist.output,
+            claims: specialist.output.claims.map((item) => ({
+              ...item,
+              assumptions: [],
+            })),
+          },
+        }),
+      ),
     ).length;
     const withoutAssumptions = boundSpecialistOutputs(specialists, strippedSize);
     expect(withoutAssumptions.omittedClaims).toBe(0);
@@ -125,8 +203,12 @@ describe("AI research prompts", () => {
       evidence: [evidence],
       specialists,
     });
-    expect(JSON.parse(prompt.input).omittedSpecialistClaims).toBe(0);
-    expect(JSON.parse(prompt.input).specialists[0].output.claims).toHaveLength(3);
+    const input = JSON.parse(prompt.input) as {
+      omittedSpecialistClaims: number;
+      specialists: Array<{ claims: unknown[] }>;
+    };
+    expect(input.omittedSpecialistClaims).toBe(0);
+    expect(input.specialists[0].claims).toHaveLength(3);
   });
 
   it("uses the retrieval-bounded context instead of copying full excerpts", () => {

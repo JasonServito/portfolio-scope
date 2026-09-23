@@ -20,7 +20,8 @@ export function boundSpecialistOutputs(
   specialists: readonly SpecialistPromptInput[],
   budget = AI_SYNTHESIS_SPECIALIST_CHAR_BUDGET,
 ): { specialists: SpecialistPromptInput[]; omittedClaims: number } {
-  const size = (value: unknown) => JSON.stringify(value).length;
+  const size = (value: readonly SpecialistPromptInput[]) =>
+    JSON.stringify(value.map(synthesisSpecialistView)).length;
   let current: SpecialistPromptInput[] = specialists.map((specialist) => ({
     agentName: specialist.agentName,
     output: {
@@ -75,12 +76,69 @@ export function boundSpecialistOutputs(
   return { specialists: current, omittedClaims };
 }
 
+/**
+ * Synthesis weighs claims, not specialist opinions, so the specialist rating
+ * and self-reported confidence are not forwarded. A NOT_AVAILABLE specialist
+ * therefore arrives as an availability state with its gaps, never as a
+ * neutral opinion.
+ */
+export function synthesisSpecialistView(specialist: SpecialistPromptInput) {
+  return {
+    agentName: specialist.agentName,
+    availability: specialist.output.availability,
+    summary: specialist.output.summary,
+    claims: specialist.output.claims,
+    warnings: specialist.output.warnings,
+    missingData: specialist.output.missingData,
+  };
+}
+
+/**
+ * Each scheduled specialist is a bounded research job with explicit
+ * questions. Risk absorbs regulatory, governance, and political exposure as
+ * an adaptive question answered only when evidence exists.
+ */
+export const SPECIALIST_RESEARCH_QUESTIONS: Record<
+  SpecialistAgentName,
+  readonly string[]
+> = {
+  FINANCIALS: [
+    "How did revenue change year over year in the latest annual and quarterly periods, and is the eight-quarter revenue trend accelerating, steady, or slowing?",
+    "How did diluted EPS change year over year, and does its quarterly trend agree with revenue?",
+    "What are the latest operating and net margins, and how do they compare with the prior-year period?",
+    "How much free cash flow was generated, what is the free-cash-flow margin, and how does operating cash flow compare with net income?",
+    "What do debt-to-equity, net cash, and the current ratio at the latest reporting date say about balance-sheet capacity?",
+    "Did the diluted share count change year over year, and which expected metrics are missing, ambiguous, or unavailable?",
+  ],
+  COMPETITORS: [
+    "Which peers are supplied, and is each an industry match or a broader sector match?",
+    "How does the company's latest annual revenue growth compare with each peer's on the peer's own fiscal period?",
+    "How do operating and net margins compare with each peer's?",
+    "How do free-cash-flow margin and leverage (debt-to-equity and net cash) compare with each peer's?",
+    "Which comparisons cannot be made because a value is unavailable, and what does the fiscal-period mismatch mean for the rest?",
+  ],
+  RISK: [
+    "Leverage: does long-term debt exceed cash and equivalents (negative net cash), and what is debt-to-equity at the latest reporting date?",
+    "Liquidity: what is the current ratio, and does it indicate strain?",
+    "Trend: is any revenue, diluted EPS, or free-cash-flow trend deteriorating, and are quarters missing from the eight-quarter excerpt?",
+    "Evidence quality: which expected metrics are missing or ambiguous, on what date was the newest cited filing filed, and how does that limit this analysis?",
+    "Event timing: is an earnings event scheduled, and which selected facts could change when the next filing arrives?",
+    "Regulatory, governance, and political exposure: answer only if supplied evidence describes such exposure; otherwise state that no such evidence is supplied.",
+  ],
+  NEWS: [
+    "Is licensed current-news evidence supplied? If not, report availability NOT_AVAILABLE with no claims and state the gap; never infer current events from filings.",
+  ],
+  POLITICAL_ACTIVITY: [
+    "Is verified political-activity evidence supplied? If not, report availability NOT_AVAILABLE with no claims and state the gap.",
+  ],
+};
+
 const agentPurpose: Record<SpecialistAgentName, string> = {
-  NEWS: "Report that licensed current-news evidence is unavailable. Do not infer current events from filings.",
+  NEWS: "Licensed current-news evidence is not configured, so answer the question by reporting the gap. Do not infer current events from filings.",
   FINANCIALS:
-    "Interpret the reported financial facts, the financial summary table, the quarterly trend excerpt, and the derived growth, margin, cash-generation, and leverage values, always with their periods and units, and keep explicit gaps explicit without inventing valuation inputs.",
+    "Answer from the reported financial facts, the financial summary table, the quarterly trend excerpt, and the derived growth, margin, cash-generation, and leverage values, always with their periods and units. Keep explicit gaps explicit and never invent valuation inputs.",
   COMPETITORS:
-    "Compare the company with the supplied peer comparison table and peer set using only the supplied values and periods. Do not claim market share, rankings, or peer facts that are not supplied.",
+    "Compare the company with the supplied peer comparison table and peer set using only supplied values and periods. Do not claim market share, rankings, or peer facts that are not supplied.",
   POLITICAL_ACTIVITY:
     "Report that verified political-activity evidence is unavailable unless it is explicitly supplied.",
   RISK: "Identify company-level reporting, balance-sheet, leverage, liquidity, trend, concentration, event-timing, and evidence-quality risks from the supplied evidence. Do not use personal portfolio context.",
@@ -105,8 +163,21 @@ function defaultEvidenceContext(evidence: ResearchEvidence[]) {
 }
 
 const numericRules = [
-  "State a number only when that exact value, period, and unit appear in cited evidence.",
+  "State a number only when that exact value, period, unit, and sign appear in cited supporting evidence; a runtime check rejects any number absent from the cited excerpts.",
   "Evidence of kind DERIVED holds values this application calculated deterministically from cited SEC facts; you may quote such a value exactly as supplied with its period and unit and must describe it as derived, but you must never calculate, re-derive, extrapolate, or annualize any ratio, growth rate, difference, or average yourself.",
+];
+
+const claimKindRules = [
+  "Label every claim with a kind: FACT restates a reported value or filing statement; DERIVED quotes a value this application calculated (evidence of kind DERIVED) and must cite that item; INTERPRETATION is a conclusion, comparison, or judgment.",
+];
+
+const ratingRule =
+  "Choose the rating from the claim mix: BULLISH needs a SUPPORTIVE claim, BEARISH a COUNTERPOINT or RISK claim, MIXED both, and NEUTRAL is for balanced or thin evidence.";
+
+const specialistContractRules = [
+  "Answer the research questions from the supplied evidence. Each claim should answer a question rather than restate an evidence excerpt; when the evidence cannot answer a question, say so in missingData instead of guessing.",
+  "Set availability to COMPLETE when the evidence answers most questions, PARTIAL when material questions are unanswered because expected metrics are missing or ambiguous, and NOT_AVAILABLE when no usable evidence is supplied; NOT_AVAILABLE requires zero claims and a NEUTRAL rating.",
+  ratingRule,
 ];
 
 const safetyRules = [
@@ -130,6 +201,8 @@ export function specialistPrompt(input: {
     "Every claim must cite at least one supplied evidence id, and counterEvidenceIds may only identify supplied evidence that weakens the claim.",
     "Keep missing information explicit and preserve contradictory evidence.",
     ...numericRules,
+    ...claimKindRules,
+    ...specialistContractRules,
     ...safetyRules,
     agentPurpose[input.agentName],
   ].join(" ");
@@ -137,6 +210,7 @@ export function specialistPrompt(input: {
     task: input.agentName,
     company: { ticker: input.ticker, name: input.companyName },
     asOfDate: input.asOfDate,
+    researchQuestions: SPECIALIST_RESEARCH_QUESTIONS[input.agentName],
     evidence: {
       registry: evidenceRegistry(input.evidence),
       context: input.evidenceContext ?? defaultEvidenceContext(input.evidence),
@@ -159,8 +233,12 @@ export function synthesisPrompt(input: {
   const instructions = [
     "You synthesize validated, evidence-grounded company research for a non-advisory educational application.",
     "Use only the supplied evidence and specialist outputs. Specialist prose is interpretation, not a new source.",
+    "Weigh the specialists' claims and their cited evidence, not the specialists' opinions. A specialist whose availability is NOT_AVAILABLE contributed no evidence: report its gap in missingData and never treat it as a neutral view.",
     "Every final claim must cite supplied evidence ids directly, surface counter-evidence and disagreements, and preserve missing information.",
     ...numericRules,
+    ...claimKindRules,
+    `Keep the kind of any claim you carry forward and label your own conclusions INTERPRETATION. ${ratingRule}`,
+    "In whatWouldChange, list up to six concrete developments grounded in the supplied evidence that would change this analysis, such as a specific derived metric moving in the next filing or a missing metric becoming available. Do not mention share prices.",
     ...safetyRules,
   ].join(" ");
   const body = JSON.stringify({
@@ -171,7 +249,7 @@ export function synthesisPrompt(input: {
       registry: evidenceRegistry(input.evidence),
       context: input.evidenceContext ?? defaultEvidenceContext(input.evidence),
     },
-    specialists: bounded.specialists,
+    specialists: bounded.specialists.map(synthesisSpecialistView),
     omittedSpecialistClaims: bounded.omittedClaims,
     repairFeedback: input.repairFeedback ?? null,
   });

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { diffResearchReports } from "@/lib/research/ai/report-diff";
-import type { ModelClaim, ResearchEvidence } from "@/lib/research/ai/schemas";
+import {
+  diffResearchReports,
+  type ReportDiffClaim,
+} from "@/lib/research/ai/report-diff";
+import type { ResearchEvidence } from "@/lib/research/ai/schemas";
 
 function evidence(
   id: string,
@@ -33,10 +36,11 @@ function evidence(
 function claim(
   statement: string,
   evidenceIds: string[],
-  overrides: Partial<ModelClaim> = {},
-): ModelClaim {
+  overrides: Partial<ReportDiffClaim> = {},
+): ReportDiffClaim {
   return {
     category: "SUPPORTIVE",
+    kind: "INTERPRETATION",
     statement,
     confidence: 0.8,
     evidenceIds,

@@ -239,6 +239,16 @@ backfill, and is safe to apply with external AI disabled. Research jobs queued
 under the earlier prompt/retrieval versions fail closed after deployment by
 design; requeue them rather than editing persisted snapshots.
 
+M30 migration `20260922180000_m30_specialist_contracts` follows M29 and is
+additive: it creates the `AgentAvailability` and `ResearchClaimKind` enums and
+adds nullable `AgentRun.availability`, `ResearchClaim.kind`,
+`ResearchReport.evidenceCoverageJson`, and `ResearchReport.whatWouldChangeJson`
+columns. It touches no rows, requires no backfill, leaves historical runs and
+claims unlabelled rather than inventing values, and is safe to apply with
+external AI disabled. New jobs schedule four specialists (News, Financials,
+Competitors, Risk); jobs queued under the M29 prompt/output-schema versions
+fail closed after deployment by design.
+
 Historical M18 repository/local verification (2026-08-11) successfully applied
 both M18 migrations. Current M27 local verification (2026-08-25) found all 11
 repository migrations applied with none pending and passed all 15 dedicated AI

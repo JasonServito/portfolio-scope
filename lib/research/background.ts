@@ -29,10 +29,14 @@ import {
   AI_OUTPUT_SCHEMA_VERSION,
   AI_PROMPT_VERSION,
   AI_REPORT_VERSION,
+  AI_SPECIALIST_AGENT_VERSION,
+  AI_SYNTHESIS_AGENT_VERSION,
   AiConfigurationError,
   getQueuedAiResearchConfig,
   type AiResearchConfig,
 } from "@/lib/research/ai/config";
+import { ratingForClaims } from "@/lib/research/ai/consistency";
+import { computeEvidenceCoverage } from "@/lib/research/ai/evidence-coverage";
 import {
   GroundedModelCallError,
   runGroundedModelCall,
@@ -47,6 +51,7 @@ import {
   ResearchEvidenceSnapshotError,
   selectSpecialistEvidence,
   selectSynthesisEvidence,
+  type ResearchEvidenceSnapshot,
 } from "@/lib/research/ai/retrieval";
 import {
   claimKey,
@@ -61,7 +66,7 @@ import {
 import { seededResearchProvider } from "@/lib/research/providers/seeded-provider";
 import { synthesizeResearch } from "@/lib/research/synthesis-agent";
 import {
-  SPECIALIST_AGENT_NAMES,
+  scheduledSpecialistAgentNames,
   type AgentResult,
   type ResearchFinding,
   type ResearchRating,
@@ -70,8 +75,6 @@ import {
 } from "@/lib/research/types";
 
 const REPORT_TTL_DAYS = 30;
-const AI_SPECIALIST_AGENT_VERSION = "m18-specialist-v1";
-const AI_SYNTHESIS_AGENT_VERSION = "m18-synthesis-v1";
 const AI_USAGE_PERSISTENCE_ERROR = "AI_USAGE_PERSISTENCE_FAILED";
 
 type ChargedAiUsage = ActualAiUsage & { usageId: string };
@@ -121,12 +124,14 @@ function storedAgentResult(run: {
   promptVersion?: string | null;
   outputSchemaVersion?: string | null;
   agentVersion?: string | null;
+  availability?: AgentResult["availability"];
 }): AgentResult {
   return {
     agentName: run.agentName,
     status: run.status === AgentStatus.FAILED ? "FAILED" : "COMPLETED",
     rating: (run.rating ?? "NEUTRAL") as ResearchRating,
     confidence: run.confidence?.toNumber() ?? 0,
+    availability: run.availability ?? null,
     summary: run.summary,
     findings: jsonArray<ResearchFinding>(run.findingsJson),
     sources: jsonArray<ResearchSource>(run.sourcesJson),
@@ -189,6 +194,7 @@ function externalAgentResult(
     status: "COMPLETED",
     rating: output.rating,
     confidence: output.confidence,
+    availability: output.availability,
     summary: output.summary,
     findings: output.claims.map((claim) => ({
       label: claim.category.toLowerCase().replaceAll("_", " "),
@@ -201,6 +207,7 @@ function externalAgentResult(
   };
 }
 
+/** An explicit not-available state: no claims, no opinion, the gap preserved. */
 function missingExternalSpecialist(
   agentName: SpecialistAgentName,
   reason: string,
@@ -208,6 +215,7 @@ function missingExternalSpecialist(
   return {
     rating: "NEUTRAL",
     confidence: 0,
+    availability: "NOT_AVAILABLE",
     summary: reason,
     claims: [],
     warnings: [],
@@ -428,6 +436,7 @@ async function updateAgentRun(
           status: AgentStatus.COMPLETED,
           rating: result.rating,
           confidence: result.confidence,
+          availability: result.availability ?? null,
           summary: result.summary,
           findingsJson: result.findings,
           sourcesJson: result.sources,
@@ -464,10 +473,19 @@ async function enqueueSynthesisIfReady(
   },
   dependencies: BackgroundDependencies = {},
 ) {
+  const parent = await db.researchJob.findUnique({
+    where: { id: input.researchJobId },
+    select: { status: true, generationMode: true },
+  });
+  // Readiness counts only the specialists scheduled for this job's mode; an
+  // unscheduled historical run neither blocks nor satisfies synthesis.
+  const scheduled = scheduledSpecialistAgentNames(
+    parent?.generationMode ?? ResearchGenerationMode.EXTERNAL,
+  );
   const specialistStates = await db.agentRun.findMany({
     where: {
       researchJobId: input.researchJobId,
-      agentName: { in: [...SPECIALIST_AGENT_NAMES] },
+      agentName: { in: [...scheduled] },
     },
     select: { status: true },
   });
@@ -477,10 +495,6 @@ async function enqueueSynthesisIfReady(
   const failedSpecialists = specialistStates.filter(
     ({ status }) => status === AgentStatus.FAILED,
   ).length;
-  const parent = await db.researchJob.findUnique({
-    where: { id: input.researchJobId },
-    select: { status: true },
-  });
   if (parent?.status === ResearchStatus.CANCELLED) {
     return { completedSpecialists, cancelled: true };
   }
@@ -488,7 +502,7 @@ async function enqueueSynthesisIfReady(
     return { completedSpecialists, failed: true };
   }
 
-  if (completedSpecialists !== SPECIALIST_AGENT_NAMES.length) {
+  if (completedSpecialists !== scheduled.length) {
     await db.researchJob.updateMany({
       where: {
         id: input.researchJobId,
@@ -871,19 +885,36 @@ export async function executeResearchAgent(
 function specialistOutput(run: {
   rating: string | null;
   confidence: { toNumber(): number } | null;
+  availability: string | null;
   summary: string;
   claimsJson: Prisma.JsonValue | null;
   warningsJson: Prisma.JsonValue;
   missingDataJson: Prisma.JsonValue | null;
-}) {
-  return specialistModelOutputSchema.parse({
+}): SpecialistModelOutput {
+  const parsed = specialistModelOutputSchema.safeParse({
     rating: run.rating ?? "NEUTRAL",
     confidence: run.confidence?.toNumber() ?? 0,
+    availability: run.availability ?? "NOT_AVAILABLE",
     summary: run.summary,
     claims: jsonArray<ModelClaim>(run.claimsJson),
     warnings: jsonArray<string>(run.warningsJson),
     missingData: jsonArray<string>(run.missingDataJson),
   });
+  if (parsed.success) return parsed.data;
+  // A run persisted under an earlier output schema (for example claims
+  // without a kind) cannot be forwarded as claims. It becomes an explicit gap
+  // so synthesis still completes instead of leaving the job stuck.
+  const reason =
+    "This specialist result was recorded under an earlier output schema and could not be forwarded.";
+  return {
+    rating: "NEUTRAL",
+    confidence: 0,
+    availability: "NOT_AVAILABLE",
+    summary: run.summary || reason,
+    claims: [],
+    warnings: [],
+    missingData: [reason],
+  };
 }
 
 function partialSynthesis(
@@ -917,7 +948,7 @@ function partialSynthesis(
   const retainedClaims = [...uniqueClaims.values()].slice(0, 12);
   omittedClaims += Math.max(0, uniqueClaims.size - retainedClaims.length);
   const output = synthesisModelOutputSchema.parse({
-    rating: "MIXED",
+    rating: ratingForClaims(retainedClaims),
     confidence: Number(confidence.toFixed(3)),
     summary: `${companyName} has a bounded partial synthesis from validated public evidence. Provider failure or missing source coverage is preserved explicitly; this is research context, not financial advice.`,
     claims: retainedClaims,
@@ -933,6 +964,7 @@ function partialSynthesis(
         : []),
     ].slice(0, 10),
     disagreements: [],
+    whatWouldChange: [],
   });
   return validateGroundedOutput(output, evidence);
 }
@@ -958,6 +990,8 @@ async function persistExternalReport(input: {
   };
   output: SynthesisModelOutput;
   evidence: ResearchEvidence[];
+  /** The immutable snapshot the coverage measure is computed from; null when it could not be restored. */
+  snapshot: ResearchEvidenceSnapshot | null;
   provider: string;
   model: string | null;
   config: AiResearchConfig | null;
@@ -966,6 +1000,12 @@ async function persistExternalReport(input: {
   const completedAt = new Date();
   const asOfDate = startOfUtcDay(input.researchJob.createdAt);
   const evidenceById = new Map(input.evidence.map((item) => [item.id, item]));
+  const evidenceCoverage = input.snapshot
+    ? (computeEvidenceCoverage(
+        input.snapshot,
+        utcDateString(input.researchJob.createdAt),
+      ) as Prisma.InputJsonValue)
+    : Prisma.JsonNull;
   let reconciliationRequired = false;
 
   try {
@@ -1085,6 +1125,8 @@ async function persistExternalReport(input: {
           outputTokens: usage._sum.outputTokens ?? 0,
           estimatedCostUsd: usage._sum.estimatedCostUsd ?? 0,
           reportVersion: AI_REPORT_VERSION,
+          evidenceCoverageJson: evidenceCoverage,
+          whatWouldChangeJson: input.output.whatWouldChange,
           generatedAt: completedAt,
           expiresAt: expiresAtFrom(completedAt),
         },
@@ -1123,6 +1165,8 @@ async function persistExternalReport(input: {
           outputTokens: usage._sum.outputTokens ?? 0,
           estimatedCostUsd: usage._sum.estimatedCostUsd ?? 0,
           reportVersion: AI_REPORT_VERSION,
+          evidenceCoverageJson: evidenceCoverage,
+          whatWouldChangeJson: input.output.whatWouldChange,
           generatedAt: completedAt,
           expiresAt: expiresAtFrom(completedAt),
         },
@@ -1141,6 +1185,7 @@ async function persistExternalReport(input: {
             agentRunId: synthesis.id,
             claimKey: claimKey(claim),
             category: claim.category,
+            kind: claim.kind,
             statement: claim.statement,
             confidence: claim.confidence,
             assumptionsJson: claim.assumptions,
@@ -1241,12 +1286,13 @@ export async function executeResearchSynthesis(
     };
   }
 
+  const scheduled = scheduledSpecialistAgentNames(researchJob.generationMode);
   const specialists = researchJob.agentRuns.filter(
     (run) =>
-      run.agentName !== AgentName.SYNTHESIS &&
+      scheduled.some((agentName) => agentName === run.agentName) &&
       run.status === AgentStatus.COMPLETED,
   );
-  if (specialists.length !== SPECIALIST_AGENT_NAMES.length) {
+  if (specialists.length !== scheduled.length) {
     throw new JobExecutionError(
       "RESEARCH_INPUTS_PENDING",
       true,
@@ -1371,6 +1417,7 @@ export async function executeResearchSynthesis(
       researchJob,
       output,
       evidence: [],
+      snapshot: null,
       provider: "partial-fallback",
       model: null,
       config: null,
@@ -1484,6 +1531,7 @@ export async function executeResearchSynthesis(
       researchJob,
       output,
       evidence: reportEvidence,
+      snapshot,
       provider: providerName,
       model: providerModel,
       config,

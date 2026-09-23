@@ -35,10 +35,12 @@ const evidence: ResearchEvidence = {
 const validOutput = {
   rating: "NEUTRAL" as const,
   confidence: 0.8,
+  availability: "COMPLETE" as const,
   summary: "Reported revenue is available for the stated period.",
   claims: [
     {
       category: "SUPPORTIVE" as const,
+      kind: "FACT" as const,
       statement: "Revenue was reported for FY2025.",
       confidence: 0.9,
       evidenceIds: [evidence.id],
@@ -119,6 +121,49 @@ describe("grounded model runner", () => {
     });
 
     expect(result.attemptNumber).toBe(2);
+    expect(provider.remainingFixtures).toBe(0);
+  });
+
+  it("repairs an inconsistent response once with the failed check, then fails safe", async () => {
+    const inconsistent = {
+      ...validOutput,
+      claims: [
+        { ...validOutput.claims[0], statement: "Revenue was USD 250 in FY2025." },
+      ],
+    };
+    const provider = new RecordedResearchModelProvider({
+      fixtures: [
+        { result: { output: inconsistent } },
+        { result: { output: inconsistent } },
+      ],
+    });
+    const prompt = vi.fn((feedback?: string) => ({
+      instructions: "Grounded only.",
+      input: JSON.stringify({ feedback: feedback ?? null }),
+    }));
+
+    await expect(
+      runGroundedModelCall({
+        provider,
+        config,
+        schema: specialistModelOutputSchema,
+        schemaName: "specialist_result",
+        evidence: [evidence],
+        prompt,
+        userId: "user-a",
+        researchJobId: "job-a",
+        operation: "FINANCIALS",
+        idempotencyKey: "job-a:financials-inconsistent",
+      }),
+    ).rejects.toMatchObject({
+      name: "GroundedModelCallError",
+      code: "AI_INCONSISTENT_OUTPUT",
+      retryable: false,
+      partialResultAllowed: true,
+    });
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(prompt.mock.calls[0][0]).toBeUndefined();
+    expect(prompt.mock.calls[1][0]).toMatch(/does not appear with the same unit/);
     expect(provider.remainingFixtures).toBe(0);
   });
 

@@ -6,10 +6,15 @@ import {
   type SynthesisModelOutput,
 } from "@/lib/research/ai/schemas";
 
+/** Claims persisted before kinds were recorded diff with a null kind. */
+export type ReportDiffClaim = Omit<ModelClaim, "kind"> & {
+  kind?: ModelClaim["kind"] | null;
+};
+
 export type StructuredResearchReportSnapshot = {
   rating: SynthesisModelOutput["rating"];
   confidence: number;
-  claims: ModelClaim[];
+  claims: ReportDiffClaim[];
   evidence: ResearchEvidence[];
   sourceSnapshotSha256: string | null;
   sourceDataVersion: string | null;
@@ -37,8 +42,8 @@ export type ClaimEvidenceChange = {
 export type MaterialClaimChange = {
   previousClaimKey: string;
   currentClaimKey: string;
-  previous: ModelClaim;
-  current: ModelClaim;
+  previous: ReportDiffClaim;
+  current: ReportDiffClaim;
   similarity: number;
   reasons: Array<
     | "statement"
@@ -61,8 +66,8 @@ export type ResearchReportDiff = {
     delta: number;
     materiallyChanged: boolean;
   };
-  newClaims: Array<{ claimKey: string; claim: ModelClaim }>;
-  removedClaims: Array<{ claimKey: string; claim: ModelClaim }>;
+  newClaims: Array<{ claimKey: string; claim: ReportDiffClaim }>;
+  removedClaims: Array<{ claimKey: string; claim: ReportDiffClaim }>;
   changedClaims: MaterialClaimChange[];
   evidenceChanges: ClaimEvidenceChange[];
   source: {
@@ -83,7 +88,7 @@ export type ResearchReportDiffOptions = {
 };
 
 type IndexedClaim = {
-  claim: ModelClaim;
+  claim: ReportDiffClaim;
   index: number;
   key: string;
 };
@@ -234,8 +239,8 @@ function evidenceDelta(
 }
 
 function matchClaims(
-  previousClaims: ModelClaim[],
-  currentClaims: ModelClaim[],
+  previousClaims: ReportDiffClaim[],
+  currentClaims: ReportDiffClaim[],
   claimMatchThreshold: number,
 ) {
   const previous = previousClaims.map((claim, index) => ({

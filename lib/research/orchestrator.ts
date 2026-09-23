@@ -18,12 +18,20 @@ import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 import { getUserAiUsageSummary, utcMonthStart } from "@/lib/research/ai/budget";
 import {
   AI_CALCULATION_VERSION,
+  AI_SPECIALIST_AGENT_VERSION,
   AiConfigurationError,
   createQueuedAiGenerationConfig,
   getAiResearchConfig,
   type QueuedAiGenerationConfig,
 } from "@/lib/research/ai/config";
-import { diffResearchReports } from "@/lib/research/ai/report-diff";
+import {
+  researchEvidenceCoverageSchema,
+  upcomingEarningsFromEvidence,
+} from "@/lib/research/ai/evidence-coverage";
+import {
+  diffResearchReports,
+  type ReportDiffClaim,
+} from "@/lib/research/ai/report-diff";
 import {
   prepareResearchEvidenceSnapshot,
   type ResearchEvidenceSnapshot,
@@ -31,10 +39,10 @@ import {
 import {
   researchEvidenceSchema,
   stableHash,
-  type ModelClaim,
   type ResearchEvidence,
 } from "@/lib/research/ai/schemas";
 import {
+  scheduledSpecialistAgentNames,
   SPECIALIST_AGENT_NAMES,
   type AgentResult,
   type ResearchClaim,
@@ -77,6 +85,7 @@ function asAgentResult(
     status: run.status === "FAILED" ? "FAILED" : "COMPLETED",
     rating: (run.rating ?? "NEUTRAL") as ResearchRating,
     confidence: run.confidence?.toNumber() ?? 0,
+    availability: run.availability ?? null,
     summary: run.summary,
     findings: jsonArray<ResearchFinding>(run.findingsJson),
     sources: jsonArray<ResearchSource>(run.sourcesJson),
@@ -120,6 +129,7 @@ function shapeClaims(
     id: claim.id,
     claimKey: claim.claimKey,
     category: claim.category,
+    kind: claim.kind,
     statement: claim.statement,
     confidence: claim.confidence.toNumber(),
     assumptions: jsonArray<string>(claim.assumptionsJson),
@@ -129,30 +139,37 @@ function shapeClaims(
   }));
 }
 
-function shapeEvidenceRegistry(value: Prisma.JsonValue | null) {
+/** Evidence items of the persisted snapshot that still pass the runtime schema. */
+function parseSnapshotEvidence(value: Prisma.JsonValue | null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const candidates = (value as Record<string, unknown>).evidence;
   if (!Array.isArray(candidates)) return [];
-
-  return candidates.flatMap((candidate): ResearchEvidenceRecord[] => {
+  return candidates.flatMap((candidate): ResearchEvidence[] => {
     const parsed = researchEvidenceSchema.safeParse(candidate);
-    if (!parsed.success) return [];
-    const evidence = parsed.data;
-    return [
-      {
-        id: evidence.id,
-        sourceKind: evidence.sourceKind,
-        title: evidence.title,
-        sourceReference: evidence.sourceReference,
-        sourceUrl: evidence.sourceUrl,
-        accessionNumber: evidence.accessionNumber,
-        section: evidence.section,
-        sourceDate: evidence.sourceDate,
-        retrievedAt: evidence.retrievedAt,
-        excerpt: evidence.excerpt,
-      },
-    ];
+    return parsed.success ? [parsed.data] : [];
   });
+}
+
+function shapeEvidenceRegistry(
+  evidence: readonly ResearchEvidence[],
+): ResearchEvidenceRecord[] {
+  return evidence.map((item) => ({
+    id: item.id,
+    sourceKind: item.sourceKind,
+    title: item.title,
+    sourceReference: item.sourceReference,
+    sourceUrl: item.sourceUrl,
+    accessionNumber: item.accessionNumber,
+    section: item.section,
+    sourceDate: item.sourceDate,
+    retrievedAt: item.retrievedAt,
+    excerpt: item.excerpt,
+  }));
+}
+
+function shapeEvidenceCoverage(value: Prisma.JsonValue | null) {
+  const parsed = researchEvidenceCoverageSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function shapeResearch(
@@ -161,6 +178,7 @@ function shapeResearch(
   if (!job?.report) return null;
   const order = new Map(ALL_AGENT_NAMES.map((name, index) => [name, index]));
   const report = job.report;
+  const snapshotEvidence = parseSnapshotEvidence(job.sourceSnapshotJson);
 
   return {
     jobId: job.id,
@@ -185,9 +203,12 @@ function shapeResearch(
       missingData: jsonArray<string>(report.missingDataJson),
       disagreements: jsonArray<string>(report.disagreementsJson),
       confidence: report.confidence.toNumber(),
+      whatWouldChange: jsonArray<string>(report.whatWouldChangeJson),
+      evidenceCoverage: shapeEvidenceCoverage(report.evidenceCoverageJson),
+      upcomingEarnings: upcomingEarningsFromEvidence(snapshotEvidence),
     },
     claims: shapeClaims(report),
-    evidenceRegistry: shapeEvidenceRegistry(job.sourceSnapshotJson),
+    evidenceRegistry: shapeEvidenceRegistry(snapshotEvidence),
     metadata: {
       provider: report.provider,
       model: report.model,
@@ -266,7 +287,7 @@ function evidenceFromStoredReference(
 function structuredReportSnapshot(job: ResearchJobWithResults) {
   if (!job.report) return null;
   const evidenceById = new Map<string, ResearchEvidence>();
-  const claims: ModelClaim[] = (job.report.claims ?? []).map((claim) => {
+  const claims: ReportDiffClaim[] = (job.report.claims ?? []).map((claim) => {
     for (const evidence of claim.evidence) {
       evidenceById.set(
         evidence.referenceKey,
@@ -275,6 +296,7 @@ function structuredReportSnapshot(job: ResearchJobWithResults) {
     }
     return {
       category: claim.category,
+      kind: claim.kind,
       statement: claim.statement,
       confidence: claim.confidence.toNumber(),
       evidenceIds: claim.evidence
@@ -510,6 +532,11 @@ export async function runResearch(
   }
 
   const correlationId = randomUUID();
+  const scheduledSpecialists = scheduledSpecialistAgentNames(
+    config
+      ? ResearchGenerationMode.EXTERNAL
+      : ResearchGenerationMode.DETERMINISTIC,
+  );
   let job;
   try {
     const transactionResult = await db.$transaction(async (transaction) => {
@@ -595,12 +622,14 @@ export async function runResearch(
           aiTokenLimit: config?.maxTokensPerJob ?? null,
           aiCostLimitUsd: config?.maxCostPerJobUsd ?? null,
           correlationId,
-          requestedAgents: ALL_AGENT_NAMES.map((name) => AgentName[name]),
+          requestedAgents: [...scheduledSpecialists, "SYNTHESIS" as const].map(
+            (name) => AgentName[name],
+          ),
           ...(config ? { createdAt: now } : {}),
         },
       });
       await transaction.agentRun.createMany({
-        data: SPECIALIST_AGENT_NAMES.map((agentName) => ({
+        data: scheduledSpecialists.map((agentName) => ({
           researchJobId: created.id,
           agentName,
           status: "PENDING" as const,
@@ -608,7 +637,9 @@ export async function runResearch(
           findingsJson: [],
           sourcesJson: [],
           warningsJson: [],
-          agentVersion: config ? "m18-specialist-v1" : "deterministic-v1",
+          agentVersion: config
+            ? AI_SPECIALIST_AGENT_VERSION
+            : "deterministic-v1",
         })),
       });
       return { job: created, reused: false } as const;
@@ -661,7 +692,7 @@ export async function runResearch(
 
   try {
     await Promise.all(
-      SPECIALIST_AGENT_NAMES.map((agentName) =>
+      scheduledSpecialists.map((agentName) =>
         enqueueBackgroundJob(
           {
             type: BackgroundJobType.RESEARCH_AGENT_RUN,

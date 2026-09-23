@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import { getOutputConsistencyIssue } from "@/lib/research/ai/consistency";
+
 export const evidenceSourceKindSchema = z.enum([
   "SEC_FACT",
   "SEC_FILING",
@@ -57,9 +59,22 @@ export const researchEvidenceSchema = z
 
 export type ResearchEvidence = z.infer<typeof researchEvidenceSchema>;
 
+export const researchClaimKindSchema = z.enum([
+  "FACT",
+  "DERIVED",
+  "INTERPRETATION",
+]);
+
+export const agentAvailabilitySchema = z.enum([
+  "COMPLETE",
+  "PARTIAL",
+  "NOT_AVAILABLE",
+]);
+
 export const modelClaimSchema = z
   .object({
     category: z.enum(["SUPPORTIVE", "COUNTERPOINT", "RISK"]),
+    kind: researchClaimKindSchema,
     statement: z.string().trim().min(1).max(1_200),
     confidence: z.number().min(0).max(1),
     evidenceIds: z.array(z.string()).min(1).max(6),
@@ -79,17 +94,22 @@ const commonModelOutput = {
   missingData: z.array(z.string().trim().min(1).max(600)).max(10),
 };
 
-export const specialistModelOutputSchema = z.object(commonModelOutput).strict();
+export const specialistModelOutputSchema = z
+  .object({ ...commonModelOutput, availability: agentAvailabilitySchema })
+  .strict();
 
 export const synthesisModelOutputSchema = z
   .object({
     ...commonModelOutput,
     disagreements: z.array(z.string().trim().min(1).max(600)).max(10),
+    whatWouldChange: z.array(z.string().trim().min(1).max(600)).max(6),
   })
   .strict();
 
 export type SpecialistModelOutput = z.infer<typeof specialistModelOutputSchema>;
 export type SynthesisModelOutput = z.infer<typeof synthesisModelOutputSchema>;
+/** The fields every grounded output shares; the runner validates against these. */
+export type GroundedModelOutput = Omit<SpecialistModelOutput, "availability">;
 
 const forbiddenRecommendations = [
   /(?:^|[.!?]\s+|")\s*(?:buy|sell|hold)\s+/i,
@@ -124,6 +144,16 @@ export class ModelOutputSafetyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ModelOutputSafetyError";
+  }
+}
+
+/** A schema-valid, safely cited output whose numbers, rating, or availability disagree with its own claims or cited excerpts. */
+export class ModelOutputConsistencyError extends Error {
+  readonly code = "AI_INCONSISTENT_OUTPUT";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ModelOutputConsistencyError";
   }
 }
 
@@ -190,7 +220,7 @@ export function getModelOutputSafetyIssue(output: unknown) {
   return null;
 }
 
-export function validateGroundedOutput<T extends SpecialistModelOutput>(
+export function validateGroundedOutput<T extends GroundedModelOutput>(
   output: T,
   evidence: ResearchEvidence[],
 ) {
@@ -219,6 +249,8 @@ export function validateGroundedOutput<T extends SpecialistModelOutput>(
       );
     }
   }
+  const consistencyIssue = getOutputConsistencyIssue(output, evidence);
+  if (consistencyIssue) throw new ModelOutputConsistencyError(consistencyIssue);
   return output;
 }
 

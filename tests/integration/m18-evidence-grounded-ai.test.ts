@@ -58,7 +58,10 @@ import {
   getOwnedResearchJob,
   runResearch,
 } from "@/lib/research/orchestrator";
-import { SPECIALIST_AGENT_NAMES } from "@/lib/research/types";
+import {
+  EXTERNAL_SPECIALIST_AGENT_NAMES,
+  SPECIALIST_AGENT_NAMES,
+} from "@/lib/research/types";
 
 const runId = randomUUID().replaceAll("-", "");
 const prefix = `m18-${runId}`;
@@ -304,10 +307,12 @@ function specialistOutput(
   return {
     rating: category === "RISK" ? "BEARISH" : "NEUTRAL",
     confidence: 0.78,
+    availability: "COMPLETE",
     summary: `${statement} The conclusion is limited to the cited public evidence.`,
     claims: [
       {
         category,
+        kind: "FACT",
         statement,
         confidence: 0.8,
         evidenceIds: [evidenceId],
@@ -353,6 +358,9 @@ const synthesisOutput: SynthesisModelOutput = {
   missingData: ["Current licensed news", "Verified political activity"],
   disagreements: [
     "Revenue context and liability context point in different directions.",
+  ],
+  whatWouldChange: [
+    "A later filing changing the reported revenue or liability figures.",
   ],
 };
 
@@ -470,6 +478,7 @@ async function completeSpecialistFixtures(
       status: AgentStatus.COMPLETED,
       rating: "NEUTRAL",
       confidence: financialOutput.confidence,
+      availability: "COMPLETE",
       summary: financialOutput.summary,
       claimsJson: financialOutput.claims,
       missingDataJson: [],
@@ -613,7 +622,7 @@ describe("M18 recorded evidence-grounded research", () => {
       snapshot,
     );
 
-    for (const agentName of SPECIALIST_AGENT_NAMES) {
+    for (const agentName of EXTERNAL_SPECIALIST_AGENT_NAMES) {
       await executeResearchAgent(
         {
           researchJobId: queued.jobId,
@@ -719,7 +728,7 @@ describe("M18 recorded evidence-grounded research", () => {
     ).toHaveLength(4);
     expect(
       stored.agentRuns.filter((run) => run.provider === "bounded-missing-data"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
 
     await expect(
       getOwnedResearchJob(ids.otherUser, queued.jobId),
@@ -790,7 +799,7 @@ describe("M18 recorded evidence-grounded research", () => {
       throw new Error("The partial external research job was not queued.");
     }
 
-    for (const agentName of SPECIALIST_AGENT_NAMES) {
+    for (const agentName of EXTERNAL_SPECIALIST_AGENT_NAMES) {
       await executeResearchAgent(
         {
           researchJobId: queued.jobId,
@@ -860,7 +869,7 @@ describe("M18 recorded evidence-grounded research", () => {
       throw new Error("The metered external research job was not queued.");
     }
 
-    for (const agentName of SPECIALIST_AGENT_NAMES) {
+    for (const agentName of EXTERNAL_SPECIALIST_AGENT_NAMES) {
       await executeResearchAgent(
         {
           researchJobId: queued.jobId,
@@ -977,7 +986,7 @@ describe("M18 recorded evidence-grounded research", () => {
           type: "RESEARCH_AGENT_RUN",
         },
       }),
-    ).resolves.toBe(SPECIALIST_AGENT_NAMES.length);
+    ).resolves.toBe(EXTERNAL_SPECIALIST_AGENT_NAMES.length);
   });
 
   it("allows only one fresh external report per user and stock per UTC day", async () => {
@@ -1100,7 +1109,7 @@ describe("M18 recorded evidence-grounded research", () => {
           type: "RESEARCH_AGENT_RUN",
         },
       }),
-    ).resolves.toBe(SPECIALIST_AGENT_NAMES.length);
+    ).resolves.toBe(EXTERNAL_SPECIALIST_AGENT_NAMES.length);
 
     await db.researchJob.update({
       where: { id: firstNextDay.jobId },

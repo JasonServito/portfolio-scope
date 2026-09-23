@@ -1677,6 +1677,10 @@ function scoreEvidence(
   return { score, matchedTerms };
 }
 
+// A clipped excerpt says so, so the model never treats a cut table or
+// trend as complete.
+const TRUNCATION_MARKER = " [excerpt truncated to fit the context budget]";
+
 function renderContext(
   evidence: ResearchEvidence,
   budget: number,
@@ -1685,11 +1689,14 @@ function renderContext(
   const suffix = `\nSource: ${evidence.sourceReference}`;
   if (prefix.length + suffix.length + 1 > budget) return null;
   const available = budget - prefix.length - suffix.length;
-  const excerpt = evidence.excerpt.slice(0, available);
-  return {
-    text: `${prefix}${excerpt}${suffix}`,
-    truncated: excerpt.length < evidence.excerpt.length,
-  };
+  if (evidence.excerpt.length <= available) {
+    return { text: `${prefix}${evidence.excerpt}${suffix}`, truncated: false };
+  }
+  const excerpt =
+    available > TRUNCATION_MARKER.length
+      ? `${evidence.excerpt.slice(0, available - TRUNCATION_MARKER.length)}${TRUNCATION_MARKER}`
+      : evidence.excerpt.slice(0, available);
+  return { text: `${prefix}${excerpt}${suffix}`, truncated: true };
 }
 
 export function selectEvidence(

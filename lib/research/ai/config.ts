@@ -1,10 +1,12 @@
 import { z } from "zod";
 
 export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
-export const AI_PROMPT_VERSION = "m29-research-v1";
+export const AI_PROMPT_VERSION = "m30-research-v2";
 export const AI_RETRIEVAL_VERSION = "m29-structured-lexical-v1";
-export const AI_OUTPUT_SCHEMA_VERSION = "m18-claims-v1";
-export const AI_REPORT_VERSION = "m18-report-v1";
+export const AI_OUTPUT_SCHEMA_VERSION = "m30-claims-v2";
+export const AI_REPORT_VERSION = "m30-report-v2";
+export const AI_SPECIALIST_AGENT_VERSION = "m30-specialist-v2";
+export const AI_SYNTHESIS_AGENT_VERSION = "m30-synthesis-v2";
 export const AI_CALCULATION_VERSION = "portfolio-v1";
 export const AI_HARD_MAX_COST_PER_JOB_USD = 0.25;
 export const AI_HARD_MAX_TOKENS_PER_JOB = 50_000;
@@ -13,8 +15,11 @@ export const AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL = 2_000;
 // Context budgets are characters of rendered evidence per provider call. They
 // are sized so that three concurrent specialist reservations (which count
 // every serialized input byte as a token) plus synthesis stay inside the
-// 50,000-token job cap; see docs/ai-research.md for the envelope.
-export const AI_SPECIALIST_CONTEXT_CHAR_BUDGET = 8_000;
+// 50,000-token job cap; see docs/ai-research.md for the envelope. M30 spends
+// part of the specialist envelope on research questions and the claim
+// contract, so the evidence context was lowered from 8,000 characters; the
+// owned structured evidence still fits in full.
+export const AI_SPECIALIST_CONTEXT_CHAR_BUDGET = 7_200;
 export const AI_SPECIALIST_MAX_EVIDENCE_ITEMS = 16;
 export const AI_SYNTHESIS_CONTEXT_CHAR_BUDGET = 7_000;
 export const AI_SYNTHESIS_MAX_EVIDENCE_ITEMS = 16;

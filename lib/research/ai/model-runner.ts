@@ -19,10 +19,11 @@ import {
   type ResearchModelResult,
 } from "@/lib/research/ai/providers";
 import {
+  ModelOutputConsistencyError,
   ModelOutputSafetyError,
   validateGroundedOutput,
+  type GroundedModelOutput,
   type ResearchEvidence,
-  type SpecialistModelOutput,
 } from "@/lib/research/ai/schemas";
 
 export type GroundedModelCallResult<T> = {
@@ -79,7 +80,7 @@ type RunnerDependencies = {
  * successful reservation is intentionally returned unsettled so the caller can
  * persist the validated output and settle usage in the same transaction.
  */
-export async function runGroundedModelCall<T extends SpecialistModelOutput>(
+export async function runGroundedModelCall<T extends GroundedModelOutput>(
   input: {
     provider: ResearchModelProvider;
     config: AiResearchConfig;
@@ -239,18 +240,20 @@ export async function runGroundedModelCall<T extends SpecialistModelOutput>(
           providerRequestId: generated.providerRequestId,
         });
       }
+      const checkFailure =
+        error instanceof ModelOutputSafetyError ||
+        error instanceof ModelOutputConsistencyError;
       if (attemptNumber === 2) {
         throw new GroundedModelCallError(
-          error instanceof ModelOutputSafetyError
-            ? error.code
-            : "AI_MODEL_OUTPUT_INVALID",
+          checkFailure ? error.code : "AI_MODEL_OUTPUT_INVALID",
           false,
           true,
           { cause: error },
         );
       }
-      repairFeedback =
-        "The prior response failed the required runtime schema or evidence safety checks. Return a corrected object only; cite only supplied evidence ids and do not add recommendations.";
+      // The check messages are fixed application strings, never model or
+      // user text, so they are safe to echo back as repair guidance.
+      repairFeedback = `The prior response failed the required runtime schema, evidence safety, or consistency checks${checkFailure ? `: ${error.message}` : "."} Return a corrected object only; cite only supplied evidence ids, state numbers exactly as they appear in cited evidence with the same unit, keep the rating and availability consistent with the claims, and do not add recommendations.`;
     }
   }
 

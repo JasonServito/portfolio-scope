@@ -554,6 +554,29 @@ describe("M29 structured-first retrieval", () => {
     expect(noAgent.evidence.length).toBeGreaterThan(0);
   });
 
+  it("marks a clipped mandatory excerpt instead of truncating it silently", () => {
+    const clipped = selectEvidence(aapl, {
+      query: "",
+      agent: "FINANCIALS",
+      contextCharBudget: 6_900,
+      maxResults: 40,
+    });
+    const complete = selectEvidence(aapl, {
+      query: "",
+      agent: "FINANCIALS",
+      contextCharBudget: 32_000,
+      maxResults: 40,
+    });
+
+    expect(clipped.truncated).toBe(true);
+    expect(clipped.contextCharacters).toBeLessThanOrEqual(6_900);
+    expect(clipped.context).toContain(
+      "[excerpt truncated to fit the context budget]",
+    );
+    expect(clipped.mandatoryEvidenceIds).toEqual(complete.mandatoryEvidenceIds);
+    expect(complete.context).not.toContain("[excerpt truncated");
+  });
+
   it("keeps mandatory items ahead of higher-scoring lexical matches", () => {
     const selection = selectEvidence(aapl, {
       query: "Revenue growth (year over year) annual",
