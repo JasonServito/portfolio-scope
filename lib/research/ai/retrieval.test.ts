@@ -1,15 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+  AI_SPECIALIST_MAX_EVIDENCE_ITEMS,
+  AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
+  AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
+} from "@/lib/research/ai/config";
+import { buildAaplFixtureSnapshot } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
+import {
   buildResearchEvidenceSnapshot,
   prepareResearchEvidenceSnapshot,
   ResearchEvidenceSnapshotError,
   selectEvidence,
+  selectSpecialistEvidence,
+  selectSynthesisEvidence,
   type PublicPeerRecord,
   type PublicStockEvidenceRecord,
   type ResearchEvidenceRepository,
   type SecFactEvidenceRecord,
 } from "@/lib/research/ai/retrieval";
+import type { SpecialistAgentName } from "@/lib/research/types";
 
 const submissionsHash = "1".repeat(64);
 const companyFactsHash = "2".repeat(64);
@@ -69,7 +79,11 @@ const peers: PublicPeerRecord[] = [
       slug: "microsoft",
       name: "Microsoft Corporation",
       isSupported: true,
-      secEntity: { cik: "0000789019", legalName: "Microsoft Corporation" },
+      secEntity: {
+        id: "sec-msft",
+        cik: "0000789019",
+        legalName: "Microsoft Corporation",
+      },
     },
   },
   {
@@ -85,7 +99,11 @@ const peers: PublicPeerRecord[] = [
       slug: "dell",
       name: "Dell Technologies Inc.",
       isSupported: true,
-      secEntity: { cik: "0001571996", legalName: "Dell Technologies Inc." },
+      secEntity: {
+        id: "sec-dell",
+        cik: "0001571996",
+        legalName: "Dell Technologies Inc.",
+      },
     },
   },
 ];
@@ -174,6 +192,8 @@ function repository(
     findPublicStock: vi.fn().mockResolvedValue(publicStock),
     listSecFactCandidates: vi.fn().mockResolvedValue(input.facts ?? [fact()]),
     listPublicPeers: vi.fn().mockResolvedValue(input.peerRecords ?? peers),
+    listPeerSecFactCandidates: vi.fn().mockResolvedValue([]),
+    findUpcomingEarnings: vi.fn().mockResolvedValue(null),
   };
   return value;
 }
@@ -228,7 +248,20 @@ describe("research evidence preparation", () => {
       normalizationVersion: "sec-xbrl-v1",
       selection: "SELECTED",
     });
-    expect(snapshot.evidence).toHaveLength(4);
+    expect(
+      snapshot.evidence.filter((item) => item.sourceKind === "SEC_FACT"),
+    ).toHaveLength(1);
+    expect(
+      snapshot.evidence.map((item) => item.metadata.evidenceType),
+    ).toEqual([
+      "PUBLIC_COMPANY_IDENTITY",
+      "EXPLICIT_MISSING_METRICS",
+      "SELECTED_SEC_FACT",
+      "FINANCIAL_SUMMARY_TABLE",
+      "FINANCIAL_TREND_EXCERPT",
+      "PUBLIC_PEER_SET",
+      "PEER_COMPARISON_TABLE",
+    ]);
     expect(snapshot.sourceDataVersion).toMatch(/^[a-f0-9]{64}$/);
     expect(snapshot.inputDataVersion).toMatch(/^[a-f0-9]{64}$/);
     expect(snapshot.sourceSnapshotSha256).toMatch(/^[a-f0-9]{64}$/);
@@ -240,7 +273,7 @@ describe("research evidence preparation", () => {
     );
     expect(source.findResearchJobStock).not.toHaveBeenCalled();
     expect(source.listSecFactCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({ takePerMetric: 12 }),
+      expect.objectContaining({ takePerMetric: 24 }),
     );
     expect(snapshot.evidence.every((item) => item.id.startsWith("ev_"))).toBe(
       true,
@@ -383,6 +416,7 @@ describe("lexical evidence selection", () => {
       selectEvidence(snapshot, {
         query: "revenue",
         agent: "COMPETITORS",
+        sourceKinds: ["SEC_FACT"],
       }).evidence,
     ).toEqual([]);
   });
@@ -404,5 +438,136 @@ describe("lexical evidence selection", () => {
     expect(result.context).toContain("DELL");
     expect(result.context).toContain("MSFT");
     expect(JSON.stringify(result)).not.toMatch(/portfolio|holding|alert/i);
+  });
+});
+
+describe("M29 structured-first retrieval", () => {
+  const aapl = buildAaplFixtureSnapshot();
+  const mandatoryFor = (agent: SpecialistAgentName | "SYNTHESIS") =>
+    aapl.evidence.filter(
+      (item) =>
+        Array.isArray(item.metadata.mandatoryAgentNames) &&
+        (item.metadata.mandatoryAgentNames as string[]).includes(agent),
+    );
+
+  it.each(["FINANCIALS", "COMPETITORS", "RISK"] as const)(
+    "includes every structured item owned by %s in full before lexical fill",
+    (agent) => {
+      const selection = selectSpecialistEvidence(aapl, agent);
+      const mandatory = mandatoryFor(agent);
+
+      expect(mandatory.length).toBeGreaterThan(0);
+      expect(selection.mandatoryEvidenceIds).toEqual(
+        mandatory.map((item) => item.id),
+      );
+      expect(selection.evidenceIds.slice(0, mandatory.length)).toEqual(
+        mandatory.map((item) => item.id),
+      );
+      for (const item of mandatory) {
+        expect(selection.context).toContain(
+          `[${item.id}] ${item.title}\n${item.excerpt}\nSource: ${item.sourceReference}`,
+        );
+      }
+      expect(selection.contextCharacters).toBeLessThanOrEqual(
+        AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+      );
+      expect(selection.evidence.length).toBeGreaterThan(mandatory.length);
+      expect(selection.evidence.length).toBeLessThanOrEqual(
+        AI_SPECIALIST_MAX_EVIDENCE_ITEMS,
+      );
+      for (const item of selection.evidence) {
+        if (item.sourceKind !== "DERIVED") continue;
+        expect(selection.context).toContain(item.excerpt);
+      }
+    },
+  );
+
+  it("gives financials the summary table, trend excerpt, derived metrics, and the earnings event", () => {
+    const types = selectSpecialistEvidence(aapl, "FINANCIALS").evidence.map(
+      (item) => item.metadata.evidenceType,
+    );
+    expect(types).toEqual(
+      expect.arrayContaining([
+        "FINANCIAL_SUMMARY_TABLE",
+        "FINANCIAL_TREND_EXCERPT",
+        "DERIVED_METRIC",
+        "UPCOMING_EARNINGS_EVENT",
+        "EXPLICIT_MISSING_METRICS",
+        "SELECTED_SEC_FACT",
+      ]),
+    );
+    const competitors = selectSpecialistEvidence(aapl, "COMPETITORS").evidence;
+    expect(competitors.map((item) => item.metadata.evidenceType)).toEqual(
+      expect.arrayContaining(["PEER_COMPARISON_TABLE", "PUBLIC_PEER_SET"]),
+    );
+    expect(competitors.some((item) => item.sourceKind === "SEC_FACT")).toBe(
+      false,
+    );
+  });
+
+  it("forwards the structured tables and the peer comparison to synthesis within budget", () => {
+    const selection = selectSynthesisEvidence(aapl);
+    const mandatory = mandatoryFor("SYNTHESIS");
+    expect(selection.mandatoryEvidenceIds).toEqual(
+      mandatory.map((item) => item.id),
+    );
+    expect(mandatory.map((item) => item.metadata.evidenceType)).toEqual(
+      expect.arrayContaining([
+        "FINANCIAL_SUMMARY_TABLE",
+        "FINANCIAL_TREND_EXCERPT",
+        "PEER_COMPARISON_TABLE",
+        "UPCOMING_EARNINGS_EVENT",
+      ]),
+    );
+    expect(selection.contextCharacters).toBeLessThanOrEqual(
+      AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
+    );
+    expect(selection.evidence.length).toBeLessThanOrEqual(
+      AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
+    );
+  });
+
+  it("uses the remaining budget for lexical fill and never renders a partial derived item", () => {
+    const summary = aapl.evidence.find(
+      (item) => item.metadata.evidenceType === "FINANCIAL_SUMMARY_TABLE",
+    )!;
+    const tight = selectEvidence(aapl, {
+      query: "revenue growth margin",
+      agent: "FINANCIALS",
+      contextCharBudget: 5_400,
+      maxResults: 40,
+    });
+    expect(tight.evidenceIds).toContain(summary.id);
+    for (const item of tight.evidence) {
+      if (item.sourceKind !== "DERIVED") continue;
+      if (tight.mandatoryEvidenceIds.includes(item.id)) continue;
+      expect(tight.context).toContain(item.excerpt);
+    }
+    expect(tight.contextCharacters).toBeLessThanOrEqual(5_400);
+    expect(tight.truncated).toBe(true);
+
+    const noAgent = selectEvidence(aapl, {
+      query: "revenue growth",
+      contextCharBudget: 2_000,
+    });
+    expect(noAgent.mandatoryEvidenceIds).toEqual([]);
+    expect(noAgent.evidence.length).toBeGreaterThan(0);
+  });
+
+  it("keeps mandatory items ahead of higher-scoring lexical matches", () => {
+    const selection = selectEvidence(aapl, {
+      query: "Revenue growth (year over year) annual",
+      agent: "RISK",
+      contextCharBudget: 8_000,
+      maxResults: 12,
+    });
+    const firstMandatoryCount = selection.mandatoryEvidenceIds.length;
+    expect(firstMandatoryCount).toBeGreaterThan(0);
+    expect(selection.evidenceIds.slice(0, firstMandatoryCount)).toEqual(
+      selection.mandatoryEvidenceIds,
+    );
+    const scores = selection.matches.map((match) => match.score);
+    const fillScores = scores.slice(firstMandatoryCount);
+    expect([...fillScores].sort((a, b) => b - a)).toEqual(fillScores);
   });
 });

@@ -1,17 +1,41 @@
 import { db } from "@/lib/db";
-import { AI_RETRIEVAL_VERSION } from "@/lib/research/ai/config";
+import {
+  AI_RETRIEVAL_VERSION,
+  AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+  AI_SPECIALIST_MAX_EVIDENCE_ITEMS,
+  AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
+  AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
+} from "@/lib/research/ai/config";
 import {
   evidenceId,
   researchEvidenceSchema,
   stableHash,
   type ResearchEvidence,
 } from "@/lib/research/ai/schemas";
-import type { ResearchAgentName } from "@/lib/research/types";
+import {
+  buildDerivedMetricEvidence,
+  buildFinancialSummaryEvidence,
+  buildPeerComparisonEvidence,
+  buildTrendEvidence,
+  buildUpcomingEarningsEvidence,
+  type StructuredFact,
+  type StructuredPeer,
+} from "@/lib/research/ai/structured-evidence";
+import type {
+  ResearchAgentName,
+  SpecialistAgentName,
+} from "@/lib/research/types";
+import {
+  isPriorYearComparable,
+  priorYearDistance,
+  samePeriod as sameBoundaries,
+  type PeriodBoundaries,
+} from "@/lib/sec/derived-metrics";
 import { expectedMetricNames } from "@/lib/sec/normalization";
 import { z } from "zod";
 
 export const RESEARCH_EVIDENCE_SNAPSHOT_VERSION =
-  "m18-public-evidence-snapshot-v1";
+  "m29-public-evidence-snapshot-v2";
 
 const ALL_RESEARCH_AGENTS: readonly ResearchAgentName[] = [
   "NEWS",
@@ -37,8 +61,21 @@ const RISK_METRICS = new Set([
 const DEFAULT_LIMITS = {
   maxPeers: 8,
   factsPerMetric: 4,
-  factCandidatesPerMetric: 12,
+  factCandidatesPerMetric: 24,
 } as const;
+const TREND_QUARTERS = 8;
+const TREND_METRICS = new Set([
+  "REVENUE",
+  "DILUTED_EPS",
+  "OPERATING_CASH_FLOW",
+  "CAPITAL_EXPENDITURES",
+]);
+// Peers contribute their latest annual facts plus the prior-year comparable
+// and their latest reporting-date facts, so the lookbacks differ by kind.
+const PEER_ANNUAL_LOOKBACK_DAYS = 2 * 365 + 60;
+const PEER_INSTANT_LOOKBACK_DAYS = 400;
+const MAX_PEER_FACT_ROWS = 1_000;
+const MAX_SNAPSHOT_EVIDENCE = 160;
 
 const DEFAULT_MAX_RESULTS = 12;
 const DEFAULT_CONTEXT_CHAR_BUDGET = 12_000;
@@ -103,8 +140,30 @@ export type PublicPeerRecord = {
     slug: string;
     name: string;
     isSupported: boolean;
-    secEntity: { cik: string; legalName: string } | null;
+    secEntity: { id: string; cik: string; legalName: string } | null;
   } | null;
+};
+
+export type PeerSecFactRecord = {
+  secEntityId: string;
+  externalKey: string;
+  canonicalMetric: string;
+  label: string;
+  normalizedValue: StringValue;
+  normalizedUnit: string;
+  periodStart: DateValue | null;
+  periodEnd: DateValue;
+  periodKind: string;
+  filedAt: DateValue;
+  accessionNumber: string;
+  selection: "SELECTED" | "AMBIGUOUS" | "SUPERSEDED";
+};
+
+export type UpcomingEarningsRecord = {
+  eventDate: DateValue | null;
+  marketSession: string | null;
+  source: string;
+  fetchedAt: DateValue;
 };
 
 export type SecFactEvidenceRecord = {
@@ -171,11 +230,19 @@ export interface ResearchEvidenceRepository {
     sector: string;
     take: number;
   }): Promise<PublicPeerRecord[]>;
+  listPeerSecFactCandidates(input: {
+    secEntityIds: readonly string[];
+    metrics: readonly string[];
+    annualPeriodEndFrom: Date;
+    instantPeriodEndFrom: Date;
+    take: number;
+  }): Promise<PeerSecFactRecord[]>;
+  findUpcomingEarnings(stockId: string): Promise<UpcomingEarningsRecord | null>;
 }
 
 export type ResearchEvidenceDatabase = Pick<
   typeof db,
-  "researchJob" | "stock" | "secFinancialFact"
+  "researchJob" | "stock" | "secFinancialFact" | "upcomingEarningsState"
 >;
 
 export type EvidenceSnapshotLimits = {
@@ -265,6 +332,7 @@ export type EvidenceSelectionResult = Readonly<{
   retrievalVersion: typeof AI_RETRIEVAL_VERSION;
   evidence: readonly ResearchEvidence[];
   evidenceIds: readonly string[];
+  mandatoryEvidenceIds: readonly string[];
   matches: readonly EvidenceMatch[];
   context: string;
   contextCharacters: number;
@@ -322,7 +390,7 @@ const persistedSnapshotSchema = z
     peers: z.array(persistedPeerSchema).max(12),
     missingMetrics: z.array(z.string()).max(expectedMetricNames.length),
     ambiguousMetrics: z.array(z.string()).max(expectedMetricNames.length),
-    evidence: z.array(researchEvidenceSchema).max(64),
+    evidence: z.array(researchEvidenceSchema).max(MAX_SNAPSHOT_EVIDENCE),
   })
   .strict();
 
@@ -513,7 +581,7 @@ export function createPrismaResearchEvidenceRepository(
             slug: true,
             name: true,
             isSupported: true,
-            secEntity: { select: { cik: true, legalName: true } },
+            secEntity: { select: { id: true, cik: true, legalName: true } },
           },
         },
       } as const;
@@ -549,6 +617,61 @@ export function createPrismaResearchEvidenceRepository(
         : [];
       return [...industryPeers, ...sectorPeers];
     },
+
+    async listPeerSecFactCandidates({
+      secEntityIds,
+      metrics,
+      annualPeriodEndFrom,
+      instantPeriodEndFrom,
+      take,
+    }) {
+      if (secEntityIds.length === 0 || take <= 0) return [];
+      return database.secFinancialFact.findMany({
+        where: {
+          secEntityId: { in: [...secEntityIds] },
+          canonicalMetric: { in: [...metrics] },
+          selection: { in: ["SELECTED", "AMBIGUOUS"] },
+          OR: [
+            { periodKind: "ANNUAL", periodEnd: { gte: annualPeriodEndFrom } },
+            { periodKind: "INSTANT", periodEnd: { gte: instantPeriodEndFrom } },
+          ],
+        },
+        orderBy: [
+          { secEntityId: "asc" },
+          { canonicalMetric: "asc" },
+          { periodEnd: "desc" },
+          { filedAt: "desc" },
+          { externalKey: "asc" },
+        ],
+        take,
+        select: {
+          secEntityId: true,
+          externalKey: true,
+          canonicalMetric: true,
+          label: true,
+          normalizedValue: true,
+          normalizedUnit: true,
+          periodStart: true,
+          periodEnd: true,
+          periodKind: true,
+          filedAt: true,
+          accessionNumber: true,
+          selection: true,
+        },
+      });
+    },
+
+    async findUpcomingEarnings(stockId) {
+      return database.upcomingEarningsState.findUnique({
+        where: { stockId },
+        select: {
+          eventDate: true,
+          marketSession: true,
+          source: true,
+          fetchedAt: true,
+        },
+      });
+    },
   };
 }
 
@@ -574,7 +697,7 @@ function resolveLimits(
     factCandidatesPerMetric: integerLimit(
       limits?.factCandidatesPerMetric,
       DEFAULT_LIMITS.factCandidatesPerMetric,
-      20,
+      40,
     ),
   };
 }
@@ -672,6 +795,7 @@ function makeCompanyEvidence(
     metadata: {
       evidenceType: "PUBLIC_COMPANY_IDENTITY",
       agentNames: [...ALL_RESEARCH_AGENTS],
+      mandatoryAgentNames: ["FINANCIALS", "COMPETITORS", "RISK", "SYNTHESIS"],
       stockId: stock.stockId,
       companyId: stock.companyId,
       ticker: stock.ticker,
@@ -819,6 +943,7 @@ function makePeerEvidence(
     metadata: {
       evidenceType: "PUBLIC_PEER_SET",
       agentNames: ["COMPETITORS", "SYNTHESIS"],
+      mandatoryAgentNames: ["COMPETITORS"],
       ticker: stock.ticker,
       selectionMethod: "EXACT_INDUSTRY_THEN_SECTOR_V1",
       peerCount: peers.length,
@@ -863,6 +988,7 @@ function makeMissingMetricsEvidence(
     metadata: {
       evidenceType: "EXPLICIT_MISSING_METRICS",
       agentNames: ["FINANCIALS", "RISK", "SYNTHESIS"],
+      mandatoryAgentNames: ["FINANCIALS", "RISK", "SYNTHESIS"],
       expectedMetrics: [...expectedMetricNames].sort(),
       missingMetrics: [...missingMetrics],
       ambiguousMetrics: [...ambiguousMetrics],
@@ -871,24 +997,64 @@ function makeMissingMetricsEvidence(
   });
 }
 
-function compareFact(
-  left: SecFactEvidenceRecord,
-  right: SecFactEvidenceRecord,
-) {
-  return (
-    (date(right.periodEnd) ?? "").localeCompare(date(left.periodEnd) ?? "") ||
-    (date(right.filedAt) ?? "").localeCompare(date(left.filedAt) ?? "") ||
-    left.externalKey.localeCompare(right.externalKey)
-  );
+type SelectableFact = {
+  externalKey: string;
+  canonicalMetric: string;
+  periodKind: string;
+  periodStart: DateValue | null;
+  periodEnd: DateValue;
+  filedAt: DateValue;
+  selection: "SELECTED" | "AMBIGUOUS" | "SUPERSEDED";
+};
+
+function boundaries(fact: SelectableFact): PeriodBoundaries {
+  return {
+    periodStart: dateOnly(fact.periodStart),
+    periodEnd: dateOnly(fact.periodEnd) ?? "",
+  };
 }
 
-function selectFacts(
-  candidates: readonly SecFactEvidenceRecord[],
-  factsPerMetric: number,
+function samePeriod(left: SelectableFact, right: SelectableFact) {
+  return sameBoundaries(boundaries(left), boundaries(right));
+}
+
+/**
+ * The prior-year observation comparable to the reference period, using the
+ * derived-metric service's comparable window so selection and calculation
+ * agree. An ambiguous comparable is excluded so growth stays unavailable.
+ */
+function priorYearComparable<T extends SelectableFact>(
+  group: readonly T[],
+  reference: T,
 ) {
-  const selected: SecFactEvidenceRecord[] = [];
+  const target = boundaries(reference);
+  const window = group.filter((fact) =>
+    isPriorYearComparable(boundaries(fact), target),
+  );
+  const nearest = [...window].sort(
+    (left, right) =>
+      priorYearDistance(boundaries(left), target) -
+        priorYearDistance(boundaries(right), target) ||
+      compareFact(left, right),
+  )[0];
+  if (!nearest) return null;
+  return window
+    .filter((fact) => samePeriod(fact, nearest))
+    .some((fact) => fact.selection === "AMBIGUOUS")
+    ? null
+    : nearest.selection === "SELECTED"
+      ? nearest
+      : null;
+}
+
+function selectFacts<T extends SelectableFact>(
+  candidates: readonly T[],
+  factsPerMetric: number,
+  options: { trendQuarters: number; comparables: boolean },
+) {
+  const selected = new Map<string, T>();
   const ambiguousMetrics = new Set<string>();
-  const byMetric = new Map<string, SecFactEvidenceRecord[]>();
+  const byMetric = new Map<string, T[]>();
   for (const candidate of candidates) {
     if (!expectedMetricNames.includes(candidate.canonicalMetric)) continue;
     const group = byMetric.get(candidate.canonicalMetric) ?? [];
@@ -897,14 +1063,15 @@ function selectFacts(
   }
 
   for (const metric of [...expectedMetricNames].sort()) {
-    const byPeriodKind = new Map<string, SecFactEvidenceRecord[]>();
+    const byPeriodKind = new Map<string, T[]>();
     for (const fact of byMetric.get(metric) ?? []) {
       const group = byPeriodKind.get(fact.periodKind) ?? [];
       group.push(fact);
       byPeriodKind.set(fact.periodKind, group);
     }
-    const metricSelected: SecFactEvidenceRecord[] = [];
-    for (const group of byPeriodKind.values()) {
+    const metricLatest: T[] = [];
+    const metricExtra: T[] = [];
+    for (const [periodKind, group] of byPeriodKind) {
       group.sort(compareFact);
       const latestPeriod = date(group[0]?.periodEnd);
       const latest = group.filter(
@@ -915,21 +1082,59 @@ function selectFacts(
         continue;
       }
       const value = latest.find((fact) => fact.selection === "SELECTED");
-      if (value) metricSelected.push(value);
+      if (!value) continue;
+      metricLatest.push(value);
+      if (options.comparables) {
+        const comparable = priorYearComparable(group, value);
+        if (comparable) metricExtra.push(comparable);
+      }
+      if (
+        options.trendQuarters > 0 &&
+        periodKind === "QUARTERLY" &&
+        TREND_METRICS.has(metric)
+      ) {
+        const quarters = new Set<string>();
+        for (const fact of group) {
+          if (fact.selection !== "SELECTED") continue;
+          const periodEnd = date(fact.periodEnd) ?? "";
+          if (quarters.has(periodEnd)) continue;
+          if (
+            group.some(
+              (candidate) =>
+                candidate.selection === "AMBIGUOUS" &&
+                samePeriod(candidate, fact),
+            )
+          ) {
+            continue;
+          }
+          quarters.add(periodEnd);
+          metricExtra.push(fact);
+          if (quarters.size >= options.trendQuarters) break;
+        }
+      }
     }
-    metricSelected.sort(compareFact);
-    selected.push(...metricSelected.slice(0, factsPerMetric));
+    metricLatest.sort(compareFact);
+    for (const fact of [...metricLatest.slice(0, factsPerMetric), ...metricExtra]) {
+      selected.set(fact.externalKey, fact);
+    }
   }
 
-  selected.sort(
-    (left, right) =>
-      left.canonicalMetric.localeCompare(right.canonicalMetric) ||
-      compareFact(left, right),
-  );
   return {
-    selected,
+    selected: [...selected.values()].sort(
+      (left, right) =>
+        left.canonicalMetric.localeCompare(right.canonicalMetric) ||
+        compareFact(left, right),
+    ),
     ambiguousMetrics: [...ambiguousMetrics].sort(),
   };
+}
+
+function compareFact(left: SelectableFact, right: SelectableFact) {
+  return (
+    (date(right.periodEnd) ?? "").localeCompare(date(left.periodEnd) ?? "") ||
+    (date(right.filedAt) ?? "").localeCompare(date(left.filedAt) ?? "") ||
+    left.externalKey.localeCompare(right.externalKey)
+  );
 }
 
 function shapeStock(record: PublicStockEvidenceRecord): ResearchEvidenceStock {
@@ -998,40 +1203,115 @@ function shapePeers(
   );
 }
 
-export async function prepareResearchEvidenceSnapshot(
-  requestedStock: ResearchJobStockIdentity,
-  dependencies: ResearchEvidenceDependencies = {},
-): Promise<ResearchEvidenceSnapshot> {
-  const repository = resolveRepository(dependencies);
-  const limits = resolveLimits(dependencies.limits);
-  const record = await repository.findPublicStock(requestedStock.stockId);
-  if (!record) {
-    throw new ResearchEvidenceSnapshotError(
-      "RESEARCH_STOCK_NOT_FOUND",
-      "The research stock is not available in the public catalog.",
-    );
-  }
+function structuredFact(
+  fact: SecFactEvidenceRecord,
+  evidence: ResearchEvidence,
+): StructuredFact {
+  return {
+    referenceId: evidence.id,
+    evidenceId: evidence.id,
+    externalKey: fact.externalKey,
+    metric: fact.canonicalMetric,
+    label: fact.label,
+    value: Number(stringValue(fact.normalizedValue)),
+    unit: fact.normalizedUnit,
+    periodKind: fact.periodKind as StructuredFact["periodKind"],
+    periodStart: dateOnly(fact.periodStart),
+    periodEnd: dateOnly(fact.periodEnd) ?? "",
+    filedAt: dateOnly(fact.filedAt) ?? "",
+    accessionNumber: fact.accessionNumber,
+    selection: fact.selection,
+  };
+}
+
+function peerStructuredFact(fact: PeerSecFactRecord): StructuredFact {
+  return {
+    referenceId: `sec-fact:${fact.externalKey}`,
+    evidenceId: null,
+    externalKey: fact.externalKey,
+    metric: fact.canonicalMetric,
+    label: fact.label,
+    value: Number(stringValue(fact.normalizedValue)),
+    unit: fact.normalizedUnit,
+    periodKind: fact.periodKind as StructuredFact["periodKind"],
+    periodStart: dateOnly(fact.periodStart),
+    periodEnd: dateOnly(fact.periodEnd) ?? "",
+    filedAt: dateOnly(fact.filedAt) ?? "",
+    accessionNumber: fact.accessionNumber,
+    selection: fact.selection,
+  };
+}
+
+function shapeStructuredPeers(
+  peers: readonly ResearchEvidencePeer[],
+  peerRecords: readonly PublicPeerRecord[],
+  peerFactCandidates: readonly PeerSecFactRecord[],
+): StructuredPeer[] {
+  const entityByStockId = new Map(
+    peerRecords.map((record) => [record.id, record.company?.secEntity?.id ?? null]),
+  );
+  return peers.map((peer) => {
+    const secEntityId = entityByStockId.get(peer.stockId) ?? null;
+    const candidates = secEntityId
+      ? peerFactCandidates.filter((fact) => fact.secEntityId === secEntityId)
+      : [];
+    const selection = selectFacts(candidates, DEFAULT_LIMITS.factsPerMetric, {
+      trendQuarters: 0,
+      comparables: true,
+    });
+    return {
+      ticker: peer.ticker,
+      companyName: peer.companyName,
+      cik: peer.cik,
+      relationship: peer.relationship,
+      facts: selection.selected.map(peerStructuredFact),
+      ambiguousMetrics: selection.ambiguousMetrics,
+    };
+  });
+}
+
+function peerFactLookbacks(selected: readonly SecFactEvidenceRecord[]) {
+  const latest = selected
+    .map((fact) => date(fact.periodEnd))
+    .filter((value): value is string => value !== null)
+    .sort()
+    .at(-1);
+  if (!latest) return null;
+  const from = (days: number) => {
+    const value = new Date(latest);
+    value.setUTCDate(value.getUTCDate() - days);
+    return value;
+  };
+  return {
+    annualPeriodEndFrom: from(PEER_ANNUAL_LOOKBACK_DAYS),
+    instantPeriodEndFrom: from(PEER_INSTANT_LOOKBACK_DAYS),
+  };
+}
+
+export type ResearchEvidenceSnapshotInput = {
+  record: PublicStockEvidenceRecord;
+  factCandidates: readonly SecFactEvidenceRecord[];
+  peerRecords: readonly PublicPeerRecord[];
+  peerFactCandidates: readonly PeerSecFactRecord[];
+  upcomingEarnings: UpcomingEarningsRecord | null;
+  limits?: Partial<EvidenceSnapshotLimits>;
+};
+
+/**
+ * Selects the subject's SEC facts (latest per period kind, prior-year
+ * comparables, and trend quarters), derives deterministic metrics, and
+ * assembles the immutable snapshot. Pure so fixtures can build it offline.
+ */
+export function assembleResearchEvidenceSnapshot(
+  input: ResearchEvidenceSnapshotInput,
+): ResearchEvidenceSnapshot {
+  const limits = resolveLimits(input.limits);
+  const record = input.record;
   const stock = shapeStock(record);
-  const secEntityId = record.company?.secEntity?.id ?? null;
-  const [factCandidates, peerRecords] = await Promise.all([
-    secEntityId && limits.factsPerMetric > 0
-      ? repository.listSecFactCandidates({
-          secEntityId,
-          metrics: expectedMetricNames,
-          takePerMetric: Math.max(
-            limits.factsPerMetric,
-            limits.factCandidatesPerMetric,
-          ),
-        })
-      : Promise.resolve([]),
-    repository.listPublicPeers({
-      stockId: stock.stockId,
-      industry: stock.industry,
-      sector: stock.sector,
-      take: limits.maxPeers,
-    }),
-  ]);
-  const factSelection = selectFacts(factCandidates, limits.factsPerMetric);
+  const factSelection = selectFacts(input.factCandidates, limits.factsPerMetric, {
+    trendQuarters: TREND_QUARTERS,
+    comparables: true,
+  });
   const selectedMetricNames = new Set(
     factSelection.selected.map((fact) => fact.canonicalMetric),
   );
@@ -1041,14 +1321,57 @@ export async function prepareResearchEvidenceSnapshot(
       .sort(),
   );
   const ambiguousMetrics = deepFreeze(factSelection.ambiguousMetrics);
-  const peers = shapePeers(stock, peerRecords, limits.maxPeers);
+  const peers = shapePeers(stock, input.peerRecords, limits.maxPeers);
   const identityRawSource = record.company?.secEntity?.rawSources[0] ?? null;
-  const evidence = deepFreeze([
-    makeCompanyEvidence(stock, identityRawSource),
-    ...factSelection.selected.map(makeFactEvidence),
-    makePeerEvidence(stock, peers),
-    makeMissingMetricsEvidence(stock, missingMetrics, ambiguousMetrics),
-  ]);
+  const factEvidence = factSelection.selected.map(makeFactEvidence);
+  const structuredFacts = factSelection.selected.map((fact, index) =>
+    structuredFact(fact, factEvidence[index]),
+  );
+  const structuredStock = {
+    ticker: stock.ticker,
+    companyName: stock.companyName,
+    cik: stock.cik,
+  };
+  const derived = buildDerivedMetricEvidence(
+    structuredStock,
+    structuredFacts,
+    ambiguousMetrics,
+  );
+  const earnings =
+    input.upcomingEarnings && input.upcomingEarnings.eventDate !== null
+      ? buildUpcomingEarningsEvidence(structuredStock, {
+          eventDate: dateOnly(input.upcomingEarnings.eventDate) ?? "",
+          marketSession: input.upcomingEarnings.marketSession,
+          source: text(input.upcomingEarnings.source, 240),
+        })
+      : null;
+  const evidence = deepFreeze(
+    [
+      makeCompanyEvidence(stock, identityRawSource),
+      // The small policy item precedes the tables so a tight budget never
+      // cuts the statement of what is missing.
+      makeMissingMetricsEvidence(stock, missingMetrics, ambiguousMetrics),
+      ...factEvidence,
+      ...derived.evidence.map(validatedEvidence),
+      validatedEvidence(
+        buildFinancialSummaryEvidence(
+          structuredStock,
+          structuredFacts,
+          derived.metrics,
+        ),
+      ),
+      validatedEvidence(buildTrendEvidence(structuredStock, structuredFacts)),
+      makePeerEvidence(stock, peers),
+      validatedEvidence(
+        buildPeerComparisonEvidence(
+          structuredStock,
+          { facts: structuredFacts, metrics: derived.metrics },
+          shapeStructuredPeers(peers, input.peerRecords, input.peerFactCandidates),
+        ),
+      ),
+      ...(earnings ? [validatedEvidence(earnings)] : []),
+    ].slice(0, MAX_SNAPSHOT_EVIDENCE),
+  );
 
   const sourceDataVersion = stableHash({
     schemaVersion: RESEARCH_EVIDENCE_SNAPSHOT_VERSION,
@@ -1077,6 +1400,68 @@ export async function prepareResearchEvidenceSnapshot(
   return deepFreeze({
     ...snapshotWithoutHash,
     sourceSnapshotSha256: stableHash(snapshotWithoutHash),
+  });
+}
+
+export async function prepareResearchEvidenceSnapshot(
+  requestedStock: ResearchJobStockIdentity,
+  dependencies: ResearchEvidenceDependencies = {},
+): Promise<ResearchEvidenceSnapshot> {
+  const repository = resolveRepository(dependencies);
+  const limits = resolveLimits(dependencies.limits);
+  const record = await repository.findPublicStock(requestedStock.stockId);
+  if (!record) {
+    throw new ResearchEvidenceSnapshotError(
+      "RESEARCH_STOCK_NOT_FOUND",
+      "The research stock is not available in the public catalog.",
+    );
+  }
+  const secEntityId = record.company?.secEntity?.id ?? null;
+  const [factCandidates, peerRecords, upcomingEarnings] = await Promise.all([
+    secEntityId && limits.factsPerMetric > 0
+      ? repository.listSecFactCandidates({
+          secEntityId,
+          metrics: expectedMetricNames,
+          takePerMetric: Math.max(
+            limits.factsPerMetric,
+            limits.factCandidatesPerMetric,
+          ),
+        })
+      : Promise.resolve([]),
+    repository.listPublicPeers({
+      stockId: record.id,
+      industry: text(record.industry, 240),
+      sector: text(record.sector, 240),
+      take: limits.maxPeers,
+    }),
+    repository.findUpcomingEarnings(record.id),
+  ]);
+  const lookbacks = peerFactLookbacks(
+    selectFacts(factCandidates, limits.factsPerMetric, {
+      trendQuarters: 0,
+      comparables: false,
+    }).selected,
+  );
+  const peerEntityIds = peerRecords
+    .slice(0, limits.maxPeers)
+    .map((peer) => peer.company?.secEntity?.id ?? null)
+    .filter((id): id is string => id !== null);
+  const peerFactCandidates =
+    lookbacks && peerEntityIds.length > 0
+      ? await repository.listPeerSecFactCandidates({
+          secEntityIds: peerEntityIds,
+          metrics: expectedMetricNames,
+          ...lookbacks,
+          take: MAX_PEER_FACT_ROWS,
+        })
+      : [];
+  return assembleResearchEvidenceSnapshot({
+    record,
+    factCandidates,
+    peerRecords,
+    peerFactCandidates,
+    upcomingEarnings,
+    limits: dependencies.limits,
   });
 }
 
@@ -1255,6 +1640,13 @@ function supportsAgent(evidence: ResearchEvidence, agent: ResearchAgentName) {
   );
 }
 
+function isMandatoryFor(evidence: ResearchEvidence, agent: ResearchAgentName) {
+  const agents = evidence.metadata.mandatoryAgentNames;
+  return (
+    Array.isArray(agents) && agents.some((candidate) => candidate === agent)
+  );
+}
+
 function scoreEvidence(
   evidence: ResearchEvidence,
   terms: readonly string[],
@@ -1308,13 +1700,22 @@ export function selectEvidence(
   const terms = queryTerms(query);
   const phrase = normalizeSearchText(query);
   const sourceKinds = request.sourceKinds ? new Set(request.sourceKinds) : null;
-  const ranked = snapshot.evidence
-    .filter(
-      (item) =>
-        (!request.agent || supportsAgent(item, request.agent)) &&
-        (!sourceKinds || sourceKinds.has(item.sourceKind)) &&
-        metadataMatches(item, request.metadata),
-    )
+  const eligible = snapshot.evidence.filter(
+    (item) =>
+      (!request.agent || supportsAgent(item, request.agent)) &&
+      (!sourceKinds || sourceKinds.has(item.sourceKind)) &&
+      metadataMatches(item, request.metadata),
+  );
+  // Structured evidence owned by the agent is included first, in snapshot
+  // order, before lexical ranking fills the remaining budget.
+  const mandatory = request.agent
+    ? eligible
+        .filter((item) => isMandatoryFor(item, request.agent!))
+        .map((item) => ({ item, ...scoreEvidence(item, terms, phrase) }))
+    : [];
+  const mandatoryIds = new Set(mandatory.map((entry) => entry.item.id));
+  const ranked = eligible
+    .filter((item) => !mandatoryIds.has(item.id))
     .map((item) => ({ item, ...scoreEvidence(item, terms, phrase) }))
     .filter((item) => terms.length === 0 || item.score > 0)
     .sort(
@@ -1337,11 +1738,16 @@ export function selectEvidence(
   let used = 0;
   let excerptTruncated = false;
 
-  for (const candidate of ranked) {
-    if (selected.length >= maxResults) break;
+  const include = (
+    candidate: (typeof ranked)[number],
+    options: { wholeOnly: boolean },
+  ) => {
     const separator = blocks.length === 0 ? 0 : 2;
     const rendered = renderContext(candidate.item, budget - used - separator);
-    if (!rendered) continue;
+    if (!rendered) return false;
+    // A partially rendered derived value could drop its formula, inputs, or
+    // derived marker, so lexical fill includes derived evidence whole or not at all.
+    if (options.wholeOnly && rendered.truncated) return false;
     if (separator) used += separator;
     blocks.push(rendered.text);
     used += rendered.text.length;
@@ -1354,9 +1760,18 @@ export function selectEvidence(
         matchedTerms: deepFreeze([...candidate.matchedTerms]),
       }),
     );
+    return true;
+  };
+
+  for (const candidate of mandatory) include(candidate, { wholeOnly: false });
+  for (const candidate of ranked) {
+    if (selected.length >= maxResults) break;
+    include(candidate, {
+      wholeOnly: candidate.item.sourceKind === "DERIVED",
+    });
   }
 
-  const omittedEvidenceCount = ranked.length - selected.length;
+  const omittedEvidenceCount = mandatory.length + ranked.length - selected.length;
   const context = blocks.join("\n\n");
   return deepFreeze({
     query,
@@ -1364,6 +1779,9 @@ export function selectEvidence(
     retrievalVersion: AI_RETRIEVAL_VERSION,
     evidence: selected,
     evidenceIds: selected.map((item) => item.id),
+    mandatoryEvidenceIds: selected
+      .filter((item) => mandatoryIds.has(item.id))
+      .map((item) => item.id),
     matches,
     context,
     contextCharacters: context.length,
@@ -1373,3 +1791,41 @@ export function selectEvidence(
 }
 
 export const retrieveResearchEvidence = selectEvidence;
+
+function specialistQuery(agentName: SpecialistAgentName) {
+  switch (agentName) {
+    case "FINANCIALS":
+      return "revenue income cash flow margin growth derived summary trend assets liabilities equity financial period annual quarterly";
+    case "COMPETITORS":
+      return "company sector industry exchange peer competitors comparison derived";
+    case "RISK":
+      return "liabilities debt equity cash leverage liquidity ratio revenue concentration ambiguity missing risk filing derived";
+    case "NEWS":
+      return "licensed current company news";
+    case "POLITICAL_ACTIVITY":
+      return "verified political activity lobbying contribution";
+  }
+}
+
+/** Specialist retrieval: owned structured evidence first, lexical fill after. */
+export function selectSpecialistEvidence(
+  snapshot: ResearchEvidenceSnapshot,
+  agentName: SpecialistAgentName,
+) {
+  return selectEvidence(snapshot, {
+    query: specialistQuery(agentName),
+    agent: agentName,
+    maxResults: AI_SPECIALIST_MAX_EVIDENCE_ITEMS,
+    contextCharBudget: AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
+  });
+}
+
+export function selectSynthesisEvidence(snapshot: ResearchEvidenceSnapshot) {
+  return selectEvidence(snapshot, {
+    query:
+      "company financial performance derived summary trend peers competitors risk evidence counterpoint",
+    agent: "SYNTHESIS",
+    maxResults: AI_SYNTHESIS_MAX_EVIDENCE_ITEMS,
+    contextCharBudget: AI_SYNTHESIS_CONTEXT_CHAR_BUDGET,
+  });
+}

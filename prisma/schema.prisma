@@ -75,6 +75,7 @@ enum EvidenceSourceKind {
   COMPANY_PROFILE
   PEER_SET
   DETERMINISTIC
+  DERIVED
 }
 
 enum AgentName {

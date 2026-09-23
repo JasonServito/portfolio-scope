@@ -1,13 +1,27 @@
 import { z } from "zod";
 
 export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
-export const AI_PROMPT_VERSION = "m18-research-v1";
-export const AI_RETRIEVAL_VERSION = "m18-lexical-v1";
+export const AI_PROMPT_VERSION = "m29-research-v1";
+export const AI_RETRIEVAL_VERSION = "m29-structured-lexical-v1";
 export const AI_OUTPUT_SCHEMA_VERSION = "m18-claims-v1";
 export const AI_REPORT_VERSION = "m18-report-v1";
 export const AI_CALCULATION_VERSION = "portfolio-v1";
 export const AI_HARD_MAX_COST_PER_JOB_USD = 0.25;
 export const AI_HARD_MAX_TOKENS_PER_JOB = 50_000;
+export const AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL = 2_000;
+
+// Context budgets are characters of rendered evidence per provider call. They
+// are sized so that three concurrent specialist reservations (which count
+// every serialized input byte as a token) plus synthesis stay inside the
+// 50,000-token job cap; see docs/ai-research.md for the envelope.
+export const AI_SPECIALIST_CONTEXT_CHAR_BUDGET = 8_000;
+export const AI_SPECIALIST_MAX_EVIDENCE_ITEMS = 16;
+export const AI_SYNTHESIS_CONTEXT_CHAR_BUDGET = 7_000;
+export const AI_SYNTHESIS_MAX_EVIDENCE_ITEMS = 16;
+// Serialized specialist outputs forwarded to synthesis. All validated claims
+// are forwarded unless the payload would push the job past its token cap; the
+// prompt then states how many low-confidence claims were left out.
+export const AI_SYNTHESIS_SPECIALIST_CHAR_BUDGET = 12_000;
 
 const LEGACY_AI_PRICING_VERSION = "openai-pricing-2026-08-11";
 const DEFAULT_RESEARCH_MODEL = "gpt-5.4-mini-2026-03-17";
@@ -107,7 +121,9 @@ const aiEnvironmentSchema = z
     AI_MAX_TOKENS_PER_JOB: optionalNumber(AI_HARD_MAX_TOKENS_PER_JOB).pipe(
       z.number().int().max(AI_HARD_MAX_TOKENS_PER_JOB),
     ),
-    AI_MAX_OUTPUT_TOKENS_PER_CALL: optionalNumber(1_500).pipe(
+    AI_MAX_OUTPUT_TOKENS_PER_CALL: optionalNumber(
+      AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
+    ).pipe(
       z.number().int().max(8_000),
     ),
     AI_PROVIDER_TIMEOUT_MS: optionalNumber(20_000).pipe(

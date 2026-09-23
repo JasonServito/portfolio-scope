@@ -45,7 +45,8 @@ import {
 import {
   buildResearchEvidenceSnapshot,
   ResearchEvidenceSnapshotError,
-  selectEvidence,
+  selectSpecialistEvidence,
+  selectSynthesisEvidence,
 } from "@/lib/research/ai/retrieval";
 import {
   claimKey,
@@ -157,21 +158,6 @@ function runSpecialist(
       return runPoliticalActivityAgent(data);
     case "RISK":
       return runRiskAgent(data);
-  }
-}
-
-function agentQuery(agentName: SpecialistAgentName) {
-  switch (agentName) {
-    case "FINANCIALS":
-      return "revenue income cash assets liabilities equity financial period annual quarterly";
-    case "COMPETITORS":
-      return "company sector industry exchange peer competitors comparison";
-    case "RISK":
-      return "liabilities cash debt revenue concentration ambiguity missing risk filing";
-    case "NEWS":
-      return "licensed current company news";
-    case "POLITICAL_ACTIVITY":
-      return "verified political activity lobbying contribution";
   }
 }
 
@@ -697,12 +683,10 @@ export async function executeResearchAgent(
           environment,
           dependencies,
         );
-        const evidenceSelection = selectEvidence(snapshot, {
-          query: agentQuery(input.agentName),
-          agent: input.agentName,
-          maxResults: 8,
-          contextCharBudget: 6_000,
-        });
+        const evidenceSelection = selectSpecialistEvidence(
+          snapshot,
+          input.agentName,
+        );
         const evidence = [...evidenceSelection.evidence];
         const generated = await runGroundedModelCall(
           {
@@ -1398,13 +1382,7 @@ export async function executeResearchSynthesis(
       partial: true,
     };
   }
-  const evidenceSelection = selectEvidence(snapshot, {
-    query:
-      "company financial performance competitors risk evidence counterpoint",
-    agent: "SYNTHESIS",
-    maxResults: 12,
-    contextCharBudget: 8_000,
-  });
+  const evidenceSelection = selectSynthesisEvidence(snapshot);
   const evidence = [...evidenceSelection.evidence];
 
   let output: SynthesisModelOutput;

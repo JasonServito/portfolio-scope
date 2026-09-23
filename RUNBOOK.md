@@ -232,6 +232,13 @@ also additive. It retains reasoning and provider-declared total tokens for each
 new metered attempt without inventing values for historical rows. Apply it with
 external AI disabled and preserve it during rollback for reconciliation.
 
+M29 migration `20260922120000_m29_derived_evidence_kind` follows M27 and only
+adds the `DERIVED` value to the `EvidenceSourceKind` enum for deterministic
+derived-metric and structured-table evidence. It touches no rows, requires no
+backfill, and is safe to apply with external AI disabled. Research jobs queued
+under the earlier prompt/retrieval versions fail closed after deployment by
+design; requeue them rather than editing persisted snapshots.
+
 Historical M18 repository/local verification (2026-08-11) successfully applied
 both M18 migrations. Current M27 local verification (2026-08-25) found all 11
 repository migrations applied with none pending and passed all 15 dedicated AI
@@ -741,9 +748,9 @@ Create only a separately scoped Preview OpenAI project/key during M27. Set the
 complete M18 variable set from `.env.example` in Preview. New work accepts only
 `gpt-5.4-mini-2026-03-17`. The hard maximums are `$5` global/month, `$1`
 user/month, `$0.25` per job, and 50,000 tokens per job; the checked-in defaults
-also use 1,500 output tokens per call, a 20-second timeout, and five user reports
-per UTC month. Runtime configuration may lower but cannot raise any hard
-maximum. Do not create or configure a Production key/project during M27.
+also use 2,000 output tokens per call (raised from 1,500 in M29), a 20-second
+timeout, and five user reports per UTC month. Runtime configuration may lower
+but cannot raise any hard maximum. Do not create or configure a Production key/project during M27.
 
 Open the provider console and record the reviewed pricing date/version and model
 deprecation status. Configure a provider-side alert or spending stop at or below

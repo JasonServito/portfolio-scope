@@ -50,7 +50,21 @@ export class GroundedModelCallError extends Error {
 
 type Prompt = { instructions: string; input: string };
 
-const PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE = 1_024;
+export const PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE = 1_024;
+
+/** The exact provider input the runner reserves against, byte for byte. */
+export function serializeProviderInput(
+  prompt: Prompt,
+  schemaName: string,
+  schema: z.ZodType,
+) {
+  return JSON.stringify({
+    instructions: prompt.instructions,
+    input: prompt.input,
+    outputSchemaName: schemaName,
+    outputSchema: z.toJSONSchema(schema),
+  });
+}
 
 type RunnerDependencies = {
   environment?: NodeJS.ProcessEnv;
@@ -107,12 +121,11 @@ export async function runGroundedModelCall<T extends SpecialistModelOutput>(
     const prompt = input.prompt(repairFeedback);
     let serializedProviderInput: string;
     try {
-      serializedProviderInput = JSON.stringify({
-        instructions: prompt.instructions,
-        input: prompt.input,
-        outputSchemaName: input.schemaName,
-        outputSchema: z.toJSONSchema(input.schema),
-      });
+      serializedProviderInput = serializeProviderInput(
+        prompt,
+        input.schemaName,
+        input.schema,
+      );
     } catch (error) {
       throw new GroundedModelCallError(
         "AI_MODEL_PROVIDER_CONFIGURATION",

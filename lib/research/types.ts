@@ -29,7 +29,8 @@ export type ResearchEvidenceRecord = {
     | "SEC_FILING"
     | "COMPANY_PROFILE"
     | "PEER_SET"
-    | "DETERMINISTIC";
+    | "DETERMINISTIC"
+    | "DERIVED";
   title: string;
   sourceReference: string;
   sourceUrl: string | null;

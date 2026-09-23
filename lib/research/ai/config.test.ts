@@ -27,7 +27,7 @@ describe("AI research configuration", () => {
       userMonthlyBudgetUsd: 1,
       maxCostPerJobUsd: 0.25,
       maxTokensPerJob: 50_000,
-      maxOutputTokensPerCall: 1_500,
+      maxOutputTokensPerCall: 2_000,
       userMonthlyReportLimit: 5,
     });
     expect(() =>

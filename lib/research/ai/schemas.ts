@@ -8,6 +8,7 @@ export const evidenceSourceKindSchema = z.enum([
   "COMPANY_PROFILE",
   "PEER_SET",
   "DETERMINISTIC",
+  "DERIVED",
 ]);
 
 export const researchEvidenceSchema = z

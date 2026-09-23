@@ -5,13 +5,17 @@ import {
   evaluateResearchOutput,
 } from "@/lib/research/ai/evaluation";
 import { CURATED_EVALUATION_CASES } from "@/lib/research/ai/fixtures/curated-evaluation";
+import type {
+  ResearchEvidence,
+  SynthesisModelOutput,
+} from "@/lib/research/ai/schemas";
 
 describe("offline research evaluation", () => {
   it("scores a grounded curated report across evidence and safety metrics", () => {
     const result = evaluateResearchOutput(CURATED_EVALUATION_CASES[0]);
 
     expect(result).toMatchObject({
-      id: "grounded-example",
+      id: "aapl-grounded-derived-evidence",
       humanReviewRequired: true,
       schemaValid: true,
       evidenceSchemaValid: true,
@@ -27,22 +31,54 @@ describe("offline research evaluation", () => {
         contradictionPreserved: true,
       },
       counts: {
-        claims: 2,
-        citations: 3,
+        claims: 6,
+        citations: 8,
         unsupportedClaims: 0,
-        numericalClaims: 2,
-        numericallySupportedClaims: 2,
+        numericalClaims: 6,
+        numericallySupportedClaims: 6,
       },
-      latencyMs: 840,
+      latencyMs: 9_400,
       usage: {
-        inputTokens: 1_200,
-        cachedInputTokens: 200,
-        outputTokens: 320,
-        totalTokens: 1_520,
-        estimatedCostUsd: 0.0011,
+        inputTokens: 8_500,
+        cachedInputTokens: 0,
+        outputTokens: 1_100,
+        totalTokens: 9_600,
+        estimatedCostUsd: 0.011325,
       },
       issues: [],
     });
+  });
+
+  it("cites derived, table, trend, peer, and event evidence that all resolve to supplied items", () => {
+    const grounded = CURATED_EVALUATION_CASES[0];
+    const evidenceById = new Map(
+      (grounded.evidence as ResearchEvidence[]).map((item) => [item.id, item]),
+    );
+    const output = grounded.output as SynthesisModelOutput;
+    const citedTypes = new Set(
+      output.claims.flatMap((claim) =>
+        [...claim.evidenceIds, ...claim.counterEvidenceIds].map(
+          (id) => evidenceById.get(id)?.metadata.evidenceType,
+        ),
+      ),
+    );
+    expect(citedTypes).toEqual(
+      new Set([
+        "DERIVED_METRIC",
+        "FINANCIAL_SUMMARY_TABLE",
+        "FINANCIAL_TREND_EXCERPT",
+        "PEER_COMPARISON_TABLE",
+        "UPCOMING_EARNINGS_EVENT",
+      ]),
+    );
+    expect(
+      output.claims.every((claim) =>
+        [...claim.evidenceIds, ...claim.counterEvidenceIds].every((id) =>
+          evidenceById.has(id),
+        ),
+      ),
+    ).toBe(true);
+    expect(grounded.evidence.length).toBeGreaterThan(60);
   });
 
   it.each([
@@ -179,11 +215,11 @@ describe("offline research evaluation", () => {
       missingDataHonesty: 0.5,
       contradictionRate: 1,
       contradictionPreservationRate: 0.5,
-      averageLatencyMs: 730,
-      totalInputTokens: 2_100,
-      totalCachedInputTokens: 200,
-      totalOutputTokens: 500,
-      totalEstimatedCostUsd: 0.0017,
+      averageLatencyMs: 7_750,
+      totalInputTokens: 17_000,
+      totalCachedInputTokens: 0,
+      totalOutputTokens: 1_280,
+      totalEstimatedCostUsd: 0.01851,
     });
   });
 
