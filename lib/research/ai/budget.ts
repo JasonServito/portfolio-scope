@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { countTokens } from "gpt-tokenizer/encoding/o200k_base";
+
 import {
   AiBudgetScope,
   AiUsageStatus,
@@ -61,8 +63,21 @@ export function utcMonthStart(now = new Date()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-export function estimateInputTokenUpperBound(input: string) {
-  return Math.max(1, Buffer.byteLength(input, "utf8"));
+// Reserved input tokens are counted with o200k_base, the encoding of the
+// pinned research model, plus a 25% margin: against Production usage the
+// local count was 1% to 8% above the provider's reported input, and a
+// reservation below actual usage is recorded UNCONFIRMED and blocks spend.
+// The UTF-8 byte count stays a hard ceiling because every token spans at
+// least one byte. The byte count alone overstated input about 3.5 times,
+// which left no room under the job cap for a synthesis repair.
+export const INPUT_TOKEN_RESERVATION_MARGIN = 1.25;
+
+export function estimateInputTokenReservation(input: string) {
+  const bytes = Math.max(1, Buffer.byteLength(input, "utf8"));
+  const counted = Math.ceil(
+    countTokens(input) * INPUT_TOKEN_RESERVATION_MARGIN,
+  );
+  return Math.min(bytes, Math.max(1, counted));
 }
 
 function roundUsdUp(value: number) {
@@ -165,11 +180,21 @@ function providerUsageValidationError(actual: ActualAiUsage) {
   return null;
 }
 
+// Concurrent specialist reservations update the same budget rows, so
+// serializable conflicts are expected. Immediate retries re-collided and
+// failed the whole specialist attempt; a short jittered backoff lets the
+// competing transactions commit first.
+const SERIALIZABLE_ATTEMPTS = 5;
+
+function serializableBackoffMs(attempt: number) {
+  return 10 * attempt + Math.floor(Math.random() * 40);
+}
+
 async function withSerializableRetry<T>(
   database: BudgetDatabase,
   operation: (transaction: Prisma.TransactionClient) => Promise<T>,
 ) {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
     try {
       return await database.$transaction(operation, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -178,7 +203,10 @@ async function withSerializableRetry<T>(
       const retryable =
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2034";
-      if (!retryable || attempt === 3) throw error;
+      if (!retryable || attempt === SERIALIZABLE_ATTEMPTS) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, serializableBackoffMs(attempt)),
+      );
     }
   }
   throw new Error("Unreachable transaction retry state.");

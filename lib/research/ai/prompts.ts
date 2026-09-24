@@ -103,24 +103,24 @@ export const SPECIALIST_RESEARCH_QUESTIONS: Record<
   readonly string[]
 > = {
   FINANCIALS: [
-    "How did revenue change year over year in the latest annual and quarterly periods, and is the eight-quarter revenue trend accelerating, steady, or slowing?",
-    "How did diluted EPS change year over year, and does its quarterly trend agree with revenue?",
+    "How did revenue change year over year in the latest annual and quarterly periods, and do same-quarter changes show growth accelerating, steady, or slowing?",
+    "How did diluted EPS change year over year, and do its same-quarter changes agree with revenue's?",
     "What are the latest operating and net margins, and how do they compare with the prior-year period?",
     "How much free cash flow was generated, what is the free-cash-flow margin, and how does operating cash flow compare with net income?",
-    "What do debt-to-equity, net cash, and the current ratio at the latest reporting date say about balance-sheet capacity?",
+    "What do debt-to-equity, cash minus long-term debt, and the current ratio at the latest reporting date say about balance-sheet capacity?",
     "Did the diluted share count change year over year, and which expected metrics are missing, ambiguous, or unavailable?",
   ],
   COMPETITORS: [
     "Which peers are supplied, and is each an industry match or a broader sector match?",
-    "How does the company's latest annual revenue growth compare with each peer's on the peer's own fiscal period?",
+    "How does the company's latest annual revenue growth compare with each peer's, stating each company's fiscal period?",
     "How do operating and net margins compare with each peer's?",
-    "How do free-cash-flow margin and leverage (debt-to-equity and net cash) compare with each peer's?",
-    "Which comparisons cannot be made because a value is unavailable, and what does the fiscal-period mismatch mean for the rest?",
+    "How do free-cash-flow margin, debt-to-equity, and current ratio compare with each peer's?",
+    "Which comparisons cannot be made because a value is unavailable? Compare the rest across each company's latest fiscal year, stating periods.",
   ],
   RISK: [
-    "Leverage: does long-term debt exceed cash and equivalents (negative net cash), and what is debt-to-equity at the latest reporting date?",
+    "Leverage: does long-term debt exceed cash and equivalents (negative cash minus long-term debt), and what is debt-to-equity at the latest reporting date?",
     "Liquidity: what is the current ratio, and does it indicate strain?",
-    "Trend: is any revenue, diluted EPS, or free-cash-flow trend deteriorating, and are quarters missing from the eight-quarter excerpt?",
+    "Trend: do same-quarter changes show revenue, diluted EPS, or free cash flow deteriorating, and are quarters missing from the eight-quarter excerpt?",
     "Evidence quality: which expected metrics are missing or ambiguous, on what date was the newest cited filing filed, and how does that limit this analysis?",
     "Event timing: is an earnings event scheduled, and which selected facts could change when the next filing arrives?",
     "Regulatory, governance, and political exposure: answer only if supplied evidence describes such exposure; otherwise state that no such evidence is supplied.",
@@ -176,7 +176,7 @@ const sourceKindRules = [
 ];
 
 const claimKindRules = [
-  "Label every claim with a kind: FACT restates a reported value or filing statement; DERIVED quotes a value this application calculated (evidence of kind DERIVED) and must cite that item; INTERPRETATION is a conclusion, comparison, or judgment.",
+  "Label every claim with a kind: FACT restates a reported value or filing statement; DERIVED quotes a value this application calculated (evidence of kind DERIVED) and must cite that item; INTERPRETATION is a conclusion, comparison, or judgment. RISK means a potential adverse effect, not a favorable fact.",
 ];
 
 const ratingRule =

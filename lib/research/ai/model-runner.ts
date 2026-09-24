@@ -1,8 +1,9 @@
 import { z } from "zod";
 
+import { logger } from "@/lib/observability/logger";
 import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 import {
-  estimateInputTokenUpperBound,
+  estimateInputTokenReservation,
   markAiUsageUnconfirmed,
   releaseAiUsage,
   reserveAiUsage,
@@ -157,7 +158,7 @@ export async function runValidatedModelCall<T>(
         promptVersion: AI_PROMPT_VERSION,
         attemptNumber,
         reservedInputTokens:
-          estimateInputTokenUpperBound(serializedProviderInput) +
+          estimateInputTokenReservation(serializedProviderInput) +
           PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE,
         reservedOutputTokens: maxOutputTokens,
         config: input.config,
@@ -254,6 +255,17 @@ export async function runValidatedModelCall<T>(
       const checkFailure =
         error instanceof ModelOutputSafetyError ||
         error instanceof ModelOutputConsistencyError;
+      logger.warn("ai.model.output.rejected", {
+        provider: input.provider.provider,
+        errorCode: checkFailure ? error.code : "AI_MODEL_OUTPUT_INVALID",
+        details: {
+          researchJobId: input.researchJobId,
+          operation: input.operation,
+          attempt: attemptNumber,
+          maxAttempts: input.maxAttempts,
+          reason: rejectionReason(error),
+        },
+      });
       if (attemptNumber === input.maxAttempts) {
         throw new GroundedModelCallError(
           checkFailure ? error.code : "AI_MODEL_OUTPUT_INVALID",
@@ -269,6 +281,27 @@ export async function runValidatedModelCall<T>(
   }
 
   throw new GroundedModelCallError("AI_MODEL_OUTPUT_INVALID", false, true);
+}
+
+/**
+ * Why an output was rejected, without model or user text: check messages are
+ * fixed application strings, and schema failures are reduced to issue paths
+ * and codes.
+ */
+function rejectionReason(error: unknown) {
+  if (
+    error instanceof ModelOutputSafetyError ||
+    error instanceof ModelOutputConsistencyError
+  ) {
+    return error.message;
+  }
+  if (error instanceof z.ZodError) {
+    return error.issues
+      .slice(0, 3)
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.code}`)
+      .join("; ");
+  }
+  return error instanceof Error ? error.name : "unknown";
 }
 
 /** Specialist and synthesis calls retain their single constrained repair. */

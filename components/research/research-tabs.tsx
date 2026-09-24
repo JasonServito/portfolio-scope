@@ -89,6 +89,76 @@ function generationDescription(research: StockResearch) {
   return `Prepared ${date} for the read-only demo.`;
 }
 
+const TOPIC_NAMES: Record<string, string> = {
+  FINANCIALS: "financial performance",
+  COMPETITORS: "peer comparison",
+  RISK: "risk review",
+  NEWS: "recent events",
+  POLITICAL_ACTIVITY: "political activity",
+};
+
+// A topic that exhausted its model attempts is stored as completed by the
+// "partial-fallback" provider but has no findings; the same provider on the
+// report means the combined summary step was unavailable.
+const FALLBACK_PROVIDER = "partial-fallback";
+
+function isAiGenerated(research: StockResearch) {
+  return (
+    research.generationMode === "EXTERNAL" ||
+    research.generationMode === "RECORDED"
+  );
+}
+
+function reportCompleteness(research: StockResearch) {
+  const aiGenerated = isAiGenerated(research);
+  const incompleteTopics = research.agents
+    .filter(
+      (agent) =>
+        agent.agentName !== "SYNTHESIS" &&
+        (agent.status === "FAILED" ||
+          (aiGenerated && agent.provider === FALLBACK_PROVIDER)),
+    )
+    .map(
+      (agent) =>
+        TOPIC_NAMES[agent.agentName] ??
+        agent.agentName.toLowerCase().replaceAll("_", " "),
+    );
+  const combinedSummaryUnavailable =
+    aiGenerated && research.metadata?.provider === FALLBACK_PROVIDER;
+  return {
+    incompleteTopics,
+    combinedSummaryUnavailable,
+    partial: incompleteTopics.length > 0 || combinedSummaryUnavailable,
+  };
+}
+
+// Process notes from the combined summary step. Reports generated before
+// notes were separated also appended them to Risks, so they are removed there.
+function reportNotes(research: StockResearch) {
+  if (!isAiGenerated(research)) return [];
+  return (
+    research.agents.find((agent) => agent.agentName === "SYNTHESIS")
+      ?.warnings ?? []
+  );
+}
+
+function partialReportMessage(
+  completeness: ReturnType<typeof reportCompleteness>,
+) {
+  const parts = ["This report is partial."];
+  if (completeness.incompleteTopics.length) {
+    parts.push(
+      `The ${completeness.incompleteTopics.join(", ")} ${completeness.incompleteTopics.length === 1 ? "topic" : "topics"} could not be completed, so ${completeness.incompleteTopics.length === 1 ? "its" : "their"} findings are missing.`,
+    );
+  }
+  if (completeness.combinedSummaryUnavailable) {
+    parts.push(
+      "The combined summary step was unavailable, so the topic findings are listed without a combined interpretation.",
+    );
+  }
+  return parts.join(" ");
+}
+
 function ClaimCard({
   claim,
   onEvidenceSelect,
@@ -340,9 +410,9 @@ function WhatToWatch({ research }: { research: StockResearch }) {
 function ReportSummary({ research }: { research: StockResearch }) {
   const report = research.report;
   const coverage = report.evidenceCoverage ?? null;
-  const failedAgents = research.agents.filter(
-    (agent) => agent.status === "FAILED",
-  );
+  const completeness = reportCompleteness(research);
+  const notes = reportNotes(research);
+  const risks = report.risks.filter((item) => !notes.includes(item));
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -352,27 +422,38 @@ function ReportSummary({ research }: { research: StockResearch }) {
             <CardTitle aria-level={3} role="heading">
               Summary
             </CardTitle>
-            {coverage ? (
-              <Badge variant="secondary">
-                Evidence coverage {Math.round(coverage.score * 100)}%
-              </Badge>
-            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {completeness.partial ? (
+                <Badge variant="outline">Partial analysis</Badge>
+              ) : null}
+              {coverage ? (
+                <Badge variant="secondary">
+                  Evidence coverage {Math.round(coverage.score * 100)}%
+                </Badge>
+              ) : null}
+            </div>
           </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            {coverage ? (
-              <>
-                Newest filing{" "}
-                {coverage.newestFilingDate
-                  ? formatDate(coverage.newestFilingDate)
-                  : "date unavailable"}
-                {" · "}
-              </>
-            ) : null}
-            {Math.round(report.confidence * 100)}% reported confidence
-          </p>
+          {coverage ? (
+            <p className="text-xs leading-5 text-muted-foreground">
+              Newest filing{" "}
+              {coverage.newestFilingDate
+                ? formatDate(coverage.newestFilingDate)
+                : "date unavailable"}
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent>
           <p className="leading-7 text-muted-foreground">{report.overview}</p>
+          {notes.length ? (
+            <ul
+              aria-label="Report notes"
+              className="mt-3 space-y-1 text-sm text-muted-foreground"
+            >
+              {notes.map((note, index) => (
+                <li key={`${note}-${index}`}>{note}</li>
+              ))}
+            </ul>
+          ) : null}
           {research.generationMode === "EXTERNAL" ||
           research.generationMode === "RECORDED" ? (
             <p className="mt-3 text-sm text-muted-foreground">
@@ -391,7 +472,7 @@ function ReportSummary({ research }: { research: StockResearch }) {
         </CardContent>
       </Card>
 
-      {failedAgents.length ? (
+      {completeness.partial ? (
         <div
           className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100 lg:col-span-2"
           role="status"
@@ -400,9 +481,7 @@ function ReportSummary({ research }: { research: StockResearch }) {
             aria-hidden="true"
             className="mt-0.5 size-4 shrink-0"
           />
-          This report is partial. {failedAgents.length} topic
-          {failedAgents.length === 1 ? "" : "s"} could not be completed, and the
-          overall reported confidence reflects the missing information.
+          {partialReportMessage(completeness)}
         </div>
       ) : null}
 
@@ -413,7 +492,7 @@ function ReportSummary({ research }: { research: StockResearch }) {
       />
       <ReportListSection
         emptyMessage="No specific risks were identified from the available evidence."
-        items={report.risks.map((item) => labelPartialClaim(item, research))}
+        items={risks.map((item) => labelPartialClaim(item, research))}
         title="Risks"
       />
       <WhatToWatch research={research} />

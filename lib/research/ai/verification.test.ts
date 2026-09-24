@@ -77,7 +77,11 @@ describe("one bounded claim verification pass", () => {
     expect(final.claims).toEqual(
       output.claims.filter((_, index) => index !== 2 && index !== 3),
     );
-    expect(final.missingData[0]).toContain("1 unsupported claim was removed");
+    // The removal is a process note for the report, never missing information.
+    expect(final.warnings).toEqual([
+      "1 draft claim was removed because the cited evidence did not establish it; remaining claims show any limits.",
+    ]);
+    expect(final.missingData).toEqual(output.missingData);
     expect(final.summary).not.toEqual(output.summary);
     expect(final.disagreements).toEqual([]);
     expect(final.whatWouldChange).toEqual([]);
@@ -85,11 +89,11 @@ describe("one bounded claim verification pass", () => {
     expect(provider.remainingFixtures).toBe(0);
   });
 
-  it("preserves a draft on failure with a visible unverified marker and no claim edits", () => {
+  it("preserves a draft on failure without claim edits or a duplicate warning", () => {
+    // The report stores verificationCompleted=false and the page states that
+    // claim support is unverified, so the draft is returned unchanged.
     const final = applyClaimVerification(output, null);
-    expect(final.claims).toEqual(output.claims);
-    expect(final.summary).toBe(output.summary);
-    expect(final.warnings[0]).toContain("has not been verified");
+    expect(final).toEqual(output);
   });
 
   it.each([

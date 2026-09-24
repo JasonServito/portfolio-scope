@@ -30,7 +30,6 @@ import {
   AI_PROMPT_VERSION,
   AI_REPORT_VERSION,
   AI_SPECIALIST_AGENT_VERSION,
-  AI_SPECIALIST_MAX_OUTPUT_TOKENS,
   AI_SYNTHESIS_AGENT_VERSION,
   AI_VERIFIER_MAX_OUTPUT_TOKENS,
   AiConfigurationError,
@@ -241,6 +240,26 @@ function publicDataGap(agentName: SpecialistAgentName) {
   }
   return "Verified political-activity evidence is not configured for this company.";
 }
+
+// Plain-language topic names for report text when a specialist is missing.
+const SPECIALIST_TOPIC_LABELS: Record<SpecialistAgentName, string> = {
+  FINANCIALS: "The financial performance review",
+  COMPETITORS: "The peer comparison",
+  RISK: "The risk review",
+  NEWS: "The recent events review",
+  POLITICAL_ACTIVITY: "The political activity review",
+};
+
+// Round-robin order for the fallback merge, so a claim limit can never drop
+// an entire topic (the risk review in particular).
+const FALLBACK_CLAIM_ORDER: readonly SpecialistAgentName[] = [
+  "FINANCIALS",
+  "RISK",
+  "COMPETITORS",
+  "NEWS",
+  "POLITICAL_ACTIVITY",
+];
+const FALLBACK_MAX_CLAIMS = 12;
 
 function modelProvider(
   config: AiResearchConfig,
@@ -744,15 +763,6 @@ export async function executeResearchAgent(
           environment,
           dependencies,
         );
-        // The reduced specialist allowances pay for the News model call, so
-        // they apply only to a job whose snapshot holds current reports;
-        // otherwise the configured per-call maximum applies as before M32.
-        const outputAllowance = hasCurrentReportEvidence(snapshot)
-          ? Math.min(
-              config.maxOutputTokensPerCall,
-              AI_SPECIALIST_MAX_OUTPUT_TOKENS[input.agentName],
-            )
-          : config.maxOutputTokensPerCall;
         const evidenceSelection = selectSpecialistEvidence(
           snapshot,
           input.agentName,
@@ -780,7 +790,6 @@ export async function executeResearchAgent(
             agentRunId: existing?.id,
             operation,
             idempotencyKey: `research:${researchJob.id}:agent:${input.agentName}:delivery:${input.attemptNumber ?? 1}`,
-            maxOutputTokens: outputAllowance,
             now: dependencies.now?.(),
             signal: input.signal,
           },
@@ -798,7 +807,7 @@ export async function executeResearchAgent(
           {
             provider: generated.providerResult.provider,
             model: generated.providerResult.model,
-            modelConfigJson: { maxOutputTokens: outputAllowance },
+            modelConfigJson: { maxOutputTokens: config.maxOutputTokensPerCall },
             promptVersion: AI_PROMPT_VERSION,
             outputSchemaVersion: AI_OUTPUT_SCHEMA_VERSION,
             agentVersion: AI_SPECIALIST_AGENT_VERSION,
@@ -874,8 +883,7 @@ export async function executeResearchAgent(
       isModelFailure &&
       (!retryable || attemptNumber >= maxAttempts)
     ) {
-      const reason =
-        "This specialist could not complete safely; its evidence gap is preserved in the partial report.";
+      const reason = `${SPECIALIST_TOPIC_LABELS[input.agentName]} could not be completed for this report, so its findings are missing.`;
       const output = missingExternalSpecialist(input.agentName, reason);
       await updateAgentRun(
         researchJob.id,
@@ -981,16 +989,36 @@ function partialSynthesis(
   evidence: ResearchEvidence[],
 ): SynthesisModelOutput {
   const allowedEvidenceIds = new Set(evidence.map((item) => item.id));
-  const uniqueClaims = new Map<string, ModelClaim>();
-  let omittedClaims = 0;
-  for (const specialist of specialists) {
-    for (const claim of specialist.output.claims) {
+  const ordered = [...specialists].sort(
+    (left, right) =>
+      FALLBACK_CLAIM_ORDER.indexOf(left.agentName) -
+      FALLBACK_CLAIM_ORDER.indexOf(right.agentName),
+  );
+  let unavailableClaims = 0;
+  const queues = ordered.map((specialist) =>
+    specialist.output.claims.filter((claim) => {
       const references = [...claim.evidenceIds, ...claim.counterEvidenceIds];
-      if (references.some((reference) => !allowedEvidenceIds.has(reference))) {
-        omittedClaims += 1;
-        continue;
+      const available = references.every((reference) =>
+        allowedEvidenceIds.has(reference),
+      );
+      if (!available) unavailableClaims += 1;
+      return available;
+    }),
+  );
+  // Take one claim from each topic in turn so the claim limit keeps every
+  // topic represented instead of filling up from the first specialist.
+  const uniqueClaims = new Map<string, ModelClaim>();
+  for (
+    let index = 0;
+    uniqueClaims.size < FALLBACK_MAX_CLAIMS &&
+    queues.some((queue) => index < queue.length);
+    index += 1
+  ) {
+    for (const queue of queues) {
+      const claim = queue[index];
+      if (claim && uniqueClaims.size < FALLBACK_MAX_CLAIMS) {
+        uniqueClaims.set(claimKey(claim), claim);
       }
-      uniqueClaims.set(claimKey(claim), claim);
     }
   }
   const completed = specialists.filter(
@@ -1000,23 +1028,22 @@ function partialSynthesis(
     ? completed.reduce((sum, item) => sum + item.output.confidence, 0) /
       completed.length
     : 0;
-  const retainedClaims = [...uniqueClaims.values()].slice(0, 12);
-  omittedClaims += Math.max(0, uniqueClaims.size - retainedClaims.length);
+  const retainedClaims = [...uniqueClaims.values()];
   const output = synthesisModelOutputSchema.parse({
     rating: ratingForClaims(retainedClaims),
     confidence: Number(confidence.toFixed(3)),
-    summary: `${companyName} has a bounded partial synthesis from validated public evidence. Provider failure or missing source coverage is preserved explicitly; this is research context, not financial advice.`,
+    summary: `This ${companyName} report lists the individual topic findings because the combined summary step was unavailable. It is research context, not financial advice.`,
     claims: retainedClaims,
     warnings: [
-      "The model synthesis was unavailable, so this report preserves validated specialist claims without adding new interpretation.",
-    ],
-    missingData: [
-      ...new Set(specialists.flatMap((item) => item.output.missingData)),
-      ...(omittedClaims > 0
+      "The combined summary step was unavailable, so the topic findings are listed without a combined interpretation.",
+      ...(unavailableClaims > 0
         ? [
-            `${omittedClaims} specialist claim${omittedClaims === 1 ? " was" : "s were"} omitted because its immutable source reference was unavailable.`,
+            "Some findings were left out because their cited sources could not be shown.",
           ]
         : []),
+    ],
+    missingData: [
+      ...new Set(ordered.flatMap((item) => item.output.missingData)),
     ].slice(0, 10),
     disagreements: [],
     whatWouldChange: [],
@@ -1175,7 +1202,6 @@ async function persistExternalReport(input: {
             ...output.claims
               .filter((claim) => claim.category === "RISK")
               .map((claim) => claim.statement),
-            ...output.warnings,
           ],
           missingDataJson: output.missingData,
           disagreementsJson: output.disagreements,
@@ -1216,7 +1242,6 @@ async function persistExternalReport(input: {
             ...output.claims
               .filter((claim) => claim.category === "RISK")
               .map((claim) => claim.statement),
-            ...output.warnings,
           ],
           missingDataJson: output.missingData,
           disagreementsJson: output.disagreements,

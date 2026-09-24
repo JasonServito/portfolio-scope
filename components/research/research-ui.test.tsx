@@ -328,10 +328,8 @@ describe("research UI", () => {
     expect(markup).toContain("Evidence coverage 78%");
     expect(markup).toContain("Newest filing");
     expect(markup).toContain("8/1/2026");
-    expect(markup).toContain("61% reported confidence");
-    expect(markup.indexOf("Evidence coverage 78%")).toBeLessThan(
-      markup.indexOf("61% reported confidence"),
-    );
+    // Model-reported confidence is no longer a headline number.
+    expect(markup).not.toContain("61% reported confidence");
     expect(markup).toContain("Recent events from filings");
     expect(markup).toContain(
       "7/30/2026 (Form 8-K): In a Form 8-K filed 2026-07-30 the company announced third quarter results.",
@@ -371,7 +369,80 @@ describe("research UI", () => {
     expect(markup).not.toContain("$0.0023");
     expect(markup).not.toContain(">mixed<");
     expect(markup).toContain("This report is partial");
+    expect(markup).toContain(
+      "The financial performance topic could not be completed, so its findings are missing.",
+    );
+    expect(markup).toContain("Partial analysis");
     expect(markup).not.toContain("Regenerate report");
+  });
+
+  it("marks fallback topics and a fallback combined summary as partial", () => {
+    const markup = renderToStaticMarkup(
+      <ResearchTabs
+        initialResearch={{
+          ...externalResearch,
+          agents: [
+            { ...failedAgent, status: "COMPLETED", provider: "partial-fallback" },
+            {
+              ...failedAgent,
+              agentName: "RISK",
+              status: "COMPLETED",
+              provider: "openai",
+            },
+          ],
+          metadata: {
+            ...externalResearch.metadata!,
+            provider: "partial-fallback",
+          },
+        }}
+        readOnly
+        ticker="AAPL"
+      />,
+    );
+
+    expect(markup).toContain("Partial analysis");
+    expect(markup).toContain(
+      "The financial performance topic could not be completed, so its findings are missing.",
+    );
+    expect(markup).not.toContain("risk review topic");
+    expect(markup).toContain(
+      "The combined summary step was unavailable, so the topic findings are listed without a combined interpretation.",
+    );
+  });
+
+  it("shows process notes in the summary instead of Risks", () => {
+    const note =
+      "Some draft claims were limited after checking their cited sources.";
+    const markup = renderToStaticMarkup(
+      <ResearchTabs
+        initialResearch={{
+          ...externalResearch,
+          agents: [
+            { ...failedAgent, status: "COMPLETED" },
+            {
+              ...failedAgent,
+              agentName: "SYNTHESIS",
+              status: "COMPLETED",
+              warnings: [note],
+            },
+          ],
+          // Reports generated before notes were separated also listed them
+          // under Risks.
+          report: {
+            ...externalResearch.report,
+            risks: ["Evidence remains incomplete.", note],
+          },
+        }}
+        readOnly
+        ticker="AAPL"
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Report notes"');
+    expect(markup.match(new RegExp(note, "g"))).toHaveLength(1);
+    expect(markup.indexOf(note)).toBeLessThan(markup.indexOf(">Risks<"));
+    expect(markup).toContain("Evidence remains incomplete.");
+    expect(markup).not.toContain("Partial analysis");
   });
 
   it("keeps the prebuilt report free of a coverage headline and labels unknown claim kinds only when known", () => {
@@ -402,6 +473,6 @@ describe("research UI", () => {
     expect(markup).not.toContain("What would change this analysis");
     expect(markup).not.toContain("Upcoming earnings");
     expect(markup).not.toContain("derived value");
-    expect(markup).toContain("61% reported confidence");
+    expect(markup).not.toContain("61% reported confidence");
   });
 });

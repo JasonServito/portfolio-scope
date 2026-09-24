@@ -652,18 +652,18 @@ Research uses the stored reports on the next report generation: the News
 specialist lists the newest current reports with their filing dates and
 reports `NOT_AVAILABLE` for a company with none in the window. A job whose
 snapshot holds current reports runs News as a fourth model call after the
-other three specialists settle, and that job's specialist calls reserve
-smaller output allowances (Financials 1,200, Risk 1,200, Competitors 900,
-News 800 tokens); a job whose snapshot holds none keeps the earlier job
-topology and the configured per-call maximum, and only the Competitors and
-Risk context budgets (4,600 and 6,000 characters) apply to every external
-job. Before enabling the flag in Production, generate one report in Preview
-with the flag on and compare each specialist's settled output plus reasoning
-tokens (`AiUsage`) with its allowance: a provider response that hits
-`max_output_tokens` is recorded `UNCONFIRMED` and blocks further AI
-reservations until reconciled, so if any specialist is within about 30
-percent of its allowance, lower that specialist's context budget and raise
-its allowance before activation. If a first-stage specialist ends `FAILED`,
+other three specialists settle. Every specialist call reserves the configured
+per-call output maximum, and input reservations count tokens with the pinned
+model's encoding plus a 25% margin, never above the byte count. The earlier
+reduced M32 allowances (Financials 1,200, Risk 1,200, Competitors 900, News
+800) were removed after the 2026-09-24 Production report measured outputs of
+1,652, 1,508, and 1,333 tokens, which would have been truncated. Before
+enabling the flag in Production, compare each call's settled output plus
+reasoning tokens (`AiUsage`) with `AI_MAX_OUTPUT_TOKENS_PER_CALL`: a provider
+response that hits `max_output_tokens` is recorded `UNCONFIRMED` and blocks
+further AI reservations until reconciled, so if any call is within about 30
+percent of the maximum, raise it (up to the 8,000-token schema ceiling) before
+activation. If a first-stage specialist ends `FAILED`,
 the deferred News run stays pending and the job remains partial exactly as
 for any failed specialist; an administrator retry of the failed specialist
 queues News. To stop the capability, set the flag back to `false`: 8-K

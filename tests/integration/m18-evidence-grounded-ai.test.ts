@@ -79,6 +79,7 @@ const ids = {
   faultSpecialistUser: `${prefix}-fault-specialist-user`,
   faultSynthesisUser: `${prefix}-fault-synthesis-user`,
   meteredUser: `${prefix}-metered-user`,
+  fallbackMixUser: `${prefix}-fallback-mix-user`,
   stock: `${prefix}-stock`,
   portfolio: `${prefix}-portfolio`,
 };
@@ -93,6 +94,7 @@ const fixtureUserIds = [
   ids.faultSpecialistUser,
   ids.faultSynthesisUser,
   ids.meteredUser,
+  ids.fallbackMixUser,
 ];
 const baseYear = 2100 + (Number.parseInt(runId.slice(0, 4), 16) % 6_000);
 const baseMonth = Number.parseInt(runId.slice(4, 6), 16) % 9;
@@ -851,6 +853,123 @@ describe("M18 recorded evidence-grounded research", () => {
         ]),
       },
     });
+  });
+
+  it("keeps every topic represented when the synthesis fallback limits claims", async () => {
+    // Digit-free statements keep the runtime numeric check out of the way.
+    const words = [
+      "alpha",
+      "bravo",
+      "charlie",
+      "delta",
+      "echo",
+      "foxtrot",
+      "golf",
+      "hotel",
+      "india",
+      "juliet",
+    ];
+    const multiClaimOutput = (
+      topic: string,
+      count: number,
+      evidenceId: string,
+      category: "SUPPORTIVE" | "COUNTERPOINT" | "RISK",
+    ): SpecialistModelOutput => ({
+      ...specialistOutput(`${topic} ${words[0]} observation.`, evidenceId, category),
+      claims: words.slice(0, count).map((word) => ({
+        category,
+        kind: "INTERPRETATION" as const,
+        statement: `${topic} ${word} observation from the cited public evidence.`,
+        confidence: 0.8,
+        evidenceIds: [evidenceId],
+        counterEvidenceIds: [],
+        assumptions: [],
+      })),
+    });
+    const outputs = [
+      multiClaimOutput("Financial", 10, revenueEvidence.id, "SUPPORTIVE"),
+      multiClaimOutput("Competitive", 3, peerEvidence.id, "COUNTERPOINT"),
+      multiClaimOutput("Risk", 3, liabilityEvidence.id, "RISK"),
+    ];
+    const provider = new RecordedResearchModelProvider({
+      model: "recorded-m18-fallback-mix-v1",
+      fixtures: [
+        ...outputs.map((output, index) => ({
+          result: {
+            output,
+            providerRequestId: `${prefix}-fallback-mix-${index + 1}`,
+            usage: { inputTokens: 100, outputTokens: 50 },
+          },
+        })),
+        {
+          error: new ModelProviderError(
+            ModelProviderErrorCode.REQUEST_REJECTED,
+            { provider: "recorded" },
+          ),
+        },
+      ],
+    });
+    const config = getAiResearchConfig(environment);
+    const queued = await runResearch(ids.fallbackMixUser, ticker, {
+      publisher,
+      environment,
+      prepareSnapshot: async () => snapshot,
+    });
+    if (!queued || !("jobId" in queued)) {
+      throw new Error("The fallback-mix research job was not queued.");
+    }
+    for (const agentName of EXTERNAL_SPECIALIST_AGENT_NAMES) {
+      await executeResearchAgent(
+        {
+          researchJobId: queued.jobId,
+          agentName,
+          userId: ids.fallbackMixUser,
+          correlationId: queued.correlationId!,
+        },
+        { provider, config, environment, publisher },
+      );
+    }
+    await expect(
+      executeResearchSynthesis(
+        { researchJobId: queued.jobId, userId: ids.fallbackMixUser },
+        { provider, config, environment },
+      ),
+    ).resolves.toMatchObject({ partial: true });
+
+    const report = await db.researchReport.findUniqueOrThrow({
+      where: { researchJobId: queued.jobId },
+      include: { claims: true },
+    });
+    const statements = report.claims.map((claim) => claim.statement);
+    expect(report.provider).toBe("partial-fallback");
+    expect(statements).toHaveLength(12);
+    // Round-robin keeps every Risk and competitor claim; the old merge filled
+    // the limit from the first specialist and could drop a whole topic.
+    for (const output of outputs.slice(1)) {
+      for (const claim of output.claims) {
+        expect(statements).toContain(claim.statement);
+      }
+    }
+    // Process notes stay out of Risks and Missing information.
+    const risks = report.risksJson as string[];
+    expect(risks).toHaveLength(3);
+    expect(risks.every((risk) => risk.startsWith("Risk "))).toBe(true);
+    expect(
+      (report.missingDataJson as string[]).some((item) =>
+        /omitted|immutable source/i.test(item),
+      ),
+    ).toBe(false);
+    const synthesisRun = await db.agentRun.findUniqueOrThrow({
+      where: {
+        researchJobId_agentName: {
+          researchJobId: queued.jobId,
+          agentName: "SYNTHESIS",
+        },
+      },
+    });
+    expect(synthesisRun.warningsJson).toEqual([
+      "The combined summary step was unavailable, so the topic findings are listed without a combined interpretation.",
+    ]);
   });
 
   it("atomically settles zero-network metered usage into job, user, global, and report totals", async () => {

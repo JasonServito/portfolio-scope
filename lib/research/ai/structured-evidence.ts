@@ -2,7 +2,9 @@ import { evidenceId, type ResearchEvidence } from "@/lib/research/ai/schemas";
 import type { ResearchAgentName } from "@/lib/research/types";
 import {
   buildDerivedMetrics,
+  DERIVED_METRIC_CAVEATS,
   formatDerivedValue,
+  roundDerivedValue,
   SEC_DERIVED_METRICS_VERSION,
   type DerivedMetric,
   type DerivedMetricInputFact,
@@ -74,6 +76,15 @@ export const STRUCTURED_EVIDENCE_TYPES = {
 } as const;
 
 const MAX_EXCERPT = 4_000;
+// A quarter is compared with the one ending about a year earlier; fiscal
+// quarters end on different weekdays, so the window allows a few days.
+const SAME_QUARTER_MIN_DAYS = 350;
+const SAME_QUARTER_MAX_DAYS = 380;
+const TREND_SERIES_NAMES: Record<string, string> = {
+  REVENUE: "Revenue",
+  DILUTED_EPS: "Diluted EPS",
+  FREE_CASH_FLOW: "Free cash flow",
+};
 const TREND_METRICS = [
   "REVENUE",
   "DILUTED_EPS",
@@ -239,7 +250,7 @@ export function buildDerivedMetricEvidence(
         `${metric.label}, ${metric.periodKind === "INSTANT" ? `at ${metric.periodEnd}` : `${metric.periodKind.toLowerCase()} period ${metric.periodStart} to ${metric.periodEnd}`}: ${formatDerivedValue(metric.value, metric.unit)}.`,
         `Formula: ${metric.formula}.`,
         `Inputs: ${metric.inputs.map(describeInput).join("; ")}.`,
-        `This is a derived value (${SEC_DERIVED_METRICS_VERSION}) calculated from the cited SEC facts; the filer did not report it.`,
+        `A derived value (${SEC_DERIVED_METRICS_VERSION}) from the cited SEC facts; not reported by the filer.`,
       ].join(" ");
       return {
         id: evidenceId({ sourceKind: "DERIVED", sourceReference }),
@@ -326,7 +337,8 @@ function derivedRow(
     }
     return `${scope}${formatDerivedValue(metric.value, metric.unit)} (${metric.periodKind === "INSTANT" ? `at ${metric.periodEnd}` : `period ending ${metric.periodEnd}`})`;
   });
-  return `${label}: ${parts.join("; ")}.`;
+  const caveat = DERIVED_METRIC_CAVEATS[id];
+  return `${label}: ${parts.join("; ")}.${caveat ? ` ${caveat}` : ""}`;
 }
 
 const DERIVED_ROW_ORDER: DerivedMetric["id"][] = [
@@ -455,6 +467,50 @@ function toCanonicalFact(fact: StructuredFact): CanonicalFundamentalFact {
   };
 }
 
+function daysApart(earlier: string, later: string) {
+  return Math.round(
+    (Date.parse(`${later.slice(0, 10)}T00:00:00.000Z`) -
+      Date.parse(`${earlier.slice(0, 10)}T00:00:00.000Z`)) /
+      86_400_000,
+  );
+}
+
+/**
+ * Same-quarter year-over-year changes within the trend window, using the
+ * derived growth formula. Adjacent quarters are not compared because many
+ * businesses are seasonal.
+ */
+function sameQuarterChanges(
+  points: readonly {
+    periodEnd: string;
+    value: number | null;
+    inputEvidenceIds: string[];
+  }[],
+) {
+  return points.flatMap((point) => {
+    if (point.value === null) return [];
+    const prior = points.find((candidate) => {
+      const days = daysApart(candidate.periodEnd, point.periodEnd);
+      return days >= SAME_QUARTER_MIN_DAYS && days <= SAME_QUARTER_MAX_DAYS;
+    });
+    if (!prior || prior.value === null || prior.value === 0) return [];
+    return [
+      {
+        periodEnd: point.periodEnd,
+        priorPeriodEnd: prior.periodEnd,
+        // Rounded like every derived value so the snapshot hash survives
+        // Prisma Json storage.
+        changePercent: roundDerivedValue(
+          ((point.value - prior.value) / Math.abs(prior.value)) * 100,
+        ),
+        inputEvidenceIds: [
+          ...new Set([...prior.inputEvidenceIds, ...point.inputEvidenceIds]),
+        ],
+      },
+    ];
+  });
+}
+
 export function buildTrendEvidence(
   stock: StructuredStock,
   facts: readonly StructuredFact[],
@@ -516,12 +572,36 @@ export function buildTrendEvidence(
           }`,
       )
       .join("; ");
-    return `${item.title}${item.id === "FREE_CASH_FLOW" ? " (derived as operating cash flow minus capital expenditures for matching quarters)" : ""}: ${points}. ${item.summary}`;
+    // The first-to-last summary is omitted: it ignores seasonality, and the
+    // same-quarter changes below state the comparable movement.
+    return `${item.title}${item.id === "FREE_CASH_FLOW" ? " (operating cash flow minus capital expenditures)" : ""}: ${points}.`;
   });
+  const yearOverYear = series.map((item) => ({
+    id: item.id,
+    title: item.title,
+    changes: sameQuarterChanges(item.points).slice(-3),
+  }));
+  const yearOverYearText = yearOverYear
+    .filter((item) => item.changes.length)
+    .map(
+      (item) =>
+        `${TREND_SERIES_NAMES[item.id] ?? item.title} ${item.changes
+          .map(
+            (change) =>
+              `${change.periodEnd}: ${formatDerivedValue(change.changePercent, "PERCENT")}`,
+          )
+          .join("; ")}`,
+    )
+    .join(". ");
   const excerpt = clip(
     [
       `${stock.ticker} eight-quarter trend excerpt from selected quarterly SEC facts (${trendPeriods.length} quarter${trendPeriods.length === 1 ? "" : "s"} available). A quarter marked not available has no selected quarterly observation; it is not zero.`,
       ...lines,
+      ...(yearOverYearText
+        ? [
+            `Change from the same quarter a year earlier: ${yearOverYearText}.`,
+          ]
+        : []),
     ].join("\n"),
   );
   return {
@@ -549,6 +629,7 @@ export function buildTrendEvidence(
       ticker: stock.ticker,
       periods: trendPeriods,
       series,
+      yearOverYear,
       inputEvidenceIds: [
         ...new Set(
           series.flatMap((item) =>

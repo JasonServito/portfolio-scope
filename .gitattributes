@@ -1,0 +1,4 @@
+# Recorded provider fixtures must stay byte-exact on every platform: their
+# parsed passages carry offsets and content hashes that a CRLF checkout
+# would change.
+tests/fixtures/** -text

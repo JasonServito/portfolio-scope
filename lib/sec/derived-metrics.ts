@@ -4,13 +4,14 @@ import type { FactSelection, PeriodKind } from "@/lib/sec/normalization";
  * Deterministic metrics derived from selected SEC facts. The formulas mirror
  * the stock-page headline calculators (free cash flow, operating margin, and
  * long-term debt-to-equity) and extend them with growth, net margin, free
- * cash flow margin, current ratio, net cash, and diluted-share change. Every
+ * cash flow margin, current ratio, cash minus long-term debt, and
+ * diluted-share change. Every
  * value is computed only from inputs whose period boundaries and units match,
  * and every unavailable value states why. Research applies stricter guards
  * than the stock page: negative equity, non-positive current liabilities, and
  * negative reported capital expenditures stay unavailable with a reason.
  */
-export const SEC_DERIVED_METRICS_VERSION = "sec-derived-v1";
+export const SEC_DERIVED_METRICS_VERSION = "sec-derived-v2";
 
 export type DerivedMetricInputFact = {
   referenceId: string;
@@ -73,6 +74,11 @@ const DURATION_PERIOD_KINDS: DerivedMetricPeriodKind[] = ["ANNUAL", "QUARTERLY"]
 // format doubles with 16 digits (Prisma Json columns) without changing the
 // immutable snapshot hash. Excerpts round further for display.
 const VALUE_SIGNIFICANT_DIGITS = 12;
+
+/** Rounds a derived value so it survives Prisma Json storage unchanged. */
+export function roundDerivedValue(value: number) {
+  return Number(value.toPrecision(VALUE_SIGNIFICANT_DIGITS));
+}
 const COMPARABLE_MIN_DAYS = 340;
 const COMPARABLE_MAX_DAYS = 390;
 const COMPARABLE_LENGTH_TOLERANCE_DAYS = 14;
@@ -132,7 +138,7 @@ const definitions = {
   },
   NET_CASH: {
     id: "NET_CASH",
-    label: "Net cash",
+    label: "Cash minus long-term debt",
     formula: "CASH_AND_EQUIVALENTS - LONG_TERM_DEBT",
     unit: "USD",
   },
@@ -144,6 +150,18 @@ const definitions = {
     unit: "PERCENT",
   },
 } satisfies Record<DerivedMetricId, Definition>;
+
+/**
+ * Scope limits shown with a derived value wherever evidence text renders it.
+ * Cash minus long-term debt omits marketable securities and short-term debt,
+ * which some filers hold in large amounts, so it must not be read as the
+ * company's complete net cash position.
+ */
+export const DERIVED_METRIC_CAVEATS: Partial<Record<DerivedMetricId, string>> =
+  {
+    NET_CASH:
+      "Excludes marketable securities.",
+  };
 
 function dateOnly(value: string) {
   return value.slice(0, 10);
@@ -411,7 +429,7 @@ function available(
     periodStart:
       reference.periodStart === null ? null : dateOnly(reference.periodStart),
     periodEnd: dateOnly(reference.periodEnd),
-    value: Number(value.toPrecision(VALUE_SIGNIFICANT_DIGITS)),
+    value: roundDerivedValue(value),
     inputs,
     unavailableReason: null,
     calculationVersion: SEC_DERIVED_METRICS_VERSION,

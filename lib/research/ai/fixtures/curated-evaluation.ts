@@ -178,7 +178,7 @@ const trendCoverageClaim: ModelClaim = {
   category: "RISK",
   kind: "INTERPRETATION",
   statement:
-    "The quarterly trend excerpt has derived free cash flow for only 2 of the 8 available quarters, so quarterly cash-generation coverage is incomplete.",
+    "The quarterly trend excerpt marks most quarters of derived free cash flow as not available, so quarterly cash-generation coverage is incomplete.",
   confidence: 0.78,
   evidenceIds: [trendExcerpt.id],
   counterEvidenceIds: [],

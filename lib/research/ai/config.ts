@@ -3,10 +3,10 @@ import { z } from "zod";
 import type { SpecialistAgentName } from "@/lib/research/types";
 
 export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
-export const AI_PROMPT_VERSION = "m33-research-v5";
+export const AI_PROMPT_VERSION = "m33-research-v6";
 export const AI_RETRIEVAL_VERSION = "m32-structured-lexical-v3";
 export const AI_OUTPUT_SCHEMA_VERSION = "m30-claims-v2";
-export const AI_REPORT_VERSION = "m33-report-v3";
+export const AI_REPORT_VERSION = "m33-report-v4";
 export const AI_SPECIALIST_AGENT_VERSION = "m30-specialist-v2";
 export const AI_SYNTHESIS_AGENT_VERSION = "m30-synthesis-v2";
 export const AI_CALCULATION_VERSION = "portfolio-v1";
@@ -29,13 +29,12 @@ export const AI_SPECIALIST_CONTEXT_CHAR_BUDGET = 7_200;
 // plus one MD&A passage need 8,400, Risk's owned items plus one Risk
 // Factors passage need 5,900, and Competitors owns little structured
 // evidence. M32 makes News a fourth model call that runs only after the
-// three settle, because their concurrent reservations already fill the
-// token cap; its budget holds the coverage statement, the four newest
+// three settle; its budget holds the coverage statement, the four newest
 // current-report items, and one press-release passage. The settled usage
-// of all four calls plus one repair and the synthesis reservation must stay
-// inside the unchanged 50,000-token cap under the conservative model in
-// prompt-budget.test.ts; the lower specialist output allowances below are
-// what pay for the fourth call.
+// of all four calls plus one repair, a synthesis repair, and verification
+// must stay inside the unchanged 50,000-token cap under the model in
+// prompt-budget.test.ts, with every call reserving the configured per-call
+// output maximum.
 export const AI_SPECIALIST_CONTEXT_CHAR_BUDGETS: Record<
   SpecialistAgentName,
   number
@@ -47,26 +46,6 @@ export const AI_SPECIALIST_CONTEXT_CHAR_BUDGETS: Record<
   POLITICAL_ACTIVITY: AI_SPECIALIST_CONTEXT_CHAR_BUDGET,
 };
 export const AI_SPECIALIST_MAX_EVIDENCE_ITEMS = 16;
-// Output allowances reserved per specialist call of a job whose snapshot
-// holds current reports (so News will make a model call), below the
-// configured per-call maximum that synthesis keeps; a job without current
-// reports keeps the configured maximum as before M32. A specialist answers
-// at most six research questions with short claims (the recorded outputs
-// are 400 to 900 tokens), so its validated output is far shorter than a
-// synthesis report; reserving less for it is what leaves room for the
-// fourth specialist call. A response that hits its allowance is recorded
-// UNCONFIRMED and blocks further reservations, so the runbook measures
-// settled output plus reasoning tokens in Preview before activation.
-export const AI_SPECIALIST_MAX_OUTPUT_TOKENS: Record<
-  SpecialistAgentName,
-  number
-> = {
-  FINANCIALS: 1_200,
-  COMPETITORS: 900,
-  RISK: 1_200,
-  NEWS: 800,
-  POLITICAL_ACTIVITY: 800,
-};
 // Synthesis runs after the specialists settle, so its budget can carry the
 // filing passages the specialists cited: its owned items (about 6,700
 // characters on the fixture), the dated current-report items the News

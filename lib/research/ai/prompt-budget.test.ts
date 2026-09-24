@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateAiCostUsd } from "@/lib/research/ai/budget";
+import {
+  calculateAiCostUsd,
+  estimateInputTokenReservation,
+} from "@/lib/research/ai/budget";
 import {
   AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
   AI_HARD_MAX_COST_PER_JOB_USD,
   AI_HARD_MAX_TOKENS_PER_JOB,
   AI_SPECIALIST_CONTEXT_CHAR_BUDGETS,
-  AI_SPECIALIST_MAX_OUTPUT_TOKENS,
   AI_VERIFIER_MAX_OUTPUT_TOKENS,
   getSupportedResearchModels,
 } from "@/lib/research/ai/config";
@@ -42,14 +44,13 @@ import {
 } from "@/lib/research/ai/verification";
 
 /**
- * Reservations treat every serialized provider-input byte as a token, so the
- * m29 context and output limits plus the m30 research questions and claim
- * contract, the m31 filing passages, and the m32 News specialist must keep
- * the job inside the 50,000-token and $0.25 caps under a conservative
- * model: the three first-stage specialists reserve concurrently; News
- * reserves only after they settle; and synthesis reserves after News
- * settles, with one specialist repair allowed. Settled usage is
- * approximated conservatively at three bytes per input token plus the
+ * Reservations count input with the pinned model's encoding plus a margin
+ * (never above the byte count) and reserve the configured per-call output
+ * maximum, exactly as the runtime does. The job must stay inside the
+ * 50,000-token and $0.25 caps: the three first-stage specialists reserve
+ * concurrently; News reserves after they settle; synthesis may need its one
+ * repair after a specialist repair; and verification follows. Settled usage
+ * is approximated conservatively at three bytes per input token plus the
  * call's full output allowance.
  */
 
@@ -115,7 +116,7 @@ function specialistSerialized(agent: ModelAgent) {
       `research_${agent.toLowerCase()}_v1`,
       specialistModelOutputSchema,
     ),
-    outputTokens: AI_SPECIALIST_MAX_OUTPUT_TOKENS[agent],
+    outputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
   };
 }
 
@@ -150,7 +151,7 @@ function synthesisSerialized(
 
 function reservation(call: { serialized: string; outputTokens: number }) {
   return (
-    bytes(call.serialized) +
+    estimateInputTokenReservation(call.serialized) +
     PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE +
     call.outputTokens
   );
@@ -222,15 +223,35 @@ describe("m33 prompt envelope with the AAPL fixture", () => {
     ).toBeLessThanOrEqual(3 * 7_200);
   });
 
-  it("defers the News specialist because a fourth concurrent reservation would not fit, then fits it after the first stage settles", () => {
+  it("fits the deferred News specialist after the first stage settles", () => {
     expect(deferred.map((item) => item.agent)).toEqual(["NEWS"]);
     const news = deferred[0];
-    expect(sum(firstStage.map(reservation)) + reservation(news)).toBeGreaterThan(
-      AI_HARD_MAX_TOKENS_PER_JOB - CONCURRENT_SPECIALIST_HEADROOM_TOKENS,
-    );
     expect(sum(firstStage.map(settled)) + reservation(news)).toBeLessThanOrEqual(
       AI_HARD_MAX_TOKENS_PER_JOB - CONCURRENT_SPECIALIST_HEADROOM_TOKENS,
     );
+  });
+
+  it("fits a synthesis repair after all four specialists and a specialist repair settle", () => {
+    // Production on 2026-09-24 fell back because a synthesis repair could not
+    // be reserved under byte-based input estimates. If this heaviest path
+    // then leaves no room for verification, the report completes marked
+    // unverified, which is the existing budget-exhaustion behavior.
+    expect(
+      sum(specialists.map(settled)) +
+        settled(largestFirstStage) +
+        settled(synthesis) +
+        reservation(synthesis),
+    ).toBeLessThanOrEqual(AI_HARD_MAX_TOKENS_PER_JOB);
+  });
+
+  it("reserves every call's counted input with margin, never above its byte count", () => {
+    for (const call of [...specialists, synthesis, verifier]) {
+      const reserved = estimateInputTokenReservation(call.serialized);
+      expect(reserved).toBeLessThanOrEqual(bytes(call.serialized));
+      // About 3.5 bytes per token in this evidence, so the estimate is far
+      // tighter than the byte bound it replaced.
+      expect(reserved).toBeLessThan(bytes(call.serialized) / 2);
+    }
   });
 
   it("leaves room for synthesis after all four specialists settle, including one repair", () => {
@@ -280,7 +301,8 @@ describe("m33 prompt envelope with the AAPL fixture", () => {
         calculateAiCostUsd(
           {
             inputTokens:
-              bytes(call.serialized) + PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE,
+              estimateInputTokenReservation(call.serialized) +
+              PROVIDER_INPUT_ENVELOPE_TOKEN_ALLOWANCE,
             outputTokens: call.outputTokens,
           },
           pricing,
@@ -301,7 +323,9 @@ describe("m33 prompt envelope with the AAPL fixture", () => {
         ),
       ),
     );
-    expect(estimatedCost).toBeLessThan(0.07);
+    // Every call is modeled at its full output allowance; the measured
+    // Production AAPL report on 2026-09-24 cost $0.051.
+    expect(estimatedCost).toBeLessThan(0.08);
   });
 
   it("grounds every recorded output inside the evidence its agent actually receives", () => {

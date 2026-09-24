@@ -99,7 +99,7 @@ describe("M29 structured research evidence", () => {
       periodKind: "ANNUAL",
     });
     expect(growth.excerpt).toBe(
-      "Revenue growth (year over year), annual period 2024-09-29 to 2025-09-27: 6.4 percent. Formula: (REVENUE[current] - REVENUE[prior year]) / |REVENUE[prior year]| x 100. Inputs: current REVENUE 416,161,000,000 USD (2024-09-29 to 2025-09-27); prior year REVENUE 391,035,000,000 USD (2023-10-01 to 2024-09-28). This is a derived value (sec-derived-v1) calculated from the cited SEC facts; the filer did not report it.",
+      "Revenue growth (year over year), annual period 2024-09-29 to 2025-09-27: 6.4 percent. Formula: (REVENUE[current] - REVENUE[prior year]) / |REVENUE[prior year]| x 100. Inputs: current REVENUE 416,161,000,000 USD (2024-09-29 to 2025-09-27); prior year REVENUE 391,035,000,000 USD (2023-10-01 to 2024-09-28). A derived value (sec-derived-v2) from the cited SEC facts; not reported by the filer.",
     );
     const inputs = growth.metadata.inputs as Array<Record<string, unknown>>;
     const cited = inputs.map((input) =>
@@ -220,6 +220,45 @@ describe("M29 structured research evidence", () => {
     expect((trend.metadata.inputEvidenceIds as string[]).length).toBeGreaterThan(
       16,
     );
+  });
+
+  it("states same-quarter year-over-year changes instead of a first-to-last trend", () => {
+    const trend = findFixtureEvidence(snapshot, {
+      evidenceType: "FINANCIAL_TREND_EXCERPT",
+    });
+    expect(trend.excerpt).toContain(
+      "Change from the same quarter a year earlier: Revenue 2025-12-27: 15.7 percent; 2026-03-28: 16.6 percent; 2026-06-27: 16.4 percent.",
+    );
+    // The first-to-last summary ignored seasonality.
+    expect(trend.excerpt).not.toContain("across 8 available quarters");
+    const yearOverYear = trend.metadata.yearOverYear as Array<{
+      id: string;
+      changes: Array<{
+        periodEnd: string;
+        priorPeriodEnd: string;
+        inputEvidenceIds: string[];
+      }>;
+    }>;
+    const revenue = yearOverYear.find((item) => item.id === "REVENUE")!;
+    expect(revenue.changes.at(-1)).toMatchObject({
+      periodEnd: "2026-06-27",
+      priorPeriodEnd: "2025-06-28",
+    });
+    expect(revenue.changes.at(-1)!.inputEvidenceIds).toHaveLength(2);
+  });
+
+  it("labels cash minus long-term debt with what it excludes", () => {
+    const summary = findFixtureEvidence(snapshot, {
+      evidenceType: "FINANCIAL_SUMMARY_TABLE",
+    });
+    expect(summary.excerpt).toContain(
+      "Cash minus long-term debt: -31,796,000,000 USD (at 2026-06-27). Excludes marketable securities.",
+    );
+    expect(summary.excerpt).not.toContain("Net cash");
+    // The summary table carries the caveat; every agent that sees the
+    // derived item also sees the table, so the item omits it for budget.
+    const netCash = findFixtureEvidence(snapshot, { metricId: "NET_CASH" });
+    expect(netCash.title).toContain("Cash minus long-term debt");
   });
 
   it("compares peers on their own periods with the same derived metrics and provenance", () => {

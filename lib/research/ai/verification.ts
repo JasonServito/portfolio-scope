@@ -102,15 +102,9 @@ export function applyClaimVerification(
   output: SynthesisModelOutput,
   verification: ClaimVerification | null,
 ): SynthesisModelOutput {
-  if (!verification) {
-    return {
-      ...output,
-      warnings: [
-        "Claim support has not been verified. Check the cited sources independently.",
-        ...output.warnings,
-      ].slice(0, 10),
-    };
-  }
+  // The report records verificationCompleted=false, and the page states that
+  // claim support is unverified, so no duplicate warning is added here.
+  if (!verification) return output;
   validateClaimVerification(verification, output);
   const claims = output.claims.filter((_, index) =>
     ["SUPPORTED", "PARTIALLY_SUPPORTED"].includes(
@@ -138,18 +132,16 @@ export function applyClaimVerification(
             ...claims.map((claim) => claim.confidence),
             claims.length ? 1 : 0,
           ),
+          // Process notes stay in warnings, which the report shows as notes,
+          // never in Risks or Missing information.
           warnings: [
-            "Some draft claims were limited or removed after checking their cited sources.",
+            unsupported
+              ? `${unsupported} draft claim${unsupported === 1 ? " was" : "s were"} removed because the cited evidence did not establish ${unsupported === 1 ? "it" : "them"}; remaining claims show any limits.`
+              : "Some draft claims were limited after checking their cited sources.",
           ],
           disagreements: [],
           whatWouldChange: [],
         }
       : {}),
-    missingData: unsupported
-      ? [
-          `${unsupported} unsupported claim${unsupported === 1 ? " was" : "s were"} removed because the cited evidence did not establish the statement.`,
-          ...output.missingData,
-        ].slice(0, 10)
-      : output.missingData,
   };
 }

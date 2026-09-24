@@ -414,7 +414,10 @@ describe("M33 persisted report and verifier accounting", () => {
   ])(
     "completes unverified and preserves the validated draft after %s",
     async (failure) => {
-      const job = await createJob(failure === "job cap" ? 25_000 : 0);
+      // Synthesis reserves about 10,500 tokens and verification about 7,000
+      // here: 37,000 prior tokens let synthesis fit and push verification
+      // over the 50,000-token cap once synthesis settles.
+      const job = await createJob(failure === "job cap" ? 37_000 : 0);
       const environment = { ...baseEnvironment };
       const recorded = new RecordedResearchModelProvider({
         fixtures: [
@@ -422,7 +425,7 @@ describe("M33 persisted report and verifier accounting", () => {
             result: {
               output,
               usage: {
-                inputTokens: failure === "job cap" ? 22_000 : 500,
+                inputTokens: failure === "job cap" ? 7_000 : 500,
                 outputTokens: 200,
               },
             },

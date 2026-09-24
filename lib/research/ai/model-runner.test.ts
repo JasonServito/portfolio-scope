@@ -167,6 +167,59 @@ describe("grounded model runner", () => {
     expect(provider.remainingFixtures).toBe(0);
   });
 
+  it("logs why each output was rejected without model text", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const inconsistent = {
+      ...validOutput,
+      claims: [
+        { ...validOutput.claims[0], statement: "Revenue was USD 250 in FY2025." },
+      ],
+    };
+    const provider = new RecordedResearchModelProvider({
+      fixtures: [
+        { result: { output: inconsistent } },
+        { result: { output: { rating: "NEUTRAL" } } },
+      ],
+    });
+
+    await expect(
+      runGroundedModelCall({
+        provider,
+        config,
+        schema: specialistModelOutputSchema,
+        schemaName: "specialist_result",
+        evidence: [evidence],
+        prompt: () => ({ instructions: "Grounded only.", input: "{}" }),
+        userId: "user-a",
+        researchJobId: "job-a",
+        operation: "SPECIALIST_RISK",
+        idempotencyKey: "job-a:risk-rejected",
+      }),
+    ).rejects.toMatchObject({ code: "AI_MODEL_OUTPUT_INVALID" });
+
+    const lines = warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes("ai.model.output.rejected"));
+    warn.mockRestore();
+    expect(lines).toHaveLength(2);
+    const [first, second] = lines.map((line) => JSON.parse(line));
+    expect(first).toMatchObject({
+      errorCode: "AI_INCONSISTENT_OUTPUT",
+      details: {
+        researchJobId: "job-a",
+        operation: "SPECIALIST_RISK",
+        attempt: 1,
+        maxAttempts: 2,
+        reason: expect.stringMatching(/does not appear with the same unit/),
+      },
+    });
+    expect(second).toMatchObject({
+      errorCode: "AI_MODEL_OUTPUT_INVALID",
+      details: { attempt: 2, reason: expect.stringContaining("invalid_type") },
+    });
+    for (const line of lines) expect(line).not.toContain("USD 250");
+  });
+
   it("stops before the first metered attempt when the kill switch is off", async () => {
     const provider = {
       provider: "openai",

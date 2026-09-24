@@ -44,18 +44,18 @@ import {
 // they do not assert human approval to activate an external provider.
 export const M33_EVALUATION_BASELINE = {
   versions: {
-    prompt: "m33-research-v5",
+    prompt: "m33-research-v6",
     retrieval: "m32-structured-lexical-v3",
     outputSchema: "m30-claims-v2",
-    report: "m33-report-v3",
+    report: "m33-report-v4",
     snapshot: "m32-public-evidence-snapshot-v4",
     model: "gpt-5.4-mini-2026-03-17",
     pricing: "openai-pricing-2026-08-24",
-    calculation: "sec-derived-v1",
+    calculation: "sec-derived-v2",
     filingParser: "sec-filing-sections-v1",
   },
   inputsSha256:
-    "d592bf777897f1d2cf34d94c1bcf60fb37aab8b7559bd9852e40e196c6ddd533",
+    "13a32f45986d390ac4716e56833a24f40b9d3fd8f32350470f1d428a00d034a0",
   thresholds: {
     caseCount: 8,
     passedCases: 8,
@@ -224,14 +224,8 @@ export async function runVerificationEvaluation(
       );
       if (stableHash(final.claims) !== stableHash(expectedClaims))
         issues.push("Retained claims differ from the reviewed gold set.");
+      // Removal counts are report notes (warnings), never missing information.
       const expectedMissing = [...item.output.missingData];
-      const unsupported = item.expectedStatuses.filter(
-        (status) => status === "UNSUPPORTED",
-      ).length;
-      if (unsupported)
-        expectedMissing.unshift(
-          `${unsupported} unsupported claim${unsupported === 1 ? " was" : "s were"} removed because the cited evidence did not establish the statement.`,
-        );
       const evaluation = evaluateResearchOutput({
         id: item.id,
         output: final,

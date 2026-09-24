@@ -862,7 +862,9 @@ describe("M32 recent events in research", () => {
     for (const id of eventIds) {
       expect(newsRequest.evidence.registry.some((item) => item.id === id)).toBe(true);
     }
-    expect(generate.mock.calls[3][0].maxOutputTokens).toBe(800);
+    // Every call reserves the configured per-call maximum; the reduced M32
+    // allowances were removed after Production outputs exceeded them.
+    expect(generate.mock.calls[3][0].maxOutputTokens).toBe(config.maxOutputTokensPerCall);
     await expect(
       db.backgroundJob.count({
         where: { researchJobId: queued.jobId, type: "RESEARCH_SYNTHESIS" },
@@ -885,7 +887,9 @@ describe("M32 recent events in research", () => {
       availability: "PARTIAL",
       provider: "recorded",
     });
-    expect(news.modelConfigJson).toEqual({ maxOutputTokens: 800 });
+    expect(news.modelConfigJson).toEqual({
+      maxOutputTokens: config.maxOutputTokensPerCall,
+    });
     const eventReference = stored.report!.claims
       .flatMap((claim) => claim.evidence)
       .find((reference) => reference.secFilingId === `${prefix}-filing-results`);
