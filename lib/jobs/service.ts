@@ -35,6 +35,7 @@ import { sendOperationalHeartbeat } from "@/lib/operations/heartbeat";
 export type JobHandler = (
   job: ClaimedBackgroundJob,
   signal: AbortSignal,
+  deadlineAt: number,
 ) => Promise<Prisma.InputJsonValue>;
 
 type ServiceDependencies = {
@@ -45,9 +46,13 @@ type ServiceDependencies = {
   now?: () => Date;
 };
 
-async function defaultHandler(job: ClaimedBackgroundJob, signal: AbortSignal) {
+async function defaultHandler(
+  job: ClaimedBackgroundJob,
+  signal: AbortSignal,
+  deadlineAt: number,
+) {
   const { executeBackgroundJobHandler } = await import("@/lib/jobs/handlers");
-  return executeBackgroundJobHandler(job, signal);
+  return executeBackgroundJobHandler(job, signal, deadlineAt);
 }
 
 function describePublishFailure(
@@ -75,8 +80,9 @@ function describePublishFailure(
 
 async function withJobTimeout<T>(
   timeoutMs: number,
-  operation: (signal: AbortSignal) => Promise<T>,
+  operation: (signal: AbortSignal, deadlineAt: number) => Promise<T>,
 ) {
+  const deadlineAt = Date.now() + timeoutMs;
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -93,7 +99,10 @@ async function withJobTimeout<T>(
   });
 
   try {
-    return await Promise.race([operation(controller.signal), timeoutPromise]);
+    return await Promise.race([
+      operation(controller.signal, deadlineAt),
+      timeoutPromise,
+    ]);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -237,8 +246,8 @@ export async function executeBackgroundJob(
       void repository.heartbeat?.(job, now()).catch(() => undefined);
     }, heartbeatIntervalMs);
     heartbeatTimer.unref?.();
-    const result = await withJobTimeout(job.timeoutMs, (signal) =>
-      handler(job, signal),
+    const result = await withJobTimeout(job.timeoutMs, (signal, deadlineAt) =>
+      handler(job, signal, deadlineAt),
     );
     await repository.complete(job, result, now());
     if (job.type === BackgroundJobType.MAINTENANCE_CLEANUP) {

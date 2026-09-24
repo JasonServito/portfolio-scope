@@ -24,6 +24,7 @@ import {
   AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS,
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
   CURATED_AAPL_SNAPSHOT,
+  recordedSupportedVerification,
 } from "@/lib/research/ai/fixtures/curated-evaluation";
 import type { GroundedModelOutput } from "@/lib/research/ai/schemas";
 import { RecordedResearchModelProvider } from "@/lib/research/ai/providers";
@@ -212,6 +213,7 @@ function recordedProvider() {
       rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.COMPETITORS),
       rekeyOutput(AAPL_RECORDED_SPECIALIST_OUTPUTS.RISK),
       rekeyOutput(AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS),
+      recordedSupportedVerification(rekeyOutput(AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS)),
     ].map((output, index) => ({
       result: {
         output,
@@ -447,7 +449,7 @@ describe("M29 derived and structured research evidence", () => {
       { provider, config, environment },
     );
 
-    expect(generate).toHaveBeenCalledTimes(4);
+    expect(generate).toHaveBeenCalledTimes(5);
     expect(provider.remainingFixtures).toBe(0);
     const requests = generate.mock.calls.map(([request]) => ({
       instructions: request.instructions,
@@ -476,7 +478,7 @@ describe("M29 derived and structured research evidence", () => {
     expect(requests[3].input).toContain(escaped(peerTable.excerpt));
     expect(requests[3].input).toContain(escaped(riskFactorsPassage.excerpt));
     for (const request of requests) {
-      expect(request.instructions).toContain("never calculate");
+      expect(request.instructions).toMatch(/never calculate|calculate financial values/);
       expect(request.input).not.toContain(privateMarker);
       expect(request.input).not.toContain("321.654");
       expect(request.input).not.toContain("111.222");

@@ -3,16 +3,17 @@ import { z } from "zod";
 import type { SpecialistAgentName } from "@/lib/research/types";
 
 export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
-export const AI_PROMPT_VERSION = "m32-research-v4";
+export const AI_PROMPT_VERSION = "m33-research-v5";
 export const AI_RETRIEVAL_VERSION = "m32-structured-lexical-v3";
 export const AI_OUTPUT_SCHEMA_VERSION = "m30-claims-v2";
-export const AI_REPORT_VERSION = "m30-report-v2";
+export const AI_REPORT_VERSION = "m33-report-v3";
 export const AI_SPECIALIST_AGENT_VERSION = "m30-specialist-v2";
 export const AI_SYNTHESIS_AGENT_VERSION = "m30-synthesis-v2";
 export const AI_CALCULATION_VERSION = "portfolio-v1";
 export const AI_HARD_MAX_COST_PER_JOB_USD = 0.25;
 export const AI_HARD_MAX_TOKENS_PER_JOB = 50_000;
 export const AI_DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL = 2_000;
+export const AI_VERIFIER_MAX_OUTPUT_TOKENS = 1_200;
 
 // Context budgets are characters of rendered evidence per provider call. They
 // are sized so that three concurrent specialist reservations (which count

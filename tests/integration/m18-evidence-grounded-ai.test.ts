@@ -53,6 +53,7 @@ import type {
   SynthesisModelOutput,
 } from "@/lib/research/ai/schemas";
 import { stableHash } from "@/lib/research/ai/schemas";
+import { recordedSupportedVerification } from "@/lib/research/ai/fixtures/curated-evaluation";
 import {
   getLatestResearchForUser,
   getOwnedResearchJob,
@@ -372,6 +373,7 @@ function recordedProvider() {
       competitorOutput,
       riskOutput,
       synthesisOutput,
+      recordedSupportedVerification(synthesisOutput),
     ].map((output, index) => ({
       result: {
         output,
@@ -383,7 +385,7 @@ function recordedProvider() {
 }
 
 function zeroNetworkMeteredProvider(
-  outputs: Array<SpecialistModelOutput | SynthesisModelOutput>,
+  outputs: unknown[],
   afterGenerate?: () => void | Promise<void>,
   requestNamespace = "metered",
 ) {
@@ -647,7 +649,7 @@ describe("M18 recorded evidence-grounded research", () => {
       },
     );
 
-    expect(generate).toHaveBeenCalledTimes(4);
+    expect(generate).toHaveBeenCalledTimes(5);
     expect(provider.remainingFixtures).toBe(0);
     const serializedRequests = JSON.stringify(generate.mock.calls);
     expect(serializedRequests).toContain(revenueEvidence.id);
@@ -657,7 +659,7 @@ describe("M18 recorded evidence-grounded research", () => {
     expect(serializedRequests).not.toContain("987.6543");
     expect(serializedRequests).not.toContain("432.1");
     expect(
-      generate.mock.calls.map(
+      generate.mock.calls.slice(0, 4).map(
         ([request]) =>
           (JSON.parse(String(request.input)) as { asOfDate: string }).asOfDate,
       ),
@@ -857,6 +859,7 @@ describe("M18 recorded evidence-grounded research", () => {
       competitorOutput,
       riskOutput,
       synthesisOutput,
+      recordedSupportedVerification(synthesisOutput),
     ]);
     const config = getAiResearchConfig(environment);
     const queued = await runResearch(ids.meteredUser, ticker, {
@@ -891,7 +894,7 @@ describe("M18 recorded evidence-grounded research", () => {
       { provider, config, environment, now: () => meteredBudgetMonth },
     );
 
-    expect(provider.generate).toHaveBeenCalledTimes(4);
+    expect(provider.generate).toHaveBeenCalledTimes(5);
     const periodStart = utcMonthStart(meteredBudgetMonth);
     const [job, usages, report, userBudget, globalBudget] = await Promise.all([
       db.researchJob.findUniqueOrThrow({ where: { id: queued.jobId } }),
@@ -919,7 +922,7 @@ describe("M18 recorded evidence-grounded research", () => {
         },
       }),
     ]);
-    expect(usages).toHaveLength(4);
+    expect(usages).toHaveLength(5);
     expect(usages.every((usage) => usage.status === "SETTLED")).toBe(true);
     expect(
       usages.every(
@@ -932,18 +935,19 @@ describe("M18 recorded evidence-grounded research", () => {
       `${prefix}-metered-2`,
       `${prefix}-metered-3`,
       `${prefix}-metered-4`,
+      `${prefix}-metered-5`,
     ]);
     expect(job.aiReservedTokens).toBe(0);
     expect(job.aiReservedCostUsd.toNumber()).toBe(0);
-    expect(job.aiUsedTokens).toBe(600);
-    expect(job.aiUsedCostUsd.toNumber()).toBe(0.0012);
-    expect(report.inputTokens).toBe(400);
-    expect(report.outputTokens).toBe(200);
-    expect(report.estimatedCostUsd?.toNumber()).toBe(0.0012);
+    expect(job.aiUsedTokens).toBe(750);
+    expect(job.aiUsedCostUsd.toNumber()).toBe(0.0015);
+    expect(report.inputTokens).toBe(500);
+    expect(report.outputTokens).toBe(250);
+    expect(report.estimatedCostUsd?.toNumber()).toBe(0.0015);
     expect(userBudget.reservedUsd.toNumber()).toBe(0);
-    expect(userBudget.usedUsd.toNumber()).toBe(0.0012);
+    expect(userBudget.usedUsd.toNumber()).toBe(0.0015);
     expect(globalBudget.reservedUsd.toNumber()).toBe(0);
-    expect(globalBudget.usedUsd.toNumber()).toBeGreaterThanOrEqual(0.0012);
+    expect(globalBudget.usedUsd.toNumber()).toBeGreaterThanOrEqual(0.0015);
   });
 
   it("deduplicates concurrent active requests before specialist fan-out", async () => {

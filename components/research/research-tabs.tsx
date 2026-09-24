@@ -58,6 +58,20 @@ function claimKindLabel(kind: ResearchClaim["kind"]) {
   return null;
 }
 
+function claimSupportLabel(status: ResearchClaim["verificationStatus"]) {
+  if (status === "PARTIALLY_SUPPORTED") return "Partially supported";
+  if (status === "SUPPORTED") return "Supported by cited evidence";
+  if (status === "CONTRADICTED") return "Conflicts with cited evidence";
+  return "Unverified";
+}
+
+function labelPartialClaim(statement: string, research: StockResearch) {
+  const claim = research.claims?.find((item) => item.statement === statement);
+  return claim?.verificationStatus === "PARTIALLY_SUPPORTED"
+    ? `Partially supported: ${statement}`
+    : statement;
+}
+
 function earningsSessionLabel(marketSession: string | null) {
   if (marketSession === "BEFORE_MARKET") return " before market open";
   if (marketSession === "AFTER_MARKET") return " after market close";
@@ -95,8 +109,13 @@ function ClaimCard({
     <article className="rounded-lg border p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">{claim.category.toLowerCase()}</Badge>
+        <Badge variant="secondary">
+          {claimSupportLabel(claim.verificationStatus)}
+        </Badge>
         {kindLabel ? (
-          <Badge variant={claim.kind === "INTERPRETATION" ? "secondary" : "default"}>
+          <Badge
+            variant={claim.kind === "INTERPRETATION" ? "secondary" : "default"}
+          >
             {kindLabel}
           </Badge>
         ) : null}
@@ -211,7 +230,7 @@ function WhatToWatch({ research }: { research: StockResearch }) {
       label: RECENT_EVENTS_LABEL,
       items: (research.report.recentEvents ?? []).map(
         (event) =>
-          `${formatDate(event.filingDate) ?? event.filingDate} (Form ${event.formType}): ${event.statement}`,
+          `${formatDate(event.filingDate) ?? event.filingDate} (Form ${event.formType}): ${labelPartialClaim(event.statement, research)}`,
       ),
     },
     {
@@ -226,7 +245,12 @@ function WhatToWatch({ research }: { research: StockResearch }) {
           ]
         : [],
     },
-    { label: "Counterpoints", items: research.report.bearCase },
+    {
+      label: "Counterpoints",
+      items: research.report.bearCase.map((item) =>
+        labelPartialClaim(item, research),
+      ),
+    },
     { label: "Missing information", items: research.report.missingData },
     {
       label: "Areas of disagreement",
@@ -263,6 +287,51 @@ function WhatToWatch({ research }: { research: StockResearch }) {
             No additional items were identified from the available evidence.
           </p>
         )}
+        {research.report.contradictedClaims?.length ? (
+          <section className="mt-5 space-y-4">
+            <h4 className="text-sm font-medium">
+              Claims with conflicting evidence
+            </h4>
+            {research.report.contradictedClaims.map((claim) => (
+              <article className="rounded-lg border p-4 text-sm" key={claim.id}>
+                <p className="font-medium">
+                  Draft claim — not retained as a finding
+                </p>
+                <p className="mt-2">{claim.statement}</p>
+                <p className="mt-3 font-medium">Conflicting cited evidence</p>
+                {claim.evidence
+                  .filter((item) =>
+                    claim.contradictingEvidenceIds?.includes(item.id),
+                  )
+                  .map((item) => (
+                    <blockquote
+                      className="mt-2 border-l-2 pl-3 text-muted-foreground"
+                      key={item.id}
+                    >
+                      <p>{item.excerpt}</p>
+                      <cite className="mt-1 block not-italic">
+                        {safeSourceUrl(item.sourceUrl) ? (
+                          <a
+                            className="underline"
+                            href={safeSourceUrl(item.sourceUrl)!}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {item.title}
+                          </a>
+                        ) : (
+                          item.title
+                        )}
+                        {item.accessionNumber
+                          ? ` · ${item.accessionNumber}`
+                          : ""}
+                      </cite>
+                    </blockquote>
+                  ))}
+              </article>
+            ))}
+          </section>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -304,6 +373,14 @@ function ReportSummary({ research }: { research: StockResearch }) {
         </CardHeader>
         <CardContent>
           <p className="leading-7 text-muted-foreground">{report.overview}</p>
+          {research.generationMode === "EXTERNAL" ||
+          research.generationMode === "RECORDED" ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {report.verificationCompleted
+                ? "Claim support was checked against cited evidence. This automated check does not replace human source review."
+                : "Claim support is unverified. Check the cited sources independently."}
+            </p>
+          ) : null}
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
             {generationDescription(research)}
           </p>
@@ -331,12 +408,12 @@ function ReportSummary({ research }: { research: StockResearch }) {
 
       <ReportListSection
         emptyMessage="No strengths were identified from the available evidence."
-        items={report.bullCase}
+        items={report.bullCase.map((item) => labelPartialClaim(item, research))}
         title="Strengths"
       />
       <ReportListSection
         emptyMessage="No specific risks were identified from the available evidence."
-        items={report.risks}
+        items={report.risks.map((item) => labelPartialClaim(item, research))}
         title="Risks"
       />
       <WhatToWatch research={research} />

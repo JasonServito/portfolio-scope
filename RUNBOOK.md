@@ -19,6 +19,18 @@ historical gate context.
 
 ## Service inventory and cost
 
+M33 release note: apply `20260923120000_m33_claim_verification` with the existing
+approved remote migration procedure before deploying the application update.
+The change adds one bounded `CLAIM_VERIFICATION` operation using the current
+model and AI switch; budgets and environment variables are unchanged. Include
+that operation's request ID, full token tuple, and cost in any approved Preview
+or Production reconciliation. A completed unverified report may retain an
+`UNCONFIRMED` verifier charge; preserve the reservation and use the existing
+operator reconciliation procedure before resuming spend. Do not rerun the
+verifier to resolve accounting uncertainty. `npm run research:evaluate` checks
+the pinned offline regression baseline; human source/advice review remains an
+activation gate. This repository work does not deploy or reactivate services.
+
 | Service              | Purpose                                               | Initial tier                            | Expected monthly change |
 | -------------------- | ----------------------------------------------------- | --------------------------------------- | ----------------------: |
 | Vercel               | Next.js production and preview deployments            | Hobby, while non-commercial terms apply |                      $0 |

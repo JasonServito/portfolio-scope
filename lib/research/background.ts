@@ -32,6 +32,7 @@ import {
   AI_SPECIALIST_AGENT_VERSION,
   AI_SPECIALIST_MAX_OUTPUT_TOKENS,
   AI_SYNTHESIS_AGENT_VERSION,
+  AI_VERIFIER_MAX_OUTPUT_TOKENS,
   AiConfigurationError,
   getQueuedAiResearchConfig,
   type AiResearchConfig,
@@ -41,6 +42,7 @@ import { computeEvidenceCoverage } from "@/lib/research/ai/evidence-coverage";
 import {
   GroundedModelCallError,
   runGroundedModelCall,
+  runValidatedModelCall,
 } from "@/lib/research/ai/model-runner";
 import { specialistPrompt, synthesisPrompt } from "@/lib/research/ai/prompts";
 import {
@@ -65,6 +67,13 @@ import {
   type SpecialistModelOutput,
   type SynthesisModelOutput,
 } from "@/lib/research/ai/schemas";
+import {
+  applyClaimVerification,
+  claimVerificationSchema,
+  validateClaimVerification,
+  verificationPrompt,
+  type ClaimVerification,
+} from "@/lib/research/ai/verification";
 import { seededResearchProvider } from "@/lib/research/providers/seeded-provider";
 import { synthesizeResearch } from "@/lib/research/synthesis-agent";
 import {
@@ -482,7 +491,8 @@ async function enqueueSynthesisIfReady(
   });
   // Readiness counts only the specialists scheduled for this job's mode; an
   // unscheduled historical run neither blocks nor satisfies synthesis.
-  const generationMode = parent?.generationMode ?? ResearchGenerationMode.EXTERNAL;
+  const generationMode =
+    parent?.generationMode ?? ResearchGenerationMode.EXTERNAL;
   const scheduled = scheduledSpecialistAgentNames(generationMode);
   const deferred = deferredSpecialistAgentNames(generationMode);
   const specialistStates = await db.agentRun.findMany({
@@ -1041,6 +1051,9 @@ async function persistExternalReport(input: {
   model: string | null;
   config: AiResearchConfig | null;
   reservation: ChargedAiUsage | null;
+  verification?: ClaimVerification | null;
+  /** Checkpoint validated synthesis and its usage before reserving verification. */
+  complete?: boolean;
 }) {
   const completedAt = new Date();
   const asOfDate = startOfUtcDay(input.researchJob.createdAt);
@@ -1052,6 +1065,7 @@ async function persistExternalReport(input: {
       ) as Prisma.InputJsonValue)
     : Prisma.JsonNull;
   let reconciliationRequired = false;
+  let verification = input.verification ?? null;
 
   try {
     await db.$transaction(async (transaction) => {
@@ -1062,10 +1076,21 @@ async function persistExternalReport(input: {
           input.reservation,
         );
         if (settled.status === AiUsageStatus.UNCONFIRMED) {
-          reconciliationRequired = true;
-          return;
+          if (input.verification) {
+            // Verification accounting uncertainty preserves the validated draft,
+            // while the existing UNCONFIRMED ledger blocks future spending.
+            verification = null;
+          } else {
+            reconciliationRequired = true;
+            return;
+          }
         }
       }
+      const originalOutput = input.output;
+      const output =
+        input.complete === false
+          ? originalOutput
+          : applyClaimVerification(originalOutput, verification);
       const synthesis = await transaction.agentRun.upsert({
         where: {
           researchJobId_agentName: {
@@ -1075,19 +1100,19 @@ async function persistExternalReport(input: {
         },
         update: {
           status: AgentStatus.COMPLETED,
-          rating: input.output.rating,
-          confidence: input.output.confidence,
-          summary: input.output.summary,
-          findingsJson: input.output.claims.map((claim) => ({
+          rating: output.rating,
+          confidence: output.confidence,
+          summary: output.summary,
+          findingsJson: output.claims.map((claim) => ({
             label: claim.category.toLowerCase(),
             detail: claim.statement,
           })),
           sourcesJson: sourcesFromEvidence(
-            citedEvidence(input.output.claims, input.evidence),
+            citedEvidence(output.claims, input.evidence),
           ),
-          warningsJson: input.output.warnings,
-          claimsJson: input.output.claims,
-          missingDataJson: input.output.missingData,
+          warningsJson: output.warnings,
+          claimsJson: output.claims,
+          missingDataJson: output.missingData,
           provider: input.provider,
           model: input.model,
           modelConfigJson: input.config
@@ -1102,19 +1127,19 @@ async function persistExternalReport(input: {
           researchJobId: input.researchJob.id,
           agentName: AgentName.SYNTHESIS,
           status: AgentStatus.COMPLETED,
-          rating: input.output.rating,
-          confidence: input.output.confidence,
-          summary: input.output.summary,
-          findingsJson: input.output.claims.map((claim) => ({
+          rating: output.rating,
+          confidence: output.confidence,
+          summary: output.summary,
+          findingsJson: output.claims.map((claim) => ({
             label: claim.category.toLowerCase(),
             detail: claim.statement,
           })),
           sourcesJson: sourcesFromEvidence(
-            citedEvidence(input.output.claims, input.evidence),
+            citedEvidence(output.claims, input.evidence),
           ),
-          warningsJson: input.output.warnings,
-          claimsJson: input.output.claims,
-          missingDataJson: input.output.missingData,
+          warningsJson: output.warnings,
+          claimsJson: output.claims,
+          missingDataJson: output.missingData,
           provider: input.provider,
           model: input.model,
           modelConfigJson: input.config
@@ -1138,23 +1163,23 @@ async function persistExternalReport(input: {
       const report = await transaction.researchReport.upsert({
         where: { researchJobId: input.researchJob.id },
         update: {
-          overview: input.output.summary,
-          rating: input.output.rating,
-          bullCaseJson: input.output.claims
+          overview: output.summary,
+          rating: output.rating,
+          bullCaseJson: output.claims
             .filter((claim) => claim.category === "SUPPORTIVE")
             .map((claim) => claim.statement),
-          bearCaseJson: input.output.claims
+          bearCaseJson: output.claims
             .filter((claim) => claim.category === "COUNTERPOINT")
             .map((claim) => claim.statement),
           risksJson: [
-            ...input.output.claims
+            ...output.claims
               .filter((claim) => claim.category === "RISK")
               .map((claim) => claim.statement),
-            ...input.output.warnings,
+            ...output.warnings,
           ],
-          missingDataJson: input.output.missingData,
-          disagreementsJson: input.output.disagreements,
-          confidence: input.output.confidence,
+          missingDataJson: output.missingData,
+          disagreementsJson: output.disagreements,
+          confidence: output.confidence,
           provider: input.provider,
           model: input.model,
           modelConfigJson: input.config
@@ -1171,30 +1196,31 @@ async function persistExternalReport(input: {
           estimatedCostUsd: usage._sum.estimatedCostUsd ?? 0,
           reportVersion: AI_REPORT_VERSION,
           evidenceCoverageJson: evidenceCoverage,
-          whatWouldChangeJson: input.output.whatWouldChange,
+          whatWouldChangeJson: output.whatWouldChange,
+          verificationCompleted: verification !== null,
           generatedAt: completedAt,
           expiresAt: expiresAtFrom(completedAt),
         },
         create: {
           researchJobId: input.researchJob.id,
           stockId: input.researchJob.stockId,
-          overview: input.output.summary,
-          rating: input.output.rating,
-          bullCaseJson: input.output.claims
+          overview: output.summary,
+          rating: output.rating,
+          bullCaseJson: output.claims
             .filter((claim) => claim.category === "SUPPORTIVE")
             .map((claim) => claim.statement),
-          bearCaseJson: input.output.claims
+          bearCaseJson: output.claims
             .filter((claim) => claim.category === "COUNTERPOINT")
             .map((claim) => claim.statement),
           risksJson: [
-            ...input.output.claims
+            ...output.claims
               .filter((claim) => claim.category === "RISK")
               .map((claim) => claim.statement),
-            ...input.output.warnings,
+            ...output.warnings,
           ],
-          missingDataJson: input.output.missingData,
-          disagreementsJson: input.output.disagreements,
-          confidence: input.output.confidence,
+          missingDataJson: output.missingData,
+          disagreementsJson: output.disagreements,
+          confidence: output.confidence,
           provider: input.provider,
           model: input.model,
           modelConfigJson: input.config
@@ -1211,7 +1237,8 @@ async function persistExternalReport(input: {
           estimatedCostUsd: usage._sum.estimatedCostUsd ?? 0,
           reportVersion: AI_REPORT_VERSION,
           evidenceCoverageJson: evidenceCoverage,
-          whatWouldChangeJson: input.output.whatWouldChange,
+          whatWouldChangeJson: output.whatWouldChange,
+          verificationCompleted: verification !== null,
           generatedAt: completedAt,
           expiresAt: expiresAtFrom(completedAt),
         },
@@ -1220,7 +1247,9 @@ async function persistExternalReport(input: {
         where: { reportId: report.id },
       });
 
-      for (const [ordinal, claim] of input.output.claims.entries()) {
+      for (const [ordinal, claim] of originalOutput.claims.entries()) {
+        const result = verification?.results[ordinal];
+        if (result?.status === "UNSUPPORTED") continue;
         const cited = [...claim.evidenceIds, ...claim.counterEvidenceIds]
           .map((id) => evidenceById.get(id))
           .filter((item): item is ResearchEvidence => Boolean(item));
@@ -1231,6 +1260,8 @@ async function persistExternalReport(input: {
             claimKey: claimKey(claim),
             category: claim.category,
             kind: claim.kind,
+            verificationStatus: result?.status ?? "UNVERIFIED",
+            verificationEvidenceIdsJson: result?.contradictingEvidenceIds ?? [],
             statement: claim.statement,
             confidence: claim.confidence,
             assumptionsJson: claim.assumptions,
@@ -1276,7 +1307,10 @@ async function persistExternalReport(input: {
       }
       await transaction.researchJob.update({
         where: { id: input.researchJob.id },
-        data: { status: ResearchStatus.COMPLETED, completedAt },
+        data:
+          input.complete === false
+            ? { status: ResearchStatus.RUNNING }
+            : { status: ResearchStatus.COMPLETED, completedAt },
       });
     });
   } catch (error) {
@@ -1301,9 +1335,11 @@ export async function executeResearchSynthesis(
     attemptNumber?: number;
     maxAttempts?: number;
     signal?: AbortSignal;
+    deadlineAt?: number;
   },
   dependencies: BackgroundDependencies = {},
 ) {
+  const deadlineAt = input.deadlineAt ?? Date.now() + 60_000;
   const researchJob = await db.researchJob.findFirst({
     where: { id: input.researchJobId, userId: input.userId },
     include: { stock: true, agentRuns: true, report: true },
@@ -1491,50 +1527,177 @@ export async function executeResearchSynthesis(
   let reservation: Parameters<typeof persistExternalReport>[0]["reservation"] =
     null;
   let reportEvidence = evidence;
+  if (researchJob.report) {
+    // A prior delivery checkpointed synthesis before verification. Reuse it
+    // rather than paying for synthesis again after a worker interruption.
+    const storedSynthesis = researchJob.agentRuns.find(
+      (run) => run.agentName === "SYNTHESIS",
+    );
+    output = synthesisModelOutputSchema.parse({
+      rating: researchJob.report.rating,
+      confidence: researchJob.report.confidence.toNumber(),
+      summary: researchJob.report.overview,
+      claims: jsonArray<ModelClaim>(storedSynthesis?.claimsJson ?? null),
+      warnings: jsonArray<string>(storedSynthesis?.warningsJson ?? null),
+      missingData: jsonArray<string>(researchJob.report.missingDataJson),
+      disagreements: jsonArray<string>(researchJob.report.disagreementsJson),
+      whatWouldChange: jsonArray<string>(
+        researchJob.report.whatWouldChangeJson,
+      ),
+    });
+    providerName = researchJob.report.provider ?? "partial-fallback";
+    providerModel = researchJob.report.model;
+    reportEvidence = [...snapshot.evidence];
+    validateGroundedOutput(output, reportEvidence);
+  } else {
+    try {
+      const environment = dependencies.environment ?? process.env;
+      if (
+        !dependencies.provider &&
+        !isFeatureEnabled("AI_RESEARCH_ENABLED", environment)
+      ) {
+        throw new GroundedModelCallError("AI_RESEARCH_DISABLED", false, true);
+      }
+      const operation = "SYNTHESIS";
+      await assertUsageReconciled(researchJob.id, operation);
+      config = boundAiConfig(
+        researchJob.generationConfigJson,
+        environment,
+        dependencies,
+      );
+      const generated = await runGroundedModelCall(
+        {
+          provider: modelProvider(config, dependencies),
+          config,
+          schema: synthesisModelOutputSchema,
+          schemaName: "research_synthesis_v1",
+          evidence,
+          prompt: (repairFeedback) =>
+            synthesisPrompt({
+              ticker: researchJob.stock.ticker,
+              companyName: researchJob.stock.companyName,
+              asOfDate: utcDateString(researchJob.createdAt),
+              evidence,
+              evidenceContext: evidenceSelection.context,
+              specialists: typedSpecialists,
+              repairFeedback,
+            }),
+          userId: input.userId,
+          researchJobId: researchJob.id,
+          operation,
+          idempotencyKey: `research:${researchJob.id}:synthesis:delivery:${input.attemptNumber ?? 1}`,
+          now: dependencies.now?.(),
+          signal: input.signal,
+        },
+        { environment },
+      );
+      output = generated.output;
+      providerName = generated.providerResult.provider;
+      providerModel = generated.providerResult.model;
+      if (generated.reservation) {
+        reservation = {
+          usageId: generated.reservation.usageId,
+          inputTokens: generated.providerResult.usage.inputTokens,
+          cachedInputTokens: generated.providerResult.usage.cachedInputTokens,
+          outputTokens: generated.providerResult.usage.outputTokens,
+          reasoningTokens: generated.providerResult.usage.reasoningTokens,
+          providerTotalTokens: generated.providerResult.usage.totalTokens,
+          providerRequestId: generated.providerResult.providerRequestId,
+        };
+      }
+    } catch (error) {
+      if (isUsageReconciliationError(error)) {
+        await throwSynthesisReconciliationError(error, researchJob.id);
+      }
+      const attemptNumber = input.attemptNumber ?? 1;
+      const maxAttempts = input.maxAttempts ?? 3;
+      if (
+        error instanceof GroundedModelCallError &&
+        error.retryable &&
+        attemptNumber < maxAttempts
+      ) {
+        throw new JobExecutionError(error.code, true, error.message, true, {
+          cause: error,
+        });
+      }
+      if (
+        !(error instanceof GroundedModelCallError) &&
+        !(error instanceof AiBudgetError) &&
+        !(error instanceof AiConfigurationError)
+      ) {
+        throw error;
+      }
+      const snapshotEvidence = [...snapshot.evidence];
+      output = partialSynthesis(
+        researchJob.stock.companyName,
+        typedSpecialists,
+        snapshotEvidence,
+      );
+      reportEvidence = citedEvidence(output.claims, snapshotEvidence);
+    }
+    try {
+      await persistExternalReport({
+        researchJob,
+        output,
+        evidence: reportEvidence,
+        snapshot,
+        provider: providerName,
+        model: providerModel,
+        config,
+        reservation,
+        complete: false,
+      });
+    } catch (error) {
+      if (isUsageReconciliationError(error)) {
+        await throwSynthesisReconciliationError(error, researchJob.id);
+      }
+      throw error;
+    }
+    reservation = null;
+  }
+
+  let verification: ClaimVerification | null = null;
   try {
     const environment = dependencies.environment ?? process.env;
-    if (
-      !dependencies.provider &&
-      !isFeatureEnabled("AI_RESEARCH_ENABLED", environment)
-    ) {
-      throw new GroundedModelCallError("AI_RESEARCH_DISABLED", false, true);
-    }
-    const operation = "SYNTHESIS";
-    await assertUsageReconciled(researchJob.id, operation);
-    config = boundAiConfig(
+    config ??= boundAiConfig(
       researchJob.generationConfigJson,
       environment,
       dependencies,
     );
-    const generated = await runGroundedModelCall(
+    // Keep time for settlement and final persistence inside the existing worker
+    // deadline even after a slow synthesis and its one repair.
+    const verifierTimeoutMs = Math.min(
+      config.providerTimeoutMs,
+      deadlineAt - Date.now() - 5_000,
+    );
+    if (verifierTimeoutMs < 1_000)
+      throw new Error("Insufficient verification time.");
+    const verifierConfig = { ...config, providerTimeoutMs: verifierTimeoutMs };
+    const verifierSignal = AbortSignal.any([
+      ...(input.signal ? [input.signal] : []),
+      AbortSignal.timeout(verifierTimeoutMs),
+    ]);
+    const generated = await runValidatedModelCall(
       {
-        provider: modelProvider(config, dependencies),
-        config,
-        schema: synthesisModelOutputSchema,
-        schemaName: "research_synthesis_v1",
-        evidence,
-        prompt: (repairFeedback) =>
-          synthesisPrompt({
-            ticker: researchJob.stock.ticker,
-            companyName: researchJob.stock.companyName,
-            asOfDate: utcDateString(researchJob.createdAt),
-            evidence,
-            evidenceContext: evidenceSelection.context,
-            specialists: typedSpecialists,
-            repairFeedback,
-          }),
+        provider: modelProvider(verifierConfig, dependencies),
+        config: verifierConfig,
+        schema: claimVerificationSchema,
+        schemaName: "research_claim_verification_v1",
+        validate: (result) => validateClaimVerification(result, output),
+        maxAttempts: 1,
+        maxOutputTokens: AI_VERIFIER_MAX_OUTPUT_TOKENS,
+        prompt: () => verificationPrompt(output, reportEvidence),
         userId: input.userId,
         researchJobId: researchJob.id,
-        operation,
-        idempotencyKey: `research:${researchJob.id}:synthesis:delivery:${input.attemptNumber ?? 1}`,
+        operation: "CLAIM_VERIFICATION",
+        // Stable across deliveries: a report never buys a second verifier call.
+        idempotencyKey: `research:${researchJob.id}:verification`,
         now: dependencies.now?.(),
-        signal: input.signal,
+        signal: verifierSignal,
       },
       { environment },
     );
-    output = generated.output;
-    providerName = generated.providerResult.provider;
-    providerModel = generated.providerResult.model;
+    verification = generated.output;
     if (generated.reservation) {
       reservation = {
         usageId: generated.reservation.usageId,
@@ -1546,35 +1709,10 @@ export async function executeResearchSynthesis(
         providerRequestId: generated.providerResult.providerRequestId,
       };
     }
-  } catch (error) {
-    if (isUsageReconciliationError(error)) {
-      await throwSynthesisReconciliationError(error, researchJob.id);
-    }
-    const attemptNumber = input.attemptNumber ?? 1;
-    const maxAttempts = input.maxAttempts ?? 3;
-    if (
-      error instanceof GroundedModelCallError &&
-      error.retryable &&
-      attemptNumber < maxAttempts
-    ) {
-      throw new JobExecutionError(error.code, true, error.message, true, {
-        cause: error,
-      });
-    }
-    if (
-      !(error instanceof GroundedModelCallError) &&
-      !(error instanceof AiBudgetError) &&
-      !(error instanceof AiConfigurationError)
-    ) {
-      throw error;
-    }
-    const snapshotEvidence = [...snapshot.evidence];
-    output = partialSynthesis(
-      researchJob.stock.companyName,
-      typedSpecialists,
-      snapshotEvidence,
-    );
-    reportEvidence = citedEvidence(output.claims, snapshotEvidence);
+  } catch {
+    // Provider refusal, invalid output, kill switch, budget exhaustion, or a
+    // previous uncertain attempt must not discard the M30-validated draft.
+    verification = null;
   }
 
   let completedAt: Date;
@@ -1588,6 +1726,7 @@ export async function executeResearchSynthesis(
       model: providerModel,
       config,
       reservation,
+      verification,
     });
   } catch (error) {
     if (isUsageReconciliationError(error)) {

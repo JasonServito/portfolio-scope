@@ -30,6 +30,7 @@ import {
   AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS,
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
   CURATED_AAPL_SNAPSHOT,
+  recordedSupportedVerification,
 } from "@/lib/research/ai/fixtures/curated-evaluation";
 import { RecordedResearchModelProvider } from "@/lib/research/ai/providers";
 import { assembleResearchEvidenceSnapshot } from "@/lib/research/ai/retrieval";
@@ -161,13 +162,19 @@ const recordedOutputs = {
 function recordedProvider(outputs: readonly GroundedModelOutput[]) {
   return new RecordedResearchModelProvider({
     model: "recorded-m30-integration-v1",
-    fixtures: outputs.map((output, index) => ({
-      result: {
-        output,
-        providerRequestId: `${prefix}-recording-${index + 1}`,
-        usage: { inputTokens: 100, outputTokens: 50 },
-      },
-    })),
+    fixtures: outputs
+      .flatMap((output): unknown[] =>
+        "whatWouldChange" in output
+          ? [output, recordedSupportedVerification(output)]
+          : [output],
+      )
+      .map((output, index) => ({
+        result: {
+          output,
+          providerRequestId: `${prefix}-recording-${index + 1}`,
+          usage: { inputTokens: 100, outputTokens: 50 },
+        },
+      })),
   });
 }
 
@@ -382,7 +389,7 @@ describe("M30 specialist contracts and calibration", () => {
       { researchJobId: queued.jobId, userId: ids.user },
       { provider, config, environment },
     );
-    expect(generate).toHaveBeenCalledTimes(4);
+    expect(generate).toHaveBeenCalledTimes(5);
 
     // The stubbed specialist persists NOT_AVAILABLE and reaches synthesis as
     // an availability state with its gap, never as a neutral opinion.
@@ -647,7 +654,7 @@ describe("M30 specialist contracts and calibration", () => {
       { provider, config: getAiResearchConfig(environment), environment },
     );
 
-    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate).toHaveBeenCalledTimes(2);
     const request = JSON.parse(String(generate.mock.calls[0][0].input)) as {
       specialists: Array<{
         agentName: string;

@@ -107,7 +107,10 @@ const externalResearch: StockResearch = {
       newestFilingAgeDays: 10,
       freshness: 1,
     },
-    upcomingEarnings: { eventDate: "2026-10-29", marketSession: "AFTER_MARKET" },
+    upcomingEarnings: {
+      eventDate: "2026-10-29",
+      marketSession: "AFTER_MARKET",
+    },
     recentEvents: [
       {
         filingDate: "2026-07-30",
@@ -150,6 +153,43 @@ const externalResearch: StockResearch = {
 };
 
 describe("research UI", () => {
+  it("labels partial findings and preserves both sides of a contradicted claim", () => {
+    const claim = {
+      ...externalResearch.claims![0],
+      verificationStatus: "PARTIALLY_SUPPORTED" as const,
+    };
+    const research: StockResearch = {
+      ...externalResearch,
+      claims: [claim],
+      report: {
+        ...externalResearch.report,
+        verificationCompleted: true,
+        bullCase: [claim.statement],
+        contradictedClaims: [
+          {
+            ...claim,
+            id: "contradiction",
+            statement: "Gross margin increased.",
+            verificationStatus: "CONTRADICTED",
+            contradictingEvidenceIds: [counterEvidence.id],
+          },
+        ],
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <ResearchTabs initialResearch={research} ticker="AAPL" />,
+    );
+    expect(markup).toContain(`Partially supported: ${claim.statement}`);
+    expect(markup).toContain("Draft claim");
+    expect(markup).toContain("Gross margin increased.");
+    expect(markup).toContain(counterEvidence.excerpt);
+    expect(markup).toContain("does not replace human source review");
+    const legacyMarkup = renderToStaticMarkup(
+      <ResearchTabs initialResearch={externalResearch} ticker="AAPL" />,
+    );
+    expect(legacyMarkup).toContain("Claim support is unverified");
+  });
+
   beforeEach(() => {
     push.mockReset();
     refresh.mockReset();

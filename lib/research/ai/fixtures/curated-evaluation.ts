@@ -1,4 +1,5 @@
 import type { ResearchEvaluationCase } from "@/lib/research/ai/evaluation";
+import type { ClaimVerification } from "@/lib/research/ai/verification";
 import {
   AAPL_FIXTURE_CURRENT_REPORTS,
   aaplFixtureCurrentReports,
@@ -11,6 +12,19 @@ import {
   type SpecialistModelOutput,
   type SynthesisModelOutput,
 } from "@/lib/research/ai/schemas";
+
+/** Successful verifier response for tests whose focus is the preceding pipeline. */
+export function recordedSupportedVerification(
+  output: Pick<SynthesisModelOutput, "claims">,
+): ClaimVerification {
+  return {
+    results: output.claims.map((claim) => ({
+      claimKey: claimKey(claim),
+      status: "SUPPORTED",
+      contradictingEvidenceIds: [],
+    })),
+  };
+}
 
 /**
  * Curated offline evaluation cases rebuilt for M29 from the checked-in AAPL

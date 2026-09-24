@@ -61,6 +61,7 @@ function assertNotAborted(signal: AbortSignal) {
 export async function executeBackgroundJobHandler(
   job: ClaimedBackgroundJob,
   signal: AbortSignal,
+  deadlineAt?: number,
 ): Promise<Prisma.InputJsonValue> {
   assertNotAborted(signal);
 
@@ -173,6 +174,7 @@ export async function executeBackgroundJobHandler(
         attemptNumber: job.attemptCount,
         maxAttempts: job.maxAttempts,
         signal,
+        deadlineAt,
       });
     }
 

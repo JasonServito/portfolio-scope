@@ -112,6 +112,13 @@ export type ResearchClaim = {
   category: "SUPPORTIVE" | "COUNTERPOINT" | "RISK";
   /** Null for claims persisted before kinds were recorded. */
   kind: ResearchClaimKind | null;
+  verificationStatus?:
+    | "UNVERIFIED"
+    | "SUPPORTED"
+    | "PARTIALLY_SUPPORTED"
+    | "UNSUPPORTED"
+    | "CONTRADICTED";
+  contradictingEvidenceIds?: string[];
   statement: string;
   confidence: number;
   assumptions: string[];
@@ -206,6 +213,8 @@ export type SynthesisReport = {
   missingData: string[];
   confidence: number;
   disagreements?: string[];
+  verificationCompleted?: boolean;
+  contradictedClaims?: ResearchClaim[];
   whatWouldChange?: string[];
   evidenceCoverage?: ResearchEvidenceCoverage | null;
   upcomingEarnings?: ResearchUpcomingEarnings | null;

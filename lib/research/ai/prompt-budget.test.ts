@@ -7,6 +7,7 @@ import {
   AI_HARD_MAX_TOKENS_PER_JOB,
   AI_SPECIALIST_CONTEXT_CHAR_BUDGETS,
   AI_SPECIALIST_MAX_OUTPUT_TOKENS,
+  AI_VERIFIER_MAX_OUTPUT_TOKENS,
   getSupportedResearchModels,
 } from "@/lib/research/ai/config";
 import {
@@ -35,6 +36,10 @@ import {
   DEFERRED_EXTERNAL_SPECIALIST_AGENT_NAMES,
   initialSpecialistAgentNames,
 } from "@/lib/research/types";
+import {
+  claimVerificationSchema,
+  verificationPrompt,
+} from "@/lib/research/ai/verification";
 
 /**
  * Reservations treat every serialized provider-input byte as a token, so the
@@ -162,7 +167,7 @@ function sum(values: number[]) {
   return values.reduce((total, value) => total + value, 0);
 }
 
-describe("m32 prompt envelope with the AAPL fixture", () => {
+describe("m33 prompt envelope with the AAPL fixture", () => {
   const specialists = modelAgents.map(specialistSerialized);
   const firstStage = specialists.filter((item) =>
     (firstStageAgents as readonly string[]).includes(item.agent),
@@ -174,6 +179,23 @@ describe("m32 prompt envelope with the AAPL fixture", () => {
     settled(item) > settled(largest) ? item : largest,
   );
   const synthesis = synthesisSerialized();
+  const verifier = {
+    serialized: serializeProviderInput(
+      verificationPrompt(AAPL_GROUNDED_SYNTHESIS, snapshot.evidence),
+      "research_claim_verification_v1",
+      claimVerificationSchema,
+    ),
+    outputTokens: AI_VERIFIER_MAX_OUTPUT_TOKENS,
+  };
+
+  it("fits one verifier reservation after synthesis settles, including one specialist repair", () => {
+    expect(
+      sum(specialists.map(settled)) +
+        settled(largestFirstStage) +
+        settled(synthesis) +
+        reservation(verifier),
+    ).toBeLessThanOrEqual(AI_HARD_MAX_TOKENS_PER_JOB);
+  });
 
   it("keeps the three concurrent first-stage specialist reservations inside the job token cap", () => {
     expect(firstStage.map((item) => item.agent)).toEqual([
@@ -252,7 +274,7 @@ describe("m32 prompt envelope with the AAPL fixture", () => {
 
   it("keeps the reserved and estimated per-report cost far below the job cost cap", () => {
     const pricing = getSupportedResearchModels()[0];
-    const calls = [...specialists, synthesis];
+    const calls = [...specialists, synthesis, verifier];
     const reservedCost = sum(
       calls.map((call) =>
         calculateAiCostUsd(
@@ -279,7 +301,7 @@ describe("m32 prompt envelope with the AAPL fixture", () => {
         ),
       ),
     );
-    expect(estimatedCost).toBeLessThan(0.06);
+    expect(estimatedCost).toBeLessThan(0.07);
   });
 
   it("grounds every recorded output inside the evidence its agent actually receives", () => {

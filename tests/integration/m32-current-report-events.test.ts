@@ -27,6 +27,7 @@ import {
 } from "@/lib/research/ai/fixtures/aapl-evidence-snapshot";
 import {
   AAPL_GROUNDED_SYNTHESIS,
+  recordedSupportedVerification,
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
   CURATED_AAPL_SNAPSHOT,
 } from "@/lib/research/ai/fixtures/curated-evaluation";
@@ -354,13 +355,19 @@ const recordedOutputs = {
 function recordedProvider(outputs: readonly GroundedModelOutput[]) {
   return new RecordedResearchModelProvider({
     model: "recorded-m32-integration-v1",
-    fixtures: outputs.map((output, index) => ({
-      result: {
-        output,
-        providerRequestId: `${prefix}-recording-${index + 1}`,
-        usage: { inputTokens: 100, outputTokens: 50 },
-      },
-    })),
+    fixtures: outputs
+      .flatMap((output): unknown[] =>
+        "whatWouldChange" in output
+          ? [output, recordedSupportedVerification(output)]
+          : [output],
+      )
+      .map((output, index) => ({
+        result: {
+          output,
+          providerRequestId: `${prefix}-recording-${index + 1}`,
+          usage: { inputTokens: 100, outputTokens: 50 },
+        },
+      })),
   });
 }
 
@@ -865,7 +872,7 @@ describe("M32 recent events in research", () => {
       { researchJobId: queued.jobId, userId: ids.user },
       { provider, config, environment },
     );
-    expect(generate).toHaveBeenCalledTimes(5);
+    expect(generate).toHaveBeenCalledTimes(6);
 
     const stored = await db.researchJob.findUniqueOrThrow({
       where: { id: queued.jobId },
@@ -894,13 +901,7 @@ describe("M32 recent events in research", () => {
         filingDate: "2026-07-30",
         formType: "8-K",
         accessionNumber: accessions.results,
-        statement: recordedOutputs.NEWS.claims[0].statement,
-      },
-      {
-        filingDate: "2026-04-30",
-        formType: "8-K",
-        accessionNumber: accessions.resultsWithoutExhibit,
-        statement: recordedOutputs.NEWS.claims[1].statement,
+        statement: recordedOutputs.SYNTHESIS.claims.at(-1)!.statement,
       },
     ]);
     expect(

@@ -30,8 +30,9 @@ function currentReportFilingDate(item: ResearchEvidence) {
 export function recentEventsFromResearch(
   agents: readonly AgentResult[],
   evidence: readonly ResearchEvidence[],
+  sourceAgent: "NEWS" | "SYNTHESIS" = "NEWS",
 ): ResearchRecentEvent[] {
-  const news = agents.find((agent) => agent.agentName === "NEWS");
+  const news = agents.find((agent) => agent.agentName === sourceAgent);
   if (
     !news ||
     news.status !== "COMPLETED" ||

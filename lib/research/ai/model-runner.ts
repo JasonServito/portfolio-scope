@@ -67,7 +67,7 @@ export function serializeProviderInput(
   });
 }
 
-type RunnerDependencies = {
+export type RunnerDependencies = {
   environment?: NodeJS.ProcessEnv;
   reserve?: typeof reserveAiUsage;
   settle?: typeof settleAiUsage;
@@ -80,13 +80,14 @@ type RunnerDependencies = {
  * successful reservation is intentionally returned unsettled so the caller can
  * persist the validated output and settle usage in the same transaction.
  */
-export async function runGroundedModelCall<T extends GroundedModelOutput>(
+export async function runValidatedModelCall<T>(
   input: {
     provider: ResearchModelProvider;
     config: AiResearchConfig;
     schema: z.ZodType<T>;
     schemaName: string;
-    evidence: ResearchEvidence[];
+    validate: (output: T) => void;
+    maxAttempts: 1 | 2;
     prompt: (repairFeedback?: string) => Prompt;
     userId: string;
     researchJobId: string;
@@ -113,7 +114,11 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
   );
   let repairFeedback: string | undefined;
 
-  for (let attemptNumber = 1; attemptNumber <= 2; attemptNumber += 1) {
+  for (
+    let attemptNumber = 1;
+    attemptNumber <= input.maxAttempts;
+    attemptNumber += 1
+  ) {
     if (input.signal?.aborted) {
       throw new GroundedModelCallError(
         "AI_MODEL_PROVIDER_ABORTED",
@@ -228,7 +233,7 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
     const parsed = input.schema.safeParse(generated.output);
     try {
       if (!parsed.success) throw parsed.error;
-      validateGroundedOutput(parsed.data, input.evidence);
+      input.validate(parsed.data);
       return {
         output: parsed.data,
         providerResult: generated,
@@ -249,7 +254,7 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
       const checkFailure =
         error instanceof ModelOutputSafetyError ||
         error instanceof ModelOutputConsistencyError;
-      if (attemptNumber === 2) {
+      if (attemptNumber === input.maxAttempts) {
         throw new GroundedModelCallError(
           checkFailure ? error.code : "AI_MODEL_OUTPUT_INVALID",
           false,
@@ -264,4 +269,26 @@ export async function runGroundedModelCall<T extends GroundedModelOutput>(
   }
 
   throw new GroundedModelCallError("AI_MODEL_OUTPUT_INVALID", false, true);
+}
+
+/** Specialist and synthesis calls retain their single constrained repair. */
+export function runGroundedModelCall<T extends GroundedModelOutput>(
+  input: Omit<
+    Parameters<typeof runValidatedModelCall<T>>[0],
+    "validate" | "maxAttempts"
+  > & {
+    evidence: ResearchEvidence[];
+  },
+  dependencies: RunnerDependencies = {},
+) {
+  return runValidatedModelCall(
+    {
+      ...input,
+      maxAttempts: 2,
+      validate: (output) => {
+        validateGroundedOutput(output, input.evidence);
+      },
+    },
+    dependencies,
+  );
 }

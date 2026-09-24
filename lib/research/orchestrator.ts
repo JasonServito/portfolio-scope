@@ -18,6 +18,7 @@ import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 import { getUserAiUsageSummary, utcMonthStart } from "@/lib/research/ai/budget";
 import {
   AI_CALCULATION_VERSION,
+  AI_REPORT_VERSION,
   AI_SPECIALIST_AGENT_VERSION,
   AiConfigurationError,
   createQueuedAiGenerationConfig,
@@ -133,6 +134,10 @@ function shapeClaims(
     claimKey: claim.claimKey,
     category: claim.category,
     kind: claim.kind,
+    verificationStatus: claim.verificationStatus,
+    contradictingEvidenceIds: jsonArray<string>(
+      claim.verificationEvidenceIdsJson,
+    ),
     statement: claim.statement,
     confidence: claim.confidence.toNumber(),
     assumptions: jsonArray<string>(claim.assumptionsJson),
@@ -178,15 +183,20 @@ function shapeEvidenceCoverage(value: Prisma.JsonValue | null) {
 function shapeResearch(
   job: ResearchJobWithResults | null,
 ): StockResearch | null {
-  if (!job?.report) return null;
+  if (!job?.report || job.status !== ResearchStatus.COMPLETED) return null;
   const order = new Map(ALL_AGENT_NAMES.map((name, index) => [name, index]));
   const report = job.report;
+  const allClaims = shapeClaims(report);
+  const claims = allClaims.filter(
+    (claim) =>
+      claim.verificationStatus !== "CONTRADICTED" &&
+      claim.verificationStatus !== "UNSUPPORTED",
+  );
   const snapshotEvidence = parseSnapshotEvidence(job.sourceSnapshotJson);
   const agents = job.agentRuns
     .map(asAgentResult)
     .sort(
-      (a, b) =>
-        (order.get(a.agentName) ?? 99) - (order.get(b.agentName) ?? 99),
+      (a, b) => (order.get(a.agentName) ?? 99) - (order.get(b.agentName) ?? 99),
     );
 
   return {
@@ -206,13 +216,21 @@ function shapeResearch(
       risks: jsonArray<string>(report.risksJson),
       missingData: jsonArray<string>(report.missingDataJson),
       disagreements: jsonArray<string>(report.disagreementsJson),
+      verificationCompleted: report.verificationCompleted,
+      contradictedClaims: allClaims.filter(
+        (claim) => claim.verificationStatus === "CONTRADICTED",
+      ),
       confidence: report.confidence.toNumber(),
       whatWouldChange: jsonArray<string>(report.whatWouldChangeJson),
       evidenceCoverage: shapeEvidenceCoverage(report.evidenceCoverageJson),
       upcomingEarnings: upcomingEarningsFromEvidence(snapshotEvidence),
-      recentEvents: recentEventsFromResearch(agents, snapshotEvidence),
+      recentEvents: recentEventsFromResearch(
+        agents,
+        snapshotEvidence,
+        report.reportVersion === AI_REPORT_VERSION ? "SYNTHESIS" : "NEWS",
+      ),
     },
-    claims: shapeClaims(report),
+    claims,
     evidenceRegistry: shapeEvidenceRegistry(snapshotEvidence),
     metadata: {
       provider: report.provider,
@@ -292,27 +310,33 @@ function evidenceFromStoredReference(
 function structuredReportSnapshot(job: ResearchJobWithResults) {
   if (!job.report) return null;
   const evidenceById = new Map<string, ResearchEvidence>();
-  const claims: ReportDiffClaim[] = (job.report.claims ?? []).map((claim) => {
-    for (const evidence of claim.evidence) {
-      evidenceById.set(
-        evidence.referenceKey,
-        evidenceFromStoredReference(evidence),
-      );
-    }
-    return {
-      category: claim.category,
-      kind: claim.kind,
-      statement: claim.statement,
-      confidence: claim.confidence.toNumber(),
-      evidenceIds: claim.evidence
-        .filter((evidence) => evidence.role === "SUPPORTING")
-        .map((evidence) => evidence.referenceKey),
-      counterEvidenceIds: claim.evidence
-        .filter((evidence) => evidence.role === "COUNTER")
-        .map((evidence) => evidence.referenceKey),
-      assumptions: jsonArray<string>(claim.assumptionsJson),
-    };
-  });
+  const claims: ReportDiffClaim[] = (job.report.claims ?? [])
+    .filter(
+      (claim) =>
+        claim.verificationStatus !== "CONTRADICTED" &&
+        claim.verificationStatus !== "UNSUPPORTED",
+    )
+    .map((claim) => {
+      for (const evidence of claim.evidence) {
+        evidenceById.set(
+          evidence.referenceKey,
+          evidenceFromStoredReference(evidence),
+        );
+      }
+      return {
+        category: claim.category,
+        kind: claim.kind,
+        statement: claim.statement,
+        confidence: claim.confidence.toNumber(),
+        evidenceIds: claim.evidence
+          .filter((evidence) => evidence.role === "SUPPORTING")
+          .map((evidence) => evidence.referenceKey),
+        counterEvidenceIds: claim.evidence
+          .filter((evidence) => evidence.role === "COUNTER")
+          .map((evidence) => evidence.referenceKey),
+        assumptions: jsonArray<string>(claim.assumptionsJson),
+      };
+    });
   return {
     rating: job.report.rating,
     confidence: job.report.confidence.toNumber(),

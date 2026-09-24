@@ -761,6 +761,14 @@ model AgentRun {
   @@index([agentName])
 }
 
+enum ClaimVerificationStatus {
+  UNVERIFIED
+  SUPPORTED
+  PARTIALLY_SUPPORTED
+  UNSUPPORTED
+  CONTRADICTED
+}
+
 model ResearchReport {
   id                   String          @id @default(cuid())
   researchJobId        String          @unique
@@ -788,6 +796,7 @@ model ResearchReport {
   reportVersion        String?
   evidenceCoverageJson Json?
   whatWouldChangeJson  Json?
+  verificationCompleted Boolean         @default(false)
   generatedAt          DateTime        @default(now())
   expiresAt            DateTime
   researchJob          ResearchJob     @relation(fields: [researchJobId], references: [id], onDelete: Cascade)
@@ -871,6 +880,8 @@ model ResearchClaim {
   asOfDate        DateTime              @db.Date
   isMaterial      Boolean               @default(true)
   kind            ResearchClaimKind?
+  verificationStatus ClaimVerificationStatus @default(UNVERIFIED)
+  verificationEvidenceIdsJson Json?
   ordinal         Int
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
