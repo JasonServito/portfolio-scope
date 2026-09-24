@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import companyFactsFixture from "@/tests/fixtures/sec/aapl-companyfacts.json";
 import submissionsFixture from "@/tests/fixtures/sec/aapl-submissions.json";
 import { db } from "@/lib/db";
+import { createSecRunCorrelationId } from "@/lib/jobs/handlers";
 import { ingestSupportedCompany } from "@/lib/sec/ingestion";
 import { prismaSecRepository } from "@/lib/sec/repository";
 import { secCompanyFactsSchema, secSubmissionsSchema } from "@/lib/sec/schemas";
@@ -320,6 +321,33 @@ describe("M14 PostgreSQL SEC persistence", () => {
           },
         }),
       ).toBe(0);
+
+      // A job retry after the failed attempt recorded its run cannot reuse
+      // the unique run correlation; the attempt-scoped one records a new run.
+      await expect(
+        ingestSupportedCompany(
+          "AAPL",
+          { trigger: "TEST", correlationId: correlations[3] },
+          { repository: prismaSecRepository, client, storage, now },
+        ),
+      ).rejects.toMatchObject({ code: "SEC_DATABASE_ERROR" });
+      const retryCorrelation = createSecRunCorrelationId(correlations[3], 2);
+      correlations.push(retryCorrelation);
+      await ingestSupportedCompany(
+        "AAPL",
+        { trigger: "TEST", correlationId: retryCorrelation },
+        { repository: prismaSecRepository, client, storage, now },
+      );
+      await expect(
+        db.secIngestionRun.findUnique({
+          where: { correlationId: retryCorrelation },
+        }),
+      ).resolves.toMatchObject({ status: "COMPLETED", errorCode: null });
+      await expect(
+        db.secIngestionRun.findUnique({
+          where: { correlationId: correlations[3] },
+        }),
+      ).resolves.toMatchObject({ status: "PARTIALLY_COMPLETED" });
     } finally {
       await db.secIngestionRun.deleteMany({
         where: { correlationId: { in: correlations } },

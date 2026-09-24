@@ -25,16 +25,35 @@ import {
 
 const MAX_CORRELATION_ID_LENGTH = 128;
 
-export function createScheduledSecCorrelationId(
-  parentCorrelationId: string,
-  ticker: string,
-) {
-  const suffix = `:sec:${ticker.toLowerCase()}:${randomUUID()}`;
+function withCorrelationSuffix(parentCorrelationId: string, suffix: string) {
   const parentPrefix = parentCorrelationId.slice(
     0,
     Math.max(0, MAX_CORRELATION_ID_LENGTH - suffix.length),
   );
   return `${parentPrefix}${suffix}`;
+}
+
+export function createScheduledSecCorrelationId(
+  parentCorrelationId: string,
+  ticker: string,
+) {
+  return withCorrelationSuffix(
+    parentCorrelationId,
+    `:sec:${ticker.toLowerCase()}:${randomUUID()}`,
+  );
+}
+
+// `SecIngestionRun.correlationId` is unique and each attempt records its own
+// run, so a retry after an attempt created its run needs a distinct, still
+// job-traceable correlation. Attempt numbers never reset for a job, including
+// administrator retries, so the suffix is unique within the job.
+export function createSecRunCorrelationId(
+  jobCorrelationId: string,
+  attemptNumber: number,
+) {
+  return attemptNumber <= 1
+    ? jobCorrelationId
+    : withCorrelationSuffix(jobCorrelationId, `:attempt:${attemptNumber}`);
 }
 
 function requireLink(value: string | null, expected: string, label: string) {
@@ -80,7 +99,10 @@ export async function executeBackgroundJobHandler(
         ticker: payload.ticker,
         requestedByUserId: job.userId,
         companyId: job.companyId,
-        correlationId: job.correlationId,
+        correlationId: createSecRunCorrelationId(
+          job.correlationId,
+          job.attemptCount,
+        ),
         timeoutMs: job.timeoutMs,
       });
     }

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   deleteMany: vi.fn(),
+  executeSecIngestionJob: vi.fn(),
   findMany: vi.fn(),
   isBackgroundFeatureEnabled: vi.fn(),
   queueSecIngestion: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock("@/lib/jobs/config", () => ({
 }));
 
 vi.mock("@/lib/sec/jobs", () => ({
-  executeSecIngestionJob: vi.fn(),
+  executeSecIngestionJob: mocks.executeSecIngestionJob,
   fetchSecFilingDocument: vi.fn(),
   queueSecIngestion: mocks.queueSecIngestion,
   renormalizeStoredCompanyFacts: vi.fn(),
@@ -176,5 +177,59 @@ describe("scheduled SEC refresh fan-out", () => {
     expect(correlationId).toHaveLength(128);
     expect(correlationId).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
     expect(correlationId).toMatch(/:sec:aapl:[0-9a-f-]{36}$/);
+  });
+});
+
+describe("SEC ingestion job retries", () => {
+  function secSyncJob(overrides: Partial<ClaimedBackgroundJob> = {}) {
+    return claimedJob({
+      type: BackgroundJobType.SEC_SUBMISSIONS_SYNC,
+      payloadJson: { ticker: "AAPL" },
+      companyId: "company-a",
+      researchJobId: null,
+      agentName: null,
+      maxAttempts: 4,
+      ...overrides,
+    });
+  }
+
+  function runCorrelationId() {
+    return (
+      mocks.executeSecIngestionJob.mock.calls[0][0] as { correlationId: string }
+    ).correlationId;
+  }
+
+  beforeEach(() => {
+    mocks.executeSecIngestionJob.mockResolvedValue({ runId: "run-a" });
+  });
+
+  it("records the first attempt under the job correlation ID", async () => {
+    await executeBackgroundJobHandler(
+      secSyncJob({ attemptCount: 1 }),
+      new AbortController().signal,
+    );
+
+    expect(runCorrelationId()).toBe("correlation-a");
+  });
+
+  it("gives a retried attempt its own job-traceable run correlation ID", async () => {
+    await executeBackgroundJobHandler(
+      secSyncJob({ attemptCount: 3 }),
+      new AbortController().signal,
+    );
+
+    expect(runCorrelationId()).toBe("correlation-a:attempt:3");
+  });
+
+  it("keeps a retried run correlation ID within the observable header limit", async () => {
+    await executeBackgroundJobHandler(
+      secSyncJob({ attemptCount: 2, correlationId: "p".repeat(128) }),
+      new AbortController().signal,
+    );
+
+    const correlationId = runCorrelationId();
+    expect(correlationId).toHaveLength(128);
+    expect(correlationId).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+    expect(correlationId).toMatch(/:attempt:2$/);
   });
 });
