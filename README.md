@@ -51,10 +51,10 @@ financials and research._
 
 ### Research report
 
-![PortfolioScope research report](public/screenshots/research.png)
+![Scrolling through a PortfolioScope AI-assisted research report](public/screenshots/research.gif)
 
-_A concise report with strengths, risks, items to watch, and expandable
-sources._
+_An AI-assisted report with changes from the previous run, a summary,
+strengths, risks, items to watch, and expandable sources._
 
 ## Tech Stack
 
