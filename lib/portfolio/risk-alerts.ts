@@ -13,6 +13,10 @@ export type RiskAlertStatus = "ACTIVE" | "RESOLVED";
 
 export const CONCENTRATION_REVIEW_THRESHOLD = 0.18;
 
+export function needsConcentrationReview(allocationPercent: number) {
+  return allocationPercent >= CONCENTRATION_REVIEW_THRESHOLD;
+}
+
 export type RiskAlert = {
   id: string;
   ticker: string;
@@ -185,7 +189,7 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
           type: "VOLATILITY",
           severity: volatilitySeverity,
           title: `${item.ticker} volatility is elevated`,
-          message: `${item.companyName} has a largest daily move of ${(item.maxDailyMove * 100).toFixed(1)}% over the recent watchlist window.`,
+          message: `${item.companyName} had a largest one-day move of ${(item.maxDailyMove * 100).toFixed(1)}% over the recent watchlist window.`,
           metricLabel: "Max daily move",
           metricValue: item.maxDailyMove,
         }),

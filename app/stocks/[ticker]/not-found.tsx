@@ -16,7 +16,7 @@ export default function StockNotFound() {
             Watchlist
           </Link>
         }
-        description="The requested ticker is not part of the seeded PortfolioScope demo dataset."
+        description="The requested ticker is not part of the PortfolioScope sample data"
         eyebrow="Stock detail"
         title="Stock unavailable"
       >
@@ -26,10 +26,10 @@ export default function StockNotFound() {
               <AlertTriangle className="size-5" />
             </span>
             <div>
-              <p className="font-medium">No seeded data found for this ticker.</p>
+              <p className="font-medium">No sample data for this ticker</p>
               <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                Open a holding or watchlist item to view deterministic price
-                history, risk flags, and company context.
+                Open a holding or watchlist item to view its price history, risk
+                flags, and company context.
               </p>
             </div>
           </CardContent>

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { generateRiskAlerts, type RiskAlertInput } from "./risk-alerts";
+import {
+  generateRiskAlerts,
+  needsConcentrationReview,
+  type RiskAlertInput,
+} from "./risk-alerts";
 
 const baseHolding = {
   id: "h1",
@@ -49,6 +53,23 @@ describe("risk alert rules", () => {
         metricValue: 0.28,
       },
     ]);
+  });
+
+  it("agrees with the chart's review line at the 18% boundary", () => {
+    for (const allocationPercent of [0.1799, 0.18]) {
+      const alerts = generateRiskAlerts(
+        createInput({ holdings: [{ ...baseHolding, allocationPercent }] }),
+      );
+      const hasConcentrationAlert = alerts.some(
+        (alert) => alert.type === "CONCENTRATION",
+      );
+
+      expect(hasConcentrationAlert).toBe(
+        needsConcentrationReview(allocationPercent),
+      );
+    }
+    expect(needsConcentrationReview(0.18)).toBe(true);
+    expect(needsConcentrationReview(0.1799)).toBe(false);
   });
 
   it("creates drawdown and price movement alerts from period returns", () => {

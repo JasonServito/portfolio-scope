@@ -104,7 +104,7 @@ export default async function StockPage({ params }: StockPageProps) {
             ["#research", "Research"],
           ].map(([href, label]) => (
             <a
-              className="shrink-0 px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="shrink-0 rounded-sm px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               href={href}
               key={href}
             >

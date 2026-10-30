@@ -1,5 +1,8 @@
 import { formatCurrency, formatPercent } from "@/lib/formatters";
-import { CONCENTRATION_REVIEW_THRESHOLD } from "@/lib/portfolio/risk-alerts";
+import {
+  CONCENTRATION_REVIEW_THRESHOLD,
+  needsConcentrationReview,
+} from "@/lib/portfolio/risk-alerts";
 import type { AllocationItem } from "@/lib/portfolio/types";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +49,9 @@ export function PositionWeights({
   const columns = showValues
     ? "grid-cols-[3rem_1fr_3rem_5rem]"
     : "grid-cols-[3rem_1fr_3rem]";
-  const above = positions.filter((item) => item.percentage > threshold);
+  const above = positions.filter((item) =>
+    needsConcentrationReview(item.percentage),
+  );
   const aboveSummary =
     above.length === 0
       ? "No position is above the review line"
@@ -76,7 +81,7 @@ export function PositionWeights({
       </div>
       <ul>
         {positions.map((item) => {
-          const isAbove = item.percentage > threshold;
+          const isAbove = needsConcentrationReview(item.percentage);
 
           return (
             <li

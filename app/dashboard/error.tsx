@@ -12,7 +12,7 @@ export default function DashboardError({
   return (
     <RouteError
       error={error}
-      message="The demo dashboard could not load its seeded analytics. Try again or return to the demo entry."
+      message="The demo dashboard could not load the sample portfolio. Try again or return to the demo entry."
       reset={reset}
     />
   );

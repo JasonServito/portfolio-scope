@@ -7,8 +7,8 @@ export default function WatchlistLoading() {
   return (
     <AppLayout>
       <PageShell
-        description="Loading the curated public research queue."
-        eyebrow="Research queue"
+        description="Companies the sample investor follows, with the latest sample price and the target they set"
+        eyebrow="North Star Portfolio · Read-only demo"
         title="Watchlist"
       >
         <div className="grid gap-4 lg:grid-cols-2">

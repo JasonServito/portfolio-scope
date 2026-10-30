@@ -70,7 +70,7 @@ export default async function DashboardPage({
           <Card>
             <CardContent>
               <DataState
-                description="The deterministic database seed is missing or unavailable. No portfolio values have been fabricated."
+                description="The sample portfolio could not be loaded. No portfolio values have been made up."
                 kind="missing"
                 title="Demo portfolio data is unavailable"
               />
