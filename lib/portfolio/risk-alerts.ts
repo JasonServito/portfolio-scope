@@ -11,6 +11,8 @@ export type RiskAlertType =
 
 export type RiskAlertStatus = "ACTIVE" | "RESOLVED";
 
+export const CONCENTRATION_REVIEW_THRESHOLD = 0.18;
+
 export type RiskAlert = {
   id: string;
   ticker: string;
@@ -78,7 +80,7 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
   for (const holding of input.holdings) {
     const concentrationSeverity = getSeverity(
       holding.allocationPercent,
-      0.18,
+      CONCENTRATION_REVIEW_THRESHOLD,
       0.25,
     );
 
@@ -91,7 +93,7 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
           type: "CONCENTRATION",
           severity: concentrationSeverity,
           title: `${holding.ticker} allocation is above the risk band`,
-          message: `${holding.companyName} represents ${(holding.allocationPercent * 100).toFixed(1)}% of the demo portfolio, above the 18% concentration review threshold.`,
+          message: `${holding.companyName} represents ${(holding.allocationPercent * 100).toFixed(1)}% of the demo portfolio, above the ${Math.round(CONCENTRATION_REVIEW_THRESHOLD * 100)}% concentration review threshold.`,
           metricLabel: "Portfolio weight",
           metricValue: holding.allocationPercent,
         }),
@@ -111,7 +113,7 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
           type: "DRAWDOWN",
           severity: drawdownSeverity,
           title: `${holding.ticker} one-month drawdown needs review`,
-          message: `${holding.companyName} is down ${(drawdown * 100).toFixed(1)}% over the seeded one-month window.`,
+          message: `${holding.companyName} is down ${(drawdown * 100).toFixed(1)}% over the past month.`,
           metricLabel: "1M drawdown",
           metricValue: drawdown,
         }),
@@ -131,7 +133,7 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
           type: "PRICE_MOVE",
           severity: dailyMoveSeverity,
           title: `${holding.ticker} moved sharply in the latest session`,
-          message: `${holding.companyName} moved ${(dailyMove * 100).toFixed(1)}% in the latest seeded trading session.`,
+          message: `${holding.companyName} moved ${(dailyMove * 100).toFixed(1)}% in the latest trading session.`,
           metricLabel: "1D move",
           metricValue: dailyMove,
         }),
@@ -158,8 +160,8 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
           title: `${item.ticker} watchlist signal is active`,
           message:
             targetDistance !== null && targetDistance <= 0.05
-              ? `${item.companyName} is within ${(targetDistance * 100).toFixed(1)}% of the seeded watchlist target.`
-              : `${item.companyName} moved ${(watchlistMove * 100).toFixed(1)}% over the seeded one-week window.`,
+              ? `${item.companyName} is within ${(targetDistance * 100).toFixed(1)}% of its watchlist target price.`
+              : `${item.companyName} moved ${(watchlistMove * 100).toFixed(1)}% over the past week.`,
           metricLabel:
             targetDistance !== null && targetDistance <= 0.05
               ? "Target distance"
@@ -183,7 +185,7 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
           type: "VOLATILITY",
           severity: volatilitySeverity,
           title: `${item.ticker} volatility is elevated`,
-          message: `${item.companyName} has a maximum seeded daily move of ${(item.maxDailyMove * 100).toFixed(1)}% over the recent watchlist window.`,
+          message: `${item.companyName} has a largest daily move of ${(item.maxDailyMove * 100).toFixed(1)}% over the recent watchlist window.`,
           metricLabel: "Max daily move",
           metricValue: item.maxDailyMove,
         }),

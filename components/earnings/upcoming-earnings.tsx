@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarClock } from "lucide-react";
+import { Fragment } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,14 +8,31 @@ import type {
   UpcomingEarningsItem,
   UpcomingEarningsPageData,
 } from "@/lib/earnings/service";
+import { cn } from "@/lib/utils";
 
 const sourceMessages: Partial<Record<EarningsSourceStatus, string>> = {
   COORDINATION_UNAVAILABLE:
-    "Live refresh coordination is unavailable. No provider request was made; valid persisted observations are shown where available.",
+    "Live refresh is unavailable right now. No provider request was made; the most recent saved dates are shown.",
   DISABLED:
-    "Live earnings updates are not activated. Valid persisted observations are shown where available.",
+    "Live earnings updates are not activated. The most recent saved dates are shown.",
   PARTIAL_FAILURE:
-    "Some live earnings updates did not complete. Valid persisted observations are shown where available.",
+    "Some live earnings updates did not finish. The most recent saved dates are shown.",
+};
+
+const stateLabels: Record<UpcomingEarningsItem["state"], string> = {
+  KNOWN: "Expected",
+  STALE: "Stale",
+  UNKNOWN: "Unknown",
+  UNAVAILABLE: "Unknown",
+  UNSUPPORTED: "Unsupported",
+};
+
+const stateDots: Record<UpcomingEarningsItem["state"], string> = {
+  KNOWN: "bg-primary",
+  STALE: "bg-caution",
+  UNKNOWN: "bg-muted-foreground/40",
+  UNAVAILABLE: "bg-muted-foreground/40",
+  UNSUPPORTED: "bg-muted-foreground/40",
 };
 
 function formatEventDate(value: string) {
@@ -48,30 +65,20 @@ function observation(item: UpcomingEarningsItem) {
   }
   if (item.state === "UNKNOWN") {
     return {
-      detail: "The provider returned no future event for this ticker.",
+      detail: "The data provider listed no upcoming event",
       label: "Date not currently available",
     };
   }
   if (item.state === "UNSUPPORTED") {
     return {
-      detail: "No provider call is made outside the fixed 25-ticker catalog.",
-      label: "Outside the M26 earnings catalog",
+      detail: "Earnings dates are tracked for a fixed list of 25 companies",
+      label: "Not covered by the earnings calendar",
     };
   }
   return {
-    detail:
-      "No valid persisted observation is available within the 72-hour stale window.",
+    detail: "No earnings check from the last 72 hours is on file",
     label: "Earnings data unavailable",
   };
-}
-
-function stateBadge(item: UpcomingEarningsItem) {
-  if (item.state === "KNOWN") return <Badge>Expected</Badge>;
-  if (item.state === "STALE") return <Badge variant="outline">Stale</Badge>;
-  if (item.state === "UNSUPPORTED") {
-    return <Badge variant="secondary">Unsupported</Badge>;
-  }
-  return <Badge variant="outline">Unknown</Badge>;
 }
 
 export function UpcomingEarnings({
@@ -84,88 +91,95 @@ export function UpcomingEarnings({
   const sourceMessage = sourceMessages[data.sourceStatus];
 
   return (
-    <section className="space-y-4" data-upcoming-earnings>
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">25-ticker catalog</Badge>
-        {readOnly ? <Badge variant="secondary">Read-only demo</Badge> : null}
-      </div>
-
-      {sourceMessage ? (
-        <div
-          className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950"
-          role="status"
-        >
-          {sourceMessage}
+    <Card data-upcoming-earnings>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle>Followed companies</CardTitle>
+          {readOnly ? <Badge variant="outline">Read-only demo</Badge> : null}
         </div>
-      ) : null}
+        {sourceMessage ? (
+          <p
+            className="mt-1 flex items-start gap-2 text-sm leading-6 text-muted-foreground"
+            role="status"
+          >
+            <span
+              aria-hidden="true"
+              className="mt-2.5 size-1.5 shrink-0 rounded-full bg-caution"
+            />
+            {sourceMessage}
+          </p>
+        ) : null}
+      </CardHeader>
+      <CardContent>
+        {data.items.length === 0 ? (
+          <div className="py-12 text-center">
+            <p className="font-medium">No followed companies yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Add a holding or watchlist item to see its earnings status
+            </p>
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {data.items.map((item) => {
+              const displayedObservation = observation(item);
 
-      {data.items.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <span className="flex size-11 items-center justify-center rounded-md bg-muted">
-              <CalendarClock className="size-5" />
-            </span>
-            <div>
-              <p className="font-medium">No followed companies yet.</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Add a holding or watchlist item to see its earnings status.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {data.items.map((item) => {
-            const displayedObservation = observation(item);
-            return (
-              <Card key={item.ticker}>
-                <CardHeader className="border-b">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <CardTitle>
-                        <Link
-                          className="hover:underline"
-                          href={`/stocks/${item.ticker.toLowerCase()}`}
-                          prefetch={false}
-                        >
-                          {item.ticker}
-                        </Link>
-                      </CardTitle>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {item.companyName}
-                      </p>
-                    </div>
-                    {stateBadge(item)}
+              return (
+                <li
+                  className="grid gap-3 py-4 text-sm first:pt-0 last:pb-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.8fr)] md:gap-6"
+                  key={item.ticker}
+                >
+                  <div className="min-w-0">
+                    <Link
+                      className="font-medium hover:underline"
+                      href={`/stocks/${item.ticker.toLowerCase()}`}
+                      prefetch={false}
+                    >
+                      {item.ticker}
+                    </Link>
+                    <p className="truncate text-muted-foreground">
+                      {item.companyName}
+                    </p>
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
                   <div>
-                    <p className="font-medium">{displayedObservation.label}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    <p className="font-medium tabular-nums">
+                      {displayedObservation.label}
+                    </p>
+                    <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
                       {displayedObservation.detail}
                     </p>
                   </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {item.followedVia.map((via) => (
-                      <Badge key={via} variant="outline">
-                        {via === "HOLDING" ? "Holding" : "Watchlist"}
-                      </Badge>
-                    ))}
+                  <div className="md:text-right">
+                    <p className="flex items-center gap-2 md:justify-end">
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-1.5 rounded-full",
+                          stateDots[item.state],
+                        )}
+                      />
+                      <span>{stateLabels[item.state]}</span>
+                    </p>
+                    <p className="mt-0.5 flex flex-wrap gap-1.5 text-xs text-muted-foreground md:justify-end">
+                      {item.followedVia.map((via, index) => (
+                        <Fragment key={via}>
+                          {index > 0 ? <span aria-hidden="true">·</span> : null}
+                          <span>{via === "HOLDING" ? "Holding" : "Watchlist"}</span>
+                        </Fragment>
+                      ))}
+                    </p>
                   </div>
-
                   {item.fetchedAt ? (
-                    <div className="border-t pt-3 text-xs leading-5 text-muted-foreground">
-                      <p>Checked {formatCheckedAt(item.fetchedAt)} UTC</p>
-                      {item.source ? <p>Source: {item.source}</p> : null}
-                    </div>
+                    <p className="font-mono text-xs text-muted-foreground md:col-span-3">
+                      Checked {formatCheckedAt(item.fetchedAt)} UTC
+                      {item.source ? <> · {item.source}</> : null}
+                    </p>
                   ) : null}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-    </section>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }

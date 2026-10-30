@@ -1,3 +1,4 @@
+import { PageShell } from "@/components/layout/page-shell";
 import { WatchlistManager } from "@/components/watchlist/watchlist-manager";
 import { requireUser } from "@/lib/auth/session";
 import { getUserWatchlist } from "@/lib/portfolio/management";
@@ -11,17 +12,11 @@ export default async function PrivateWatchlistPage() {
   const now = new Date();
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
-      <div>
-        <p className="text-sm font-medium text-muted-foreground">
-          Stocks you follow
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold">Your watchlist</h1>
-        <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Add companies, record a target price, and keep short notes about what
-          you are monitoring.
-        </p>
-      </div>
+    <PageShell
+      description="Add companies, record a target price, and keep short notes about what you are monitoring"
+      eyebrow="Stocks you follow"
+      title="Your watchlist"
+    >
       <WatchlistManager
         items={items.map((item) => ({
           id: item.id,
@@ -37,6 +32,6 @@ export default async function PrivateWatchlistPage() {
           notes: item.notes,
         }))}
       />
-    </main>
+    </PageShell>
   );
 }

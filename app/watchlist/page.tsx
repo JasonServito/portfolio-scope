@@ -1,8 +1,7 @@
-import { AlertTriangle } from "lucide-react";
-
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
 import { Card, CardContent } from "@/components/ui/card";
+import { DataState } from "@/components/ui/data-state";
 import { WatchlistManager } from "@/components/watchlist/watchlist-manager";
 import { getDemoWatchlist } from "@/lib/portfolio/management";
 import { presentWatchlistPrice } from "@/lib/portfolio/watchlist-prices";
@@ -15,22 +14,18 @@ export default async function WatchlistPage() {
   return (
     <AppLayout>
       <PageShell
-        description="Explore curated companies and their research without changing the public demo watchlist."
-        eyebrow="Research queue"
+        description="Companies the sample investor follows, with the latest sample price and the target they set"
+        eyebrow="North Star Portfolio · Read-only demo"
         title="Watchlist"
       >
         {!items ? (
           <Card>
-            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-              <span className="flex size-11 items-center justify-center rounded-md bg-muted">
-                <AlertTriangle className="size-5" />
-              </span>
-              <div>
-                <p className="font-medium">Watchlist data is unavailable.</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Seed the database to manage the demo investor watchlist.
-                </p>
-              </div>
+            <CardContent>
+              <DataState
+                description="The sample watchlist could not be loaded. No prices have been made up."
+                kind="missing"
+                title="Watchlist data is unavailable"
+              />
             </CardContent>
           </Card>
         ) : (

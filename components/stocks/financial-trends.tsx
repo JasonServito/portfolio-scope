@@ -11,7 +11,7 @@ import {
 } from "recharts";
 
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { chartAxisTick, chartTooltipStyle } from "@/components/ui/chart-theme";
 import type {
   FinancialTrend,
   FinancialTrendPoint,
@@ -57,21 +57,19 @@ function TrendChart({ trend }: { trend: FinancialTrend }) {
           data={trend.points}
           margin={{ bottom: 0, left: 0, right: 12, top: 12 }}
         >
-          <CartesianGrid
-            stroke="#e5e7eb"
-            strokeDasharray="3 3"
-            vertical={false}
-          />
+          <CartesianGrid stroke="var(--border)" vertical={false} />
           <XAxis
             axisLine={false}
             dataKey="periodEnd"
             minTickGap={20}
+            tick={chartAxisTick}
             tickFormatter={formatPeriodTick}
             tickLine={false}
             tickMargin={10}
           />
           <YAxis
             axisLine={false}
+            tick={chartAxisTick}
             tickFormatter={(value) =>
               formatTrendValue(Number(value), trend.unit)
             }
@@ -80,6 +78,8 @@ function TrendChart({ trend }: { trend: FinancialTrend }) {
             width={72}
           />
           <Tooltip
+            contentStyle={chartTooltipStyle}
+            cursor={{ stroke: "var(--border)" }}
             formatter={(value) => formatTrendValue(Number(value), trend.unit)}
             labelFormatter={(value) =>
               `Quarter ended ${new Intl.DateTimeFormat("en-US", {
@@ -93,8 +93,9 @@ function TrendChart({ trend }: { trend: FinancialTrend }) {
           <Line
             connectNulls={false}
             dataKey="value"
-            dot={{ fill: "#2563eb", r: 3, strokeWidth: 0 }}
-            stroke="#2563eb"
+            dot={{ fill: "var(--chart-1)", r: 2.5, strokeWidth: 0 }}
+            isAnimationActive={false}
+            stroke="var(--chart-1)"
             strokeWidth={2}
             type="monotone"
           />
@@ -108,8 +109,8 @@ function ValueTable({ trend }: { trend: FinancialTrend }) {
   if (trend.points.length === 0) return null;
 
   return (
-    <details className="border-t pt-3 text-sm">
-      <summary className="cursor-pointer rounded-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+    <details className="border-t pt-3 text-xs">
+      <summary className="cursor-pointer rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
         View quarterly values
       </summary>
       <div className="mt-3 overflow-x-auto">
@@ -154,45 +155,45 @@ export function FinancialTrends({ trends }: { trends: FinancialTrend[] }) {
       className="border-t pt-6"
     >
       <div>
-        <h2 className="text-xl font-semibold" id="financial-trends-heading">
-          Financial Trends
+        <h2 className="text-base font-medium" id="financial-trends-heading">
+          Financial trends
         </h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+        <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
           Up to eight selected quarters from company filings. Gaps stay
           unavailable and lines do not connect across missing facts.
         </p>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+      <div className="mt-5 grid gap-8 xl:grid-cols-3">
         {trends.map((trend) => (
-          <Card data-financial-trend={trend.id} key={trend.id} size="sm">
-            <CardHeader className="gap-2">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="font-semibold">{trend.title}</h3>
-                <Badge variant="outline">
-                  {trend.status === "AVAILABLE"
-                    ? "Available"
-                    : trend.status === "PARTIAL"
-                      ? "Partial data"
-                      : "Unavailable"}
-                </Badge>
-              </div>
+          <article
+            className="min-w-0 space-y-3"
+            data-financial-trend={trend.id}
+            key={trend.id}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-sm font-medium">{trend.title}</h3>
+              <Badge variant="outline">
+                {trend.status === "AVAILABLE"
+                  ? "Available"
+                  : trend.status === "PARTIAL"
+                    ? "Partial data"
+                    : "Unavailable"}
+              </Badge>
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {trend.description} Unit:{" "}
+              {trend.unit === "USD" ? "USD" : "USD per diluted share"}.
+            </p>
+            <p className="min-h-10 text-sm leading-5">{trend.summary}</p>
+            {trend.missingPeriods.length > 0 ? (
               <p className="text-xs leading-5 text-muted-foreground">
-                {trend.description} Unit:{" "}
-                {trend.unit === "USD" ? "USD" : "USD per diluted share"}.
+                Missing: {trend.missingPeriods.join(", ")}.
               </p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="min-h-10 text-sm leading-5">{trend.summary}</p>
-              {trend.missingPeriods.length > 0 ? (
-                <p className="text-xs leading-5 text-muted-foreground">
-                  Missing: {trend.missingPeriods.join(", ")}.
-                </p>
-              ) : null}
-              <TrendChart trend={trend} />
-              <ValueTable trend={trend} />
-            </CardContent>
-          </Card>
+            ) : null}
+            <TrendChart trend={trend} />
+            <ValueTable trend={trend} />
+          </article>
         ))}
       </div>
     </section>

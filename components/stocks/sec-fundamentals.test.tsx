@@ -59,14 +59,14 @@ describe("key metrics presentation", () => {
   it("renders ten explained headline metrics and honest missing states", () => {
     const markup = renderToStaticMarkup(<SecFundamentals data={base} />);
 
-    expect(markup).toContain("Key Metrics");
+    expect(markup).toContain("Key metrics");
     expect(markup.match(/data-headline-metric=/g)).toHaveLength(10);
     expect(markup.match(/What this means/g)).toHaveLength(10);
     expect(markup).toContain("Financial metrics have not been loaded yet");
     expect(markup).toContain("does not replace them with zero");
     expect(markup).toContain("Unavailable");
     expect(markup).toContain("A current programmatic quote");
-    expect(markup).toContain("Financial Trends");
+    expect(markup).toContain("Financial trends");
     expect(markup.match(/data-financial-trend=/g)).toHaveLength(3);
     expect(markup).toContain("Quarterly values are unavailable");
   });

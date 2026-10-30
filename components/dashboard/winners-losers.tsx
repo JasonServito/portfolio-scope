@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { signTone } from "@/components/ui/stat-card";
 import { formatSignedCurrency, formatSignedPercent } from "@/lib/formatters";
 import type { WinnerLoser } from "@/lib/portfolio/types";
+import { cn } from "@/lib/utils";
 
 type WinnersLosersProps = {
   title: string;
@@ -14,55 +13,47 @@ type WinnersLosersProps = {
 
 export function WinnersLosers({ currency, items, title }: WinnersLosersProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {items.length === 0 ? (
-          <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            No ranked holdings are available for this period.
-          </div>
-        ) : (
-          items.map((item) => {
-            const isPositive = item.periodReturn >= 0;
-            const Icon = isPositive ? ArrowUpRight : ArrowDownRight;
-
-            return (
+    <section>
+      <h3 className="text-sm font-medium">{title}</h3>
+      {items.length === 0 ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          No ranked holdings are available for this period.
+        </p>
+      ) : (
+        <ul className="mt-2 divide-y">
+          {items.map((item) => (
+            <li key={item.id}>
               <Link
-                className="flex items-center justify-between gap-4 rounded-lg border px-3 py-3 transition hover:bg-muted/40"
+                className="-mx-2 flex items-center justify-between gap-4 rounded-sm px-2 py-2.5 transition-colors hover:bg-muted"
                 href={`/stocks/${item.ticker.toLowerCase()}`}
-                key={item.id}
                 prefetch={false}
               >
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 font-medium">
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">
                     {item.ticker}
-                    <Icon className="size-3 text-muted-foreground" />
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
                     {item.companyName}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <Badge
-                    className={
-                      isPositive
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-rose-50 text-rose-700"
-                    }
+                  </span>
+                </span>
+                <span className="shrink-0 text-right tabular-nums">
+                  <span
+                    className={cn(
+                      "block text-sm font-medium",
+                      signTone(item.dollarContribution),
+                    )}
                   >
-                    {formatSignedPercent(item.periodReturn)}
-                  </Badge>
-                  <p className="mt-1 text-xs text-muted-foreground">
                     {formatSignedCurrency(item.dollarContribution, currency)}
-                  </p>
-                </div>
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {formatSignedPercent(item.periodReturn)}
+                  </span>
+                </span>
               </Link>
-            );
-          })
-        )}
-      </CardContent>
-    </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

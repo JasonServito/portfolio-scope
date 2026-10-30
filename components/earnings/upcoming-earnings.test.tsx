@@ -72,7 +72,7 @@ describe("UpcomingEarnings", () => {
     expect(markup).toContain("Stale");
     expect(markup).toContain("Date not currently available");
     expect(markup).toContain("Earnings data unavailable");
-    expect(markup).toContain("Outside the M26 earnings catalog");
+    expect(markup).toContain("Not covered by the earnings calendar");
     expect(markup).toContain("EarningsAPI.com /v1/earnings");
     expect(markup.match(/Holding/g)).toHaveLength(4);
     expect(markup).toContain("Watchlist");

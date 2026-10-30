@@ -11,8 +11,8 @@ export default async function EarningsPage() {
   return (
     <AppLayout>
       <PageShell
-        description="See the nearest expected earnings event for each company followed by the sample portfolio. Live updates remain gated until production activation is approved."
-        eyebrow="Portfolio calendar"
+        description="The next expected earnings date for each company in the sample portfolio and watchlist"
+        eyebrow="North Star Portfolio · Read-only demo"
         title="Upcoming earnings"
       >
         <UpcomingEarnings data={data} readOnly />
