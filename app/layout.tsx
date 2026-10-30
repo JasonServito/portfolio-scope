@@ -40,8 +40,8 @@ export const metadata: Metadata = {
     images: [
       {
         url: "/og.png",
-        width: 1733,
-        height: 909,
+        width: 1600,
+        height: 840,
         alt: "PortfolioScope portfolio and stock dashboard",
       },
     ],
