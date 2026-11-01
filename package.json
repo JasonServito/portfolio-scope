@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=20.19.0"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "next dev",
@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "verify:db": "npm run db:generate && prisma validate && npm run db:deploy",
-    "verify:security": "npm audit --audit-level=high",
+    "verify:security": "npm audit --omit=dev --audit-level=high",
     "db:generate": "prisma generate",
     "db:migrate": "node scripts/guarded-prisma.mjs migrate-dev",
     "db:deploy": "node scripts/guarded-prisma.mjs migrate-deploy",
@@ -61,7 +61,7 @@
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
@@ -72,7 +72,7 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite-node": "^3.2.4",
-    "vitest": "^3.2.6"
+    "vitest": "^5.0.5"
   },
   "overrides": {
     "@prisma/config": {

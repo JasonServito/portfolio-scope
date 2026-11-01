@@ -193,7 +193,7 @@ Do not run `prisma db push` against either hosted database.
 ### 2. Create the Vercel project
 
 1. Import the GitHub repository into Vercel.
-2. Select Next.js and Node.js `20.19` or newer.
+2. Select Next.js and Node.js `24.x`.
 3. Keep `npm ci` as the install command and `npm run build` as the build command.
 4. Set `main` as the Production branch.
 5. Keep pull-request Preview deployments enabled.

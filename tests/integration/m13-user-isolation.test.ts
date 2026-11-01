@@ -698,7 +698,7 @@ afterAll(async () => {
   }
 }, 60_000);
 
-describe.sequential("M13 real PostgreSQL user isolation", () => {
+describe("M13 real PostgreSQL user isolation", () => {
   it("supports owner-scoped portfolio, holding, watchlist, alert, and research workflows", async () => {
     const portfolios = await listPortfolios(ids.userA);
     expect(portfolios.map((portfolio) => portfolio.id)).toContain(
