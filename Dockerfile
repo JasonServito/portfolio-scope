@@ -1,4 +1,4 @@
-FROM node:20.19-alpine AS base
+FROM node:24-alpine AS base
 WORKDIR /workspace
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN apk add --no-cache openssl
@@ -18,7 +18,7 @@ COPY --from=deps /workspace/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20.19-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /workspace
 
 ENV NODE_ENV=production

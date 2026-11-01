@@ -152,7 +152,7 @@ cannot issue investment recommendations. See the
 
 ## Local Development
 
-Prerequisites: Node.js 20.19+, npm, and Docker Desktop or another PostgreSQL 16
+Prerequisites: Node.js 24, npm, and Docker Desktop or another PostgreSQL 16
 instance.
 
 ```bash
