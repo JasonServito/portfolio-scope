@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
+import { PageShell } from "@/components/layout/page-shell";
 import { PrivatePortfolioManager } from "@/components/portfolios/private-portfolio-manager";
 import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/session";
@@ -21,25 +22,20 @@ export default async function PrivatePortfolioPage({
   if (!portfolio) notFound();
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
-      <div>
+    <PageShell
+      actions={
         <Link
-          className={buttonVariants({ variant: "ghost", size: "sm" })}
+          className={buttonVariants({ variant: "ghost" })}
           href="/app"
+          prefetch={false}
         >
           <ArrowLeft /> Back to portfolios
         </Link>
-        <p className="mt-6 text-sm font-medium text-muted-foreground">
-          Private portfolio
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold">{portfolio.name}</h1>
-        <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Reads and mutations are scoped to your server-side session. A foreign
-          portfolio or holding identifier returns the same not-found response as
-          a missing record.
-        </p>
-      </div>
-
+      }
+      description="Update the portfolio details and keep its holdings current"
+      eyebrow="Portfolio"
+      title={portfolio.name}
+    >
       <PrivatePortfolioManager
         holdings={portfolio.holdings.map((holding) => ({
           id: holding.id,
@@ -53,6 +49,6 @@ export default async function PrivatePortfolioPage({
         initialBaseCurrency={portfolio.baseCurrency}
         initialName={portfolio.name}
       />
-    </main>
+    </PageShell>
   );
 }

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { SeverityLabel } from "@/components/alerts/severity-label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -21,10 +21,12 @@ export function PrivateAlerts({ alerts }: { alerts: PrivateAlert[] }) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function setStatus(alert: PrivateAlert) {
     setPendingId(alert.id);
     setError("");
+    setNotice("");
     try {
       const response = await fetch(`/api/alerts/${alert.id}`, {
         method: "PATCH",
@@ -38,6 +40,11 @@ export function PrivateAlerts({ alerts }: { alerts: PrivateAlert[] }) {
         setError(body.error ?? "Unable to update the alert.");
         return;
       }
+      setNotice(
+        alert.status === "ACTIVE"
+          ? `${alert.title} was resolved.`
+          : `${alert.title} was reopened.`,
+      );
       router.refresh();
     } catch {
       setError("Unable to reach the alert service. Please try again.");
@@ -57,41 +64,54 @@ export function PrivateAlerts({ alerts }: { alerts: PrivateAlert[] }) {
   }
 
   return (
-    <div className="grid gap-3">
-      {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {alerts.map((alert) => (
-        <Card key={alert.id}>
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex flex-wrap gap-2">
-                <Badge variant={alert.severity === "HIGH" ? "destructive" : "outline"}>
-                  {alert.severity.toLowerCase()}
-                </Badge>
-                <Badge variant="secondary">{alert.status.toLowerCase()}</Badge>
-                {alert.ticker ? <Badge variant="outline">{alert.ticker}</Badge> : null}
-              </div>
-              <p className="mt-3 font-medium">{alert.title}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{alert.message}</p>
-              {alert.portfolioName ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Portfolio: {alert.portfolioName}
-                </p>
-              ) : null}
-            </div>
-            <Button
-              disabled={pendingId !== null}
-              onClick={() => setStatus(alert)}
-              variant="outline"
+    <Card>
+      <CardContent>
+        {error ? (
+          <p className="mb-3 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p className="mb-3 text-sm text-muted-foreground" role="status">
+            {notice}
+          </p>
+        ) : null}
+        <ul className="divide-y">
+          {alerts.map((alert) => (
+            <li
+              className="flex flex-col gap-4 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+              key={alert.id}
             >
-              {alert.status === "ACTIVE" ? "Resolve" : "Reopen"}
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <SeverityLabel severity={alert.severity} ticker={alert.ticker} />
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono">
+                    {alert.status.toLowerCase()}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-sm font-medium">{alert.title}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {alert.message}
+                </p>
+                {alert.portfolioName ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Portfolio: {alert.portfolioName}
+                  </p>
+                ) : null}
+              </div>
+              <Button
+                className="self-start sm:self-center"
+                disabled={pendingId !== null}
+                onClick={() => setStatus(alert)}
+                variant="outline"
+              >
+                {alert.status === "ACTIVE" ? "Resolve" : "Reopen"}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { buildSecFilingIndexUrl } from "@/lib/sec/client";
 import { formatCik } from "@/lib/sec/company-registry";
+import { isCurrentReportForm, parseItemCodes } from "@/lib/sec/current-reports";
 import type { SecCompanyFacts, SecSubmissions } from "@/lib/sec/schemas";
 
 export const SEC_NORMALIZATION_VERSION = "sec-xbrl-v1";
@@ -148,6 +149,17 @@ export type ParsedSecFiling = {
   sourceUrl: string;
   isAmendment: boolean;
   amendsAccessionNumber: string | null;
+  /** Form 8-K item codes; empty for 10-K and 10-Q filings. */
+  itemCodes: string[];
+};
+
+export type ParseRecentFilingsOptions = {
+  /**
+   * When set, Form 8-K and 8-K/A filings filed on or after this date are
+   * retained with their item codes (M32). Absent or null keeps the original
+   * 10-K and 10-Q filter unchanged.
+   */
+  currentReportsFiledOnOrAfter?: Date | null;
 };
 
 export type NormalizedSecFact = {
@@ -240,23 +252,24 @@ function factExternalKey(parts: Array<string | number | null>) {
 export function parseRecentFilings(
   submissions: SecSubmissions,
   cik: string,
+  options: ParseRecentFilingsOptions = {},
 ): ParsedSecFiling[] {
   const recent = submissions.filings.recent;
   const filings: ParsedSecFiling[] = [];
+  const currentReportsFrom = options.currentReportsFiledOnOrAfter ?? null;
 
   for (let index = 0; index < recent.accessionNumber.length; index += 1) {
     const accessionNumber = recent.accessionNumber[index];
     const formType = recent.form[index];
     const filingDate = parseDate(recent.filingDate[index]);
 
-    if (
-      !accessionNumber ||
-      !formType ||
-      !filingDate ||
-      !/^10-(?:K|Q)(?:\/A)?$/.test(formType)
-    ) {
-      continue;
-    }
+    if (!accessionNumber || !formType || !filingDate) continue;
+    const retained =
+      /^10-(?:K|Q)(?:\/A)?$/.test(formType) ||
+      (currentReportsFrom !== null &&
+        isCurrentReportForm(formType) &&
+        filingDate >= currentReportsFrom);
+    if (!retained) continue;
 
     const reportDate = parseDate(recent.reportDate[index]);
     const isAmendment = formType.endsWith("/A");
@@ -272,6 +285,7 @@ export function parseRecentFilings(
       sourceUrl: buildSecFilingIndexUrl(cik, accessionNumber),
       isAmendment,
       amendsAccessionNumber: null,
+      itemCodes: parseItemCodes(recent.items?.[index]),
     });
   }
 

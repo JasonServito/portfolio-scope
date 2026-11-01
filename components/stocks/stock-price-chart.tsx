@@ -29,7 +29,7 @@ export function StockPriceChart({ currency, data }: StockPriceChartProps) {
   if (data.length === 0) {
     return (
       <div className="flex h-72 items-center justify-center rounded-lg border bg-muted/30 text-sm text-muted-foreground">
-        No seeded prices are available for this stock.
+        No sample prices are available for this stock.
       </div>
     );
   }

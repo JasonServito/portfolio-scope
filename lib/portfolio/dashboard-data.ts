@@ -1,5 +1,7 @@
-import { getDemoRiskAlerts } from "@/lib/portfolio/alerts-data";
-import { getDemoPortfolioAnalytics } from "@/lib/portfolio/analytics";
+import { getDemoRiskAlertsWithAnalytics } from "@/lib/portfolio/alerts-data";
+import {
+  getDemoPortfolioAnalyticsByPeriods,
+} from "@/lib/portfolio/analytics";
 import {
   PERFORMANCE_PERIODS,
   type HoldingAnalytics,
@@ -20,29 +22,35 @@ export type HoldingsPageRow = HoldingAnalytics & {
 };
 
 export async function getDemoDashboardData(period: PerformancePeriod) {
-  const [analytics, alerts] = await Promise.all([
-    getDemoPortfolioAnalytics(period),
-    getDemoRiskAlerts(),
+  const analyticsByPeriodPromise = getDemoPortfolioAnalyticsByPeriods(
+    PERFORMANCE_PERIODS,
+  );
+  const [analyticsByPeriod, alerts] = await Promise.all([
+    analyticsByPeriodPromise,
+    getDemoRiskAlertsWithAnalytics(analyticsByPeriodPromise),
   ]);
+  const analytics =
+    analyticsByPeriod.find((item) => item?.period === period) ?? null;
 
   return {
     activeAlertCount: alerts.length,
     analytics,
-    alerts: alerts.slice(0, 3).map((alert): DashboardAlertPreview => ({
-      id: alert.id,
-      ticker: alert.ticker,
-      severity: alert.severity,
-      type: alert.type,
-      title: alert.title,
-      message: alert.message,
-    })),
+    alerts: alerts.slice(0, 3).map(
+      (alert): DashboardAlertPreview => ({
+        id: alert.id,
+        ticker: alert.ticker,
+        severity: alert.severity,
+        type: alert.type,
+        title: alert.title,
+        message: alert.message,
+      }),
+    ),
   };
 }
 
 export async function getDemoHoldingsPageData() {
-  const analyticsByPeriod = await Promise.all(
-    PERFORMANCE_PERIODS.map((period) => getDemoPortfolioAnalytics(period)),
-  );
+  const analyticsByPeriod =
+    await getDemoPortfolioAnalyticsByPeriods(PERFORMANCE_PERIODS);
 
   if (analyticsByPeriod.some((analytics) => analytics === null)) {
     return null;

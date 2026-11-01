@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
+
 import { BackgroundJobType, type Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { EARNINGS_STALE_AFTER_MS } from "@/lib/earnings/service";
 import { isBackgroundFeatureEnabled } from "@/lib/jobs/config";
 import { JobErrorCode, JobExecutionError } from "@/lib/jobs/errors";
 import {
@@ -19,6 +22,39 @@ import {
   queueSecIngestion,
   renormalizeStoredCompanyFacts,
 } from "@/lib/sec/jobs";
+
+const MAX_CORRELATION_ID_LENGTH = 128;
+
+function withCorrelationSuffix(parentCorrelationId: string, suffix: string) {
+  const parentPrefix = parentCorrelationId.slice(
+    0,
+    Math.max(0, MAX_CORRELATION_ID_LENGTH - suffix.length),
+  );
+  return `${parentPrefix}${suffix}`;
+}
+
+export function createScheduledSecCorrelationId(
+  parentCorrelationId: string,
+  ticker: string,
+) {
+  return withCorrelationSuffix(
+    parentCorrelationId,
+    `:sec:${ticker.toLowerCase()}:${randomUUID()}`,
+  );
+}
+
+// `SecIngestionRun.correlationId` is unique and each attempt records its own
+// run, so a retry after an attempt created its run needs a distinct, still
+// job-traceable correlation. Attempt numbers never reset for a job, including
+// administrator retries, so the suffix is unique within the job.
+export function createSecRunCorrelationId(
+  jobCorrelationId: string,
+  attemptNumber: number,
+) {
+  return attemptNumber <= 1
+    ? jobCorrelationId
+    : withCorrelationSuffix(jobCorrelationId, `:attempt:${attemptNumber}`);
+}
 
 function requireLink(value: string | null, expected: string, label: string) {
   if (!value || value !== expected) {
@@ -44,6 +80,7 @@ function assertNotAborted(signal: AbortSignal) {
 export async function executeBackgroundJobHandler(
   job: ClaimedBackgroundJob,
   signal: AbortSignal,
+  deadlineAt?: number,
 ): Promise<Prisma.InputJsonValue> {
   assertNotAborted(signal);
 
@@ -62,7 +99,10 @@ export async function executeBackgroundJobHandler(
         ticker: payload.ticker,
         requestedByUserId: job.userId,
         companyId: job.companyId,
-        correlationId: job.correlationId,
+        correlationId: createSecRunCorrelationId(
+          job.correlationId,
+          job.attemptCount,
+        ),
         timeoutMs: job.timeoutMs,
       });
     }
@@ -72,13 +112,9 @@ export async function executeBackgroundJobHandler(
         BackgroundJobType.SEC_FILING_FETCH,
         job.payloadJson,
       );
-      if (!job.companyId) {
-        throw new JobExecutionError(
-          JobErrorCode.INVALID_PAYLOAD,
-          false,
-          "The filing job is missing its company binding.",
-        );
-      }
+      // Filing fetches are keyed per filing and parser version rather than
+      // bound to a company, so the latest 10-K and 10-Q can be queued
+      // together; the handler verifies the filing belongs to the ticker.
       return fetchSecFilingDocument(payload);
     }
 
@@ -135,6 +171,9 @@ export async function executeBackgroundJobHandler(
         agentName: payload.agentName,
         userId: job.userId,
         correlationId: job.correlationId,
+        attemptNumber: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+        signal,
       });
     }
 
@@ -154,6 +193,10 @@ export async function executeBackgroundJobHandler(
       return executeResearchSynthesis({
         researchJobId: payload.researchJobId,
         userId: job.userId,
+        attemptNumber: job.attemptCount,
+        maxAttempts: job.maxAttempts,
+        signal,
+        deadlineAt,
       });
     }
 
@@ -162,8 +205,15 @@ export async function executeBackgroundJobHandler(
         BackgroundJobType.MAINTENANCE_CLEANUP,
         job.payloadJson,
       );
+      const now = new Date();
+      const expiredEarnings = await db.upcomingEarningsState.deleteMany({
+        where: {
+          fetchedAt: {
+            lt: new Date(now.getTime() - EARNINGS_STALE_AFTER_MS),
+          },
+        },
+      });
       if (payload.operation === "RECOVER_STALE_JOBS") {
-        const now = new Date();
         const staleRunningCutoff = new Date(now.getTime() - 10 * 60 * 1000);
         const undeliveredCutoff = new Date(now.getTime() - 15 * 60 * 1000);
         const staleRunning =
@@ -176,11 +226,19 @@ export async function executeBackgroundJobHandler(
             undeliveredCutoff,
             now,
           );
-        return { ...staleRunning, undeliveredFailed: undelivered.count };
+        return {
+          ...staleRunning,
+          earningsDeleted: expiredEarnings.count,
+          undeliveredFailed: undelivered.count,
+        };
       }
 
       if (!isBackgroundFeatureEnabled("SEC_INGESTION_ENABLED")) {
-        return { queued: 0, skipped: "SEC ingestion is disabled." };
+        return {
+          earningsDeleted: expiredEarnings.count,
+          queued: 0,
+          skipped: "SEC ingestion is disabled.",
+        };
       }
 
       const staleBefore = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -200,11 +258,17 @@ export async function executeBackgroundJobHandler(
         if (!ticker) continue;
         queued.push(
           await queueSecIngestion(ticker, {
-            correlationId: job.correlationId,
+            correlationId: createScheduledSecCorrelationId(
+              job.correlationId,
+              ticker,
+            ),
           }),
         );
       }
-      return { queued: queued.length };
+      return {
+        earningsDeleted: expiredEarnings.count,
+        queued: queued.length,
+      };
     }
   }
 

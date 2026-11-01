@@ -40,6 +40,7 @@ describe("structured logger", () => {
       {
         details: {
           authorization: "Bearer private",
+          "x-vercel-protection-bypass": "preview-bypass-secret",
           nested: {
             cookie: "session=secret",
             endpoint: "postgresql://user:password@db.example.test/app",
@@ -52,6 +53,7 @@ describe("structured logger", () => {
     const output = String(error.mock.calls[0]?.[0]);
     expect(output).not.toContain("abc.def");
     expect(output).not.toContain("private");
+    expect(output).not.toContain("preview-bypass-secret");
     expect(output).not.toContain("session=secret");
     expect(output).not.toContain("user:password");
     expect(output).not.toContain("another-secret");

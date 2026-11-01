@@ -380,6 +380,16 @@ describe("private alerts and research services", () => {
     );
   });
 
+  it("keeps existing alerts available when target reconciliation fails", async () => {
+    mocks.watchlistItemFindMany.mockRejectedValue(
+      new Error("cached price read failed"),
+    );
+    mocks.alertFindMany.mockResolvedValue([{ id: "alert-a" }]);
+
+    await expect(listUserAlerts(actorId)).resolves.toEqual([{ id: "alert-a" }]);
+    expect(mocks.alertFindMany).toHaveBeenCalled();
+  });
+
   it("returns an owned research job together with its private report", async () => {
     mocks.researchJobFindFirst.mockResolvedValue({
       agentRuns: [],
@@ -409,10 +419,16 @@ describe("private alerts and research services", () => {
       status: "COMPLETED",
       ticker: "AAPL",
     });
-    expect(mocks.researchJobFindFirst).toHaveBeenCalledWith({
-      where: { id: "job-a", userId: actorId },
-      include: { stock: true, agentRuns: true, report: true },
-    });
+    expect(mocks.researchJobFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "job-a", userId: actorId },
+        include: expect.objectContaining({
+          stock: true,
+          agentRuns: true,
+          report: expect.any(Object),
+        }),
+      }),
+    );
   });
 
   it("keeps private research history scoped to the authenticated owner", async () => {

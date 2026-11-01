@@ -1,14 +1,15 @@
 import Link from "next/link";
 import {
-  Activity,
   BarChart3,
   Bell,
   Binoculars,
+  CalendarDays,
   LayoutDashboard,
   LineChart,
   WalletCards,
 } from "lucide-react";
 
+import { BrandMark } from "@/components/layout/brand-mark";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,11 @@ const primaryNavItems = [
     href: "/watchlist",
     label: "Watchlist",
     icon: Binoculars,
+  },
+  {
+    href: "/earnings",
+    label: "Earnings",
+    icon: CalendarDays,
   },
   {
     href: "/alerts",
@@ -56,34 +62,47 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
   return (
     <aside className="hidden min-h-screen w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground lg:flex lg:flex-col">
       <div className="border-b px-5 py-5">
-        <Link className="flex items-center gap-3" href="/dashboard">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Activity className="size-4" />
-          </span>
+        <Link className="flex items-center gap-3" href="/" prefetch={false}>
+          <BrandMark />
           <span>
             <span className="block text-sm font-semibold leading-5">
               PortfolioScope
             </span>
             <span className="block text-xs text-muted-foreground">
-              Demo investing workspace
+              Portfolio dashboard
             </span>
           </span>
         </Link>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-6 px-3 py-5">
-        <NavGroup activePath={activePath} items={primaryNavItems} label="Workspace" />
-        <NavGroup activePath={activePath} items={researchNavItems} label="Stock research" />
+      <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-5">
+        <NavGroup
+          activePath={activePath}
+          items={primaryNavItems}
+          label="Demo workspace"
+        />
+        <NavGroup
+          activePath={activePath}
+          items={researchNavItems}
+          label="Stock research"
+        />
       </nav>
 
-      <div className="m-3 rounded-lg border bg-background p-4">
+      <div className="m-3 rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-medium">Demo Mode</p>
+          <p className="text-sm font-medium">Demo mode</p>
           <Badge variant="outline">Read-only</Badge>
         </div>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Seeded data stays available without OAuth and cannot be changed in the public deployment.
+          Browse the sample portfolio without an account. Changes are disabled.
         </p>
+        <Link
+          className="mt-3 inline-flex text-xs font-medium text-primary hover:underline"
+          href="/research"
+          prefetch={false}
+        >
+          View sample research →
+        </Link>
       </div>
     </aside>
   );
@@ -106,24 +125,25 @@ function NavGroup({
 }) {
   return (
     <div className="space-y-2">
-      <p className="px-2 text-xs font-medium uppercase text-muted-foreground">
-        {label}
-      </p>
+      <p className="px-2 text-xs font-medium text-muted-foreground">{label}</p>
       <div className="space-y-1">
         {items.map((item) => {
           const Icon = item.icon;
           const isActive =
             activePath === item.href ||
-            (item.href.startsWith("/stocks") && activePath.startsWith(item.href));
+            (item.href.startsWith("/stocks") &&
+              activePath.startsWith(item.href));
 
           return (
             <Link
               className={cn(
-                "flex h-9 items-center gap-3 rounded-lg px-2 text-sm font-medium text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                isActive && "bg-sidebar-accent text-sidebar-accent-foreground"
+                "flex h-9 items-center gap-3 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                isActive &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-foreground/5",
               )}
               href={item.href}
               key={item.href}
+              prefetch={false}
             >
               <Icon className="size-4" />
               {item.label}

@@ -126,19 +126,46 @@ describe("SEC fundamentals provider", () => {
       accessionNumber: "0000320193-24-000123",
       selection: "SELECTED",
     });
+    companyRecord.secEntity.financialFacts.push({
+      ...companyRecord.secEntity.financialFacts[0],
+      periodStart: new Date("2025-06-29T00:00:00.000Z"),
+      periodEnd: new Date("2025-09-27T00:00:00.000Z"),
+      periodKind: "QUARTERLY",
+      fiscalPeriod: "FY",
+    });
+    companyRecord.secEntity.financialFacts.unshift({
+      ...companyRecord.secEntity.financialFacts[0],
+      periodStart: new Date("2025-09-28T00:00:00.000Z"),
+      periodEnd: new Date("2025-12-27T00:00:00.000Z"),
+      periodKind: "QUARTERLY",
+      fiscalYear: 2026,
+      fiscalPeriod: "Q1",
+      formType: "10-Q",
+      selection: "AMBIGUOUS",
+    });
     mocks.companyFindFirst.mockResolvedValue(companyRecord);
     const provider = new SecEdgarFundamentalsProvider();
 
     const result = await provider.getFundamentals("AAPL");
 
     expect(result.facts).toHaveLength(1);
+    expect(result.trendPeriods).toEqual([
+      "2025-12-27T00:00:00.000Z",
+      "2025-09-27T00:00:00.000Z",
+    ]);
+    expect(result.trendFacts).toHaveLength(1);
+    expect(result.trendFacts[0]).toMatchObject({
+      metric: "REVENUE",
+      periodKind: "QUARTERLY",
+      periodEnd: "2025-09-27T00:00:00.000Z",
+    });
     expect(result.facts[0]).toMatchObject({
       metric: "REVENUE",
       periodKind: "ANNUAL",
       accessionNumber: "0000320193-25-000079",
       isDerived: false,
     });
-    expect(result.ambiguousMetrics).toEqual(["NET_INCOME"]);
+    expect(result.ambiguousMetrics).toEqual(["NET_INCOME", "REVENUE"]);
     expect(result.missingMetrics).toContain("NET_INCOME");
   });
 
@@ -151,6 +178,8 @@ describe("SEC fundamentals provider", () => {
       freshness: "CURRENT" as const,
       retrievedAt: "2026-07-21T00:00:00.000Z",
       facts: [],
+      trendPeriods: [],
+      trendFacts: [],
       missingMetrics: [],
       ambiguousMetrics: [],
       lastErrorCode: null,
@@ -180,6 +209,8 @@ describe("SEC fundamentals provider", () => {
       freshness: "CURRENT" as const,
       retrievedAt: "2026-07-21T00:00:00.000Z",
       facts: [],
+      trendPeriods: [],
+      trendFacts: [],
       missingMetrics: [],
       ambiguousMetrics: [],
       lastErrorCode: null,

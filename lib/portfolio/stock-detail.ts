@@ -1,8 +1,9 @@
 import { db } from "@/lib/db";
 import { demoPortfolioName } from "@/lib/demo";
+import { getCompanyDescription } from "@/lib/portfolio/company-descriptions";
 import { calculatePercentChange } from "@/lib/portfolio/calculations";
-import { getDemoRiskAlerts } from "@/lib/portfolio/alerts-data";
-import { getDemoPortfolioAnalytics } from "@/lib/portfolio/analytics";
+import { getDemoRiskAlertsWithAnalytics } from "@/lib/portfolio/alerts-data";
+import { getDemoPortfolioAnalyticsByPeriods } from "@/lib/portfolio/analytics";
 import { getPeriodStartDate } from "@/lib/portfolio/performance";
 import {
   PERFORMANCE_PERIODS,
@@ -35,6 +36,7 @@ export type StockDetailData = {
     industry: string;
     exchange: string;
     currency: string;
+    description: string;
   };
   latestPrice: number | null;
   asOf: string | null;
@@ -53,13 +55,15 @@ export type StockDetailData = {
     targetPrice: number | null;
     notes: string | null;
   } | null;
-  relatedAlerts: Awaited<ReturnType<typeof getDemoRiskAlerts>>;
+  relatedAlerts: Awaited<ReturnType<typeof getDemoRiskAlertsWithAnalytics>>;
 };
 
 export async function getDemoStockDetail(
   ticker: string,
 ): Promise<StockDetailData | null> {
   const symbol = ticker.toUpperCase();
+  const analyticsByPeriodPromise =
+    getDemoPortfolioAnalyticsByPeriods(PERFORMANCE_PERIODS);
   const [stock, alerts, analyticsByPeriod] = await Promise.all([
     db.stock.findUnique({
       where: {
@@ -86,13 +90,8 @@ export async function getDemoStockDetail(
         },
       },
     }),
-    getDemoRiskAlerts(),
-    Promise.all(
-      PERFORMANCE_PERIODS.map(async (period) => ({
-        period,
-        analytics: await getDemoPortfolioAnalytics(period),
-      })),
-    ),
+    getDemoRiskAlertsWithAnalytics(analyticsByPeriodPromise),
+    analyticsByPeriodPromise,
   ]);
 
   if (!stock) {
@@ -102,9 +101,8 @@ export async function getDemoStockDetail(
   const latestPrice = stock.prices.at(-1);
 
   const periodReturns = Object.fromEntries(
-    PERFORMANCE_PERIODS.map((period) => {
-      const analytics = analyticsByPeriod.find((item) => item.period === period)
-        ?.analytics;
+    PERFORMANCE_PERIODS.map((period, index) => {
+      const analytics = analyticsByPeriod[index];
       const holdingReturn = analytics?.holdings.find(
         (holding) => holding.ticker === symbol,
       )?.periodReturn;
@@ -131,9 +129,8 @@ export async function getDemoStockDetail(
     }),
   ) as Record<PerformancePeriod, number | null>;
 
-  const oneMonthAnalytics = analyticsByPeriod.find(
-    (item) => item.period === "1M",
-  )?.analytics;
+  const oneMonthAnalytics =
+    analyticsByPeriod[PERFORMANCE_PERIODS.indexOf("1M")];
   const holdingAnalytics = oneMonthAnalytics?.holdings.find(
     (holding) => holding.ticker === symbol,
   );
@@ -148,6 +145,11 @@ export async function getDemoStockDetail(
       industry: stock.industry,
       exchange: stock.exchange,
       currency: stock.currency,
+      description: getCompanyDescription({
+        ticker: stock.ticker,
+        companyName: stock.companyName,
+        industry: stock.industry,
+      }),
     },
     latestPrice: latestPrice ? toNumber(latestPrice.close) : null,
     asOf: latestPrice?.timestamp.toISOString() ?? null,

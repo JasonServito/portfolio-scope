@@ -6,10 +6,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/auth/authorization", async () => {
-  const original =
-    await vi.importActual<typeof import("@/lib/auth/authorization")>(
-      "@/lib/auth/authorization",
-    );
+  const original = await vi.importActual<
+    typeof import("@/lib/auth/authorization")
+  >("@/lib/auth/authorization");
   return { ...original, requireApiAdmin: mocks.requireApiAdmin };
 });
 
@@ -39,9 +38,7 @@ describe("admin diagnostics route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe(
-      "no-store, max-age=0",
-    );
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
     await expect(response.json()).resolves.toMatchObject({
       services: { database: { status: "ok" } },
     });

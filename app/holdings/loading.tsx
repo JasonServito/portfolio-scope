@@ -7,8 +7,8 @@ export default function HoldingsLoading() {
   return (
     <AppLayout>
       <PageShell
-        description="Loading portfolio positions and period returns."
-        eyebrow="Portfolio"
+        description="Every position in the sample portfolio, with its cost, value, and return over each period"
+        eyebrow="North Star Portfolio · Read-only demo"
         title="Holdings"
       >
         <Card>

@@ -1,85 +1,136 @@
 # PortfolioScope Production Runbook
 
-This runbook covers the M11 deployment foundation through M16 production readiness: Vercel hosting, Neon PostgreSQL, environment separation, the deterministic demo, CI, health checks, monitoring, domain setup, Auth.js, GitHub and Google OAuth, database sessions, owner-scoped private resources, SEC/R2 activation, Redis, signed QStash jobs, recurring maintenance, structured diagnostics, privacy-safe analytics, security controls, logical backups, non-production recovery drills, release verification, and rollback.
+This runbook covers the M11 deployment foundation through the M18/M27 AI
+research path and M26 earnings sync: Vercel hosting, Neon PostgreSQL,
+environment separation, the
+deterministic demo, CI, health checks, monitoring, domain setup, Auth.js, OAuth,
+database sessions, owner-scoped private resources, SEC/R2 activation, Redis,
+signed QStash jobs, maintenance, diagnostics, analytics, security, backups,
+recovery, release verification, evidence-grounded model activation, budgets,
+and rollback.
 
-External AI and later product milestones remain outside this runbook. Account-side monitors, a real backup upload, a restore drill, and rollback must still be activated and evidenced by an operator; repository automation alone does not prove those external outcomes.
+The Production application rollout and the 25-company SEC financial-data
+backfill are complete. The account-side activation evidence for M26 earnings,
+M27 AI research, SEC ingestion, logical backup, Sentry release mapping, and the
+final application smoke test is recorded below. Cloudflare dashboard credential
+hardening and direct Upstash schedule inventory remain explicitly deferred,
+non-blocking follow-up work; earlier default-off notes remain where useful as
+historical gate context.
 
 ## Service inventory and cost
 
-| Service | M11 purpose | Initial tier | Expected monthly change |
-| --- | --- | --- | ---: |
-| Vercel | Next.js production and preview deployments | Hobby, while non-commercial terms apply | $0 |
-| Neon | Separate production and non-production PostgreSQL | Free | $0 |
-| GitHub Actions | Pull-request and main-branch validation | Public-repository allowance | $0 |
-| Sentry | Initial client and server error capture | Free | $0 |
-| Better Stack | Homepage and health uptime checks | Free | $0 |
-| Auth.js | GitHub/Google OAuth and database session management | Open source | $0 |
-| Cloudflare | Domain registration and DNS | Domain registration only | About $1–2, annualized |
-| Cloudflare R2 | Private raw SEC submissions and Company Facts | Free allowance | $0 expected |
-| SEC EDGAR | Authoritative submissions, filings, and Company Facts | Public access | $0 |
-| TradingView | Attributed public market chart widget | Free public widget | $0 |
-| Upstash Redis | Ephemeral caches, locks, and rate limits | Free | $0 expected |
-| Upstash QStash | Signed background delivery and two bounded schedules | Free | $0 expected |
-| PostHog | Explicit privacy-safe product events | Free | $0 expected |
-| Playwright | Critical browser journeys in GitHub Actions | Open source | $0 |
+M33 release note: apply `20260923120000_m33_claim_verification` with the existing
+approved remote migration procedure before deploying the application update.
+The change adds one bounded `CLAIM_VERIFICATION` operation using the current
+model and AI switch; budgets and environment variables are unchanged. Include
+that operation's request ID, full token tuple, and cost in any approved Preview
+or Production reconciliation. A completed unverified report may retain an
+`UNCONFIRMED` verifier charge; preserve the reservation and use the existing
+operator reconciliation procedure before resuming spend. Do not rerun the
+verifier to resolve accounting uncertainty. `npm run research:evaluate` checks
+the pinned offline regression baseline; human source/advice review remains an
+activation gate. This repository work does not deploy or reactivate services.
 
-Expected M11–M16 monthly infrastructure total: approximately `$1–2 USD`, entirely from the annualized domain cost while R2, Upstash, Sentry, Better Stack, PostHog, and CI remain inside their reviewed free allowances. The backup retention policy is 7 daily, 4 weekly, and 3 monthly objects. Do not enable a paid tier or uncapped usage without updating this table and the project cost review.
+| Service              | Purpose                                               | Initial tier                            | Expected monthly change |
+| -------------------- | ----------------------------------------------------- | --------------------------------------- | ----------------------: |
+| Vercel               | Next.js production and preview deployments            | Hobby, while non-commercial terms apply |                      $0 |
+| Neon                 | Separate production and non-production PostgreSQL     | Free                                    |                      $0 |
+| GitHub Actions       | Pull-request and main-branch validation               | Public-repository allowance             |                      $0 |
+| Sentry               | Initial client and server error capture               | Free                                    |                      $0 |
+| Better Stack         | Homepage and health uptime checks                     | Free                                    |                      $0 |
+| Auth.js              | GitHub/Google OAuth and database session management   | Open source                             |                      $0 |
+| Cloudflare           | Domain registration and DNS                           | Domain registration only                |  About $1–2, annualized |
+| Cloudflare R2        | Private raw SEC JSON and 10-K/10-Q primary documents  | Free allowance                          |             $0 expected |
+| SEC EDGAR            | Authoritative submissions, filings, and Company Facts | Public access                           |                      $0 |
+| TradingView          | Attributed public market chart widget                 | Free public widget                      |                      $0 |
+| EarningsAPI.com      | Guarded normalized upcoming-earnings observations     | Free, published 1,000 requests/month    |             $0 expected |
+| Upstash Redis        | Ephemeral caches, locks, and rate limits              | Free                                    |             $0 expected |
+| Upstash QStash       | Signed background delivery and two bounded schedules  | Free                                    |             $0 expected |
+| PostHog              | Explicit privacy-safe product events                  | Free                                    |             $0 expected |
+| Playwright           | Critical browser journeys in GitHub Actions           | Open source                             |                      $0 |
+| OpenAI Responses API | Guarded evidence interpretation                       | Usage-based                             |  Application maximum $5 |
+
+Expected non-AI monthly infrastructure total: approximately `$1-2 USD`,
+primarily the annualized domain cost while the reviewed free allowances hold.
+The M18 application hard maximum is `$5 USD` per UTC month, so the estimated
+configured maximum total is approximately `$6-7 USD`, below the `$30 USD`
+project limit. The M27 model is pinned to
+`gpt-5.4-mini-2026-03-17`; official rates reviewed 2026-08-25 were `$0.75`
+input, `$0.075` cached input, and `$4.50` output per million tokens. Recheck
+current pricing and deprecation status immediately before a live call and
+reconcile the actual provider invoice. The backup retention policy is 7 daily,
+4 weekly, and 3 monthly objects. Do not enable an uncapped paid tier.
 
 ## Environment matrix
 
 Configure each environment independently. Never copy production database credentials into Preview.
 
-| Variable | Local | Preview | Production | Secret |
-| --- | --- | --- | --- | ---: |
-| `DATABASE_URL` | Local pooled/runtime URL | Non-production Neon pooled URL | Production Neon pooled URL | Yes |
-| `DIRECT_URL` | Local direct URL | Non-production Neon direct URL | Production Neon direct URL | Yes |
-| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Stable staging URL or current preview origin | Canonical HTTPS origin | No |
-| `AUTH_SECRET` | Unique local secret | Unique Preview secret | Unique Production secret | Yes |
-| `AUTH_TRUST_HOST` | `true` | `true` after host review | `true` for the canonical deployment host | No |
-| `AUTH_GITHUB_ID` | Local GitHub OAuth app | Staging GitHub OAuth app | Production GitHub OAuth app | Treat as configuration |
-| `AUTH_GITHUB_SECRET` | Local GitHub secret | Staging GitHub secret | Production GitHub secret | Yes |
-| `AUTH_GOOGLE_ID` | Local Google OAuth client | Staging Google OAuth client | Production Google OAuth client | Treat as configuration |
-| `AUTH_GOOGLE_SECRET` | Local Google secret | Staging Google secret | Production Google secret | Yes |
-| `AUTH_GOOGLE_ENABLED` | Explicit local choice | `false` until callback proof | Explicit Production choice | No |
-| `DEMO_USER_EMAIL` | Dedicated demo identity | Dedicated non-production demo identity | Dedicated production demo identity | No |
-| `SEC_USER_AGENT` | `PortfolioScope/1.0` | Environment-identifying app name | Production-identifying app name | No |
-| `SEC_CONTACT_EMAIL` | Monitored developer contact | Monitored operator contact | Monitored production contact | Treat as contact configuration |
-| `R2_ACCOUNT_ID` | Development account | Non-production account | Production account | Treat as server configuration |
-| `R2_ACCESS_KEY_ID` | Development bucket token | Preview bucket token | Production bucket token | Yes |
-| `R2_SECRET_ACCESS_KEY` | Development bucket secret | Preview bucket secret | Production bucket secret | Yes |
-| `R2_BUCKET_NAME` | Development bucket | Isolated Preview bucket | Private Production bucket | Treat as server configuration |
-| `R2_ENDPOINT` | Blank or local-compatible endpoint | Blank unless overridden | Blank unless overridden | No |
-| `SEC_LOCAL_MANUAL_INGESTION_ENABLED` | `false`; temporarily `true` for controlled localhost validation | Always `false` | Always `false` | No |
-| `UPSTASH_REDIS_REST_URL` | Blank unless testing jobs | Non-production Redis REST URL | Production Redis REST URL | Treat as server configuration |
-| `UPSTASH_REDIS_REST_TOKEN` | Blank unless testing jobs | Non-production Redis token | Production Redis token | Yes |
-| `QSTASH_TOKEN` | Blank unless testing jobs | Non-production QStash token | Production QStash token | Yes |
-| `QSTASH_CURRENT_SIGNING_KEY` | Blank unless testing jobs | Non-production current key | Production current key | Yes |
-| `QSTASH_NEXT_SIGNING_KEY` | Blank unless testing jobs | Non-production next key | Production next key | Yes |
-| `BACKGROUND_JOBS_ENABLED` | `false` until configured | `false` until callback proof | `false` until callback proof | No |
-| `SEC_INGESTION_ENABLED` | `false` until configured | Independent opt-in | Independent opt-in | No |
-| `PUBLIC_STOCK_PAGES_ENABLED` | Explicit local choice | Independent opt-in | Independent opt-in | No |
-| `RESEARCH_GENERATION_ENABLED` | `false` until configured | Independent opt-in | Independent opt-in | No |
-| `AI_RESEARCH_ENABLED` | `false` | `false` | `false` until M18 | No |
-| `PORTFOLIO_EXPORT_ENABLED` | `false` | `false` | `false` until implemented | No |
-| `MAINTENANCE_MODE` | `false` | `false` | Emergency kill switch | No |
-| `SENTRY_DSN` | Blank or development project | Preview project/DSN | Production project/DSN | Treat as server configuration |
-| `NEXT_PUBLIC_SENTRY_DSN` | Blank or development project | Preview project/DSN | Production project/DSN | No; DSNs are client-visible |
-| `SENTRY_ENVIRONMENT` | `local` | `preview` | `production` | No |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | `local` | `preview` | `production` | No |
-| `SENTRY_RELEASE` / `NEXT_PUBLIC_SENTRY_RELEASE` | Blank or local revision | Same Preview commit SHA | Same Production commit SHA | No |
-| `SENTRY_TRACES_SAMPLE_RATE` / `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | `0` | Reviewed value from `0` to `1` | Reviewed value from `0` to `1` | No |
-| `SENTRY_ORG` | Blank unless uploading source maps | Sentry organization slug | Sentry organization slug | No |
-| `SENTRY_PROJECT` | Blank unless uploading source maps | Preview project slug | Production project slug | No |
-| `SENTRY_AUTH_TOKEN` | Blank | Build-only token | Build-only token | Yes |
-| `NEXT_PUBLIC_POSTHOG_KEY` | Blank or development project key | Preview project key | Production project key | No; client-visible |
-| `NEXT_PUBLIC_POSTHOG_HOST` | Blank or assigned regional host | Assigned regional host | Assigned regional host | No |
-| `BETTER_STACK_WORKER_HEARTBEAT_URL` | Blank | Preview heartbeat URL | Production heartbeat URL | Yes |
-| `BETTER_STACK_BACKUP_HEARTBEAT_URL` | Blank | Preview heartbeat URL | Production heartbeat URL | Yes |
-| `BETTER_STACK_BACKUP_FAILURE_HEARTBEAT_URL` | Blank | Preview failure URL | Production failure URL | Yes |
-| `LAST_RESTORE_DRILL_AT` | Blank | ISO-8601 completion time | Last approved non-production drill time | No |
-| `LAST_RESTORE_DRILL_REFERENCE` | Blank | Non-secret evidence reference | Non-secret evidence reference | No |
-| `LAST_COST_REVIEW_AT` | Blank | ISO-8601 review time | Latest monthly review time | No |
-| `LAST_COST_REVIEW_REFERENCE` | Blank | Non-secret evidence reference | Non-secret evidence reference | No |
+| Variable                                                              | Local                                                           | Preview                                          | Production                                   |                         Secret |
+| --------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- | -----------------------------: |
+| `DATABASE_URL`                                                        | Local pooled/runtime URL                                        | Non-production Neon pooled URL                   | Production Neon pooled URL                   |                            Yes |
+| `DIRECT_URL`                                                          | Local direct URL                                                | Non-production Neon direct URL                   | Production Neon direct URL                   |                            Yes |
+| `NEXT_PUBLIC_APP_URL`                                                 | `http://localhost:3000`                                         | Stable staging URL or current preview origin     | Canonical HTTPS origin                       |                             No |
+| `AUTH_SECRET`                                                         | Unique local secret                                             | Unique Preview secret                            | Unique Production secret                     |                            Yes |
+| `AUTH_TRUST_HOST`                                                     | `true`                                                          | `true` after host review                         | `true` for the canonical deployment host     |                             No |
+| `AUTH_GITHUB_ID`                                                      | Local GitHub OAuth app                                          | Staging GitHub OAuth app                         | Production GitHub OAuth app                  |         Treat as configuration |
+| `AUTH_GITHUB_SECRET`                                                  | Local GitHub secret                                             | Staging GitHub secret                            | Production GitHub secret                     |                            Yes |
+| `AUTH_GOOGLE_ID`                                                      | Local Google OAuth client                                       | Staging Google OAuth client                      | Production Google OAuth client               |         Treat as configuration |
+| `AUTH_GOOGLE_SECRET`                                                  | Local Google secret                                             | Staging Google secret                            | Production Google secret                     |                            Yes |
+| `AUTH_GOOGLE_ENABLED`                                                 | Explicit local choice                                           | `false` until callback proof                     | Explicit Production choice                   |                             No |
+| `DEMO_USER_EMAIL`                                                     | Dedicated demo identity                                         | Dedicated non-production demo identity           | Dedicated production demo identity           |                             No |
+| `SEC_USER_AGENT`                                                      | `PortfolioScope/1.0`                                            | Environment-identifying app name                 | Production-identifying app name              |                             No |
+| `SEC_CONTACT_EMAIL`                                                   | Monitored developer contact                                     | Monitored operator contact                       | Monitored production contact                 | Treat as contact configuration |
+| `R2_ACCOUNT_ID`                                                       | Development account                                             | Non-production account                           | Production account                           |  Treat as server configuration |
+| `R2_ACCESS_KEY_ID`                                                    | Development bucket token                                        | Preview bucket token                             | Production bucket token                      |                            Yes |
+| `R2_SECRET_ACCESS_KEY`                                                | Development bucket secret                                       | Preview bucket secret                            | Production bucket secret                     |                            Yes |
+| `R2_BUCKET_NAME`                                                      | Development bucket                                              | Isolated Preview bucket                          | Private Production bucket                    |  Treat as server configuration |
+| `R2_ENDPOINT`                                                         | Blank or local-compatible endpoint                              | Blank unless overridden                          | Blank unless overridden                      |                             No |
+| `SEC_LOCAL_MANUAL_INGESTION_ENABLED`                                  | `false`; temporarily `true` for controlled localhost validation | Always `false`                                   | Always `false`                               |                             No |
+| `UPSTASH_REDIS_REST_URL`                                              | Blank unless testing jobs                                       | Non-production Redis REST URL                    | Production Redis REST URL                    |  Treat as server configuration |
+| `UPSTASH_REDIS_REST_TOKEN`                                            | Blank unless testing jobs                                       | Non-production Redis token                       | Production Redis token                       |                            Yes |
+| `QSTASH_TOKEN`                                                        | Blank unless testing jobs                                       | Non-production QStash token                      | Production QStash token                      |                            Yes |
+| `QSTASH_URL`                                                          | Blank unless a regional API origin is required                  | Regional QStash HTTPS API origin when needed     | Regional QStash HTTPS API origin when needed |                             No |
+| `QSTASH_CURRENT_SIGNING_KEY`                                          | Blank unless testing jobs                                       | Non-production current key                       | Production current key                       |                            Yes |
+| `QSTASH_NEXT_SIGNING_KEY`                                             | Blank unless testing jobs                                       | Non-production next key                          | Production next key                          |                            Yes |
+| `VERCEL_AUTOMATION_BYPASS_SECRET`                                     | Blank                                                           | Required automation bypass for protected Preview | Blank; ignored by job publishing             |                            Yes |
+| `BACKGROUND_JOBS_ENABLED`                                             | `false` until configured                                        | `false` until callback proof                     | `true`                                       |                             No |
+| `SEC_INGESTION_ENABLED`                                               | `false` until configured                                        | Independent opt-in                               | `true`                                       |                             No |
+| `SEC_FILING_TEXT_ENABLED`                                             | `false` unless validating filing text                           | `false` until the M31 approval is recorded       | `false` until the M31 approval is recorded   |                             No |
+| `SEC_CURRENT_REPORTS_ENABLED`                                         | `false` unless validating current reports                       | `false` until the M32 approval is recorded       | `false` until the M32 approval is recorded   |                             No |
+| `PUBLIC_STOCK_PAGES_ENABLED`                                          | Explicit local choice                                           | Independent opt-in                               | Independent opt-in                           |                             No |
+| `RESEARCH_GENERATION_ENABLED`                                         | `false` until configured                                        | Independent opt-in                               | `true`                                       |                             No |
+| `AI_RESEARCH_ENABLED`                                                 | `false`                                                         | `false` until controlled proof                   | `true`                                       |                             No |
+| `EARNINGS_SYNC_ENABLED`                                               | `false`                                                         | Always `false`                                   | `true`                                       |                             No |
+| `EARNINGS_API_KEY`                                                    | Blank                                                           | Blank                                            | Server-only Production key                   |                            Yes |
+| `OPENAI_API_KEY`                                                      | Blank by default                                                | Environment-scoped key only for proof            | Separate Production key                      |                            Yes |
+| `OPENAI_RESEARCH_MODEL`                                               | Pinned `gpt-5.4-mini-2026-03-17`                                | Pinned `gpt-5.4-mini-2026-03-17`                 | Pinned `gpt-5.4-mini-2026-03-17`             |                             No |
+| `AI_MONTHLY_BUDGET_USD`                                               | `5` maximum                                                     | `5` maximum, preferably lower for proof          | `5` maximum                                  |                             No |
+| `AI_USER_MONTHLY_BUDGET_USD`                                          | `1` maximum                                                     | `1` maximum                                      | `1` maximum                                  |                             No |
+| `AI_MAX_COST_PER_JOB_USD`                                             | `0.25` maximum                                                  | `0.25` maximum                                   | `0.25` maximum                               |                             No |
+| `AI_MAX_TOKENS_PER_JOB`                                               | `50000` maximum                                                 | `50000` maximum                                  | `50000` maximum                              |                             No |
+| `AI_MAX_OUTPUT_TOKENS_PER_CALL`                                       | `1500`                                                          | Reviewed bound                                   | Reviewed bound                               |                             No |
+| `AI_PROVIDER_TIMEOUT_MS`                                              | `20000`                                                         | At most `25000`                                  | At most `25000`                              |                             No |
+| `AI_USER_MONTHLY_REPORT_LIMIT`                                        | `5`                                                             | Reviewed quota                                   | Reviewed quota                               |                             No |
+| `PORTFOLIO_EXPORT_ENABLED`                                            | `false`                                                         | `false`                                          | `false` until implemented                    |                             No |
+| `MAINTENANCE_MODE`                                                    | `false`                                                         | `false`                                          | Emergency kill switch                        |                             No |
+| `SENTRY_DSN`                                                          | Blank or development project                                    | Preview project/DSN                              | Production project/DSN                       |  Treat as server configuration |
+| `NEXT_PUBLIC_SENTRY_DSN`                                              | Blank or development project                                    | Preview project/DSN                              | Production project/DSN                       |    No; DSNs are client-visible |
+| `SENTRY_ENVIRONMENT`                                                  | `local`                                                         | `preview`                                        | `production`                                 |                             No |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT`                                      | `local`                                                         | `preview`                                        | `production`                                 |                             No |
+| `SENTRY_RELEASE` / `NEXT_PUBLIC_SENTRY_RELEASE`                       | Blank or local revision                                         | Same Preview commit SHA                          | Unset; fall back to `VERCEL_GIT_COMMIT_SHA`  |                             No |
+| `SENTRY_TRACES_SAMPLE_RATE` / `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | `0`                                                             | Reviewed value from `0` to `1`                   | Reviewed value from `0` to `1`               |                             No |
+| `SENTRY_ORG`                                                          | Blank unless uploading source maps                              | Sentry organization slug                         | Sentry organization slug                     |                             No |
+| `SENTRY_PROJECT`                                                      | Blank unless uploading source maps                              | Preview project slug                             | Production project slug                      |                             No |
+| `SENTRY_AUTH_TOKEN`                                                   | Blank                                                           | Build-only token                                 | Build-only token                             |                            Yes |
+| `NEXT_PUBLIC_POSTHOG_KEY`                                             | Blank or development project key                                | Preview project key                              | Production project key                       |             No; client-visible |
+| `NEXT_PUBLIC_POSTHOG_HOST`                                            | Blank or assigned regional host                                 | Assigned regional host                           | Assigned regional host                       |                             No |
+| `BETTER_STACK_WORKER_HEARTBEAT_URL`                                   | Blank                                                           | Preview heartbeat URL                            | Production heartbeat URL                     |                            Yes |
+| `BETTER_STACK_BACKUP_HEARTBEAT_URL`                                   | Blank                                                           | Preview heartbeat URL                            | Production heartbeat URL                     |                            Yes |
+| `BETTER_STACK_BACKUP_FAILURE_HEARTBEAT_URL`                           | Blank                                                           | Preview failure URL                              | Production failure URL                       |                            Yes |
+| `LAST_RESTORE_DRILL_AT`                                               | Blank                                                           | ISO-8601 completion time                         | Last approved non-production drill time      |                             No |
+| `LAST_RESTORE_DRILL_REFERENCE`                                        | Blank                                                           | Non-secret evidence reference                    | Non-secret evidence reference                |                             No |
+| `LAST_COST_REVIEW_AT`                                                 | Blank                                                           | ISO-8601 review time                             | Latest monthly review time                   |                             No |
+| `LAST_COST_REVIEW_REFERENCE`                                          | Blank                                                           | Non-secret evidence reference                    | Non-secret evidence reference                |                             No |
 
 Rules:
 
@@ -100,6 +151,14 @@ Rules:
 - Redis and QStash credentials are server-only and must be different between
   Preview and Production. Redis is never authoritative for users, portfolios,
   financial facts, research reports, final job state, or audit events.
+- `OPENAI_API_KEY` is server-only and must be independently scoped for Preview
+  and Production. Do not expose provider prompts, evidence, request IDs, or the
+  key through readiness, client variables, analytics, or application logs.
+- The external model receives only bounded public-company evidence. Holdings,
+  quantities, values, allocations, cost basis, alerts, notes, email, sessions,
+  and `userId` remain outside the provider request.
+- PostgreSQL owns AI budget reservations and settled/unconfirmed usage. Redis
+  rate limits supplement but never replace global, user, and job accounting.
 - Keep all M15 flags `false` until the stable HTTPS origin and signed worker
   callback have been verified in that environment.
 - Every listed feature flag must be set explicitly in Production. An absent or
@@ -134,7 +193,7 @@ Do not run `prisma db push` against either hosted database.
 ### 2. Create the Vercel project
 
 1. Import the GitHub repository into Vercel.
-2. Select Next.js and Node.js `20.19` or newer.
+2. Select Next.js and Node.js `24.x`.
 3. Keep `npm ci` as the install command and `npm run build` as the build command.
 4. Set `main` as the Production branch.
 5. Keep pull-request Preview deployments enabled.
@@ -151,9 +210,17 @@ From a trusted operator environment with production `DATABASE_URL` and `DIRECT_U
 npm ci
 npm run db:generate
 npx prisma validate
-npm run db:deploy
-npm run db:seed
+MIGRATION_TARGET=production \
+MIGRATION_CONFIRMATION=APPLY_PRODUCTION_MIGRATIONS \
+npm run db:deploy:approved
+MIGRATION_TARGET=production \
+MIGRATION_CONFIRMATION=SEED_PRODUCTION_DATABASE \
+npm run db:seed:approved
 ```
+
+The approved commands are an execution guard, not a substitute for migration
+review and human release approval. Routine `db:deploy`, `db:migrate`, `db:seed`,
+and `verify:db` commands refuse remote database hosts.
 
 The seed uses deterministic upserts, updates only the marked demo identity and shared seeded catalog, and does not delete non-demo users. It can adopt a verified legacy demo owner at `DEMO_USER_EMAIL` without rewriting that user's primary key. It aborts on multiple markers, an unexpected configured-email owner, a conflicting stable ID, or deterministic alert/research IDs owned by another user. Changing `DEMO_USER_EMAIL` updates only the already marked identity when the new address is unclaimed. `npm run test:integration` is intentionally blocked when `NODE_ENV` or `VERCEL_ENV` is `production`; run that check only against local or Preview databases.
 
@@ -165,6 +232,46 @@ idempotent seed after deployment to create/link the 25-company registry; the
 seed performs no network or R2 access. Existing unsupported securities remain
 valid. After a real backfill, preserve the SEC tables and use a forward fix
 rather than dropping facts or raw-object references.
+
+M18 migrations `20260811120000_m18_ai_research_foundation` and
+`20260811130000_m18_bind_ai_generation_config` follow the existing auth,
+isolation, SEC, and durable-job migrations. Apply them with
+`AI_RESEARCH_ENABLED=false`. It adds nullable research provenance/version fields
+and new budget, usage, claim, and evidence tables. It requires no seed or data
+backfill, and it leaves historical reports classified as deterministic. Preserve
+these additive records during rollback so usage can be reconciled.
+
+M27 migration `20260824120000_m27_ai_usage_provider_tokens` follows M18 and is
+also additive. It retains reasoning and provider-declared total tokens for each
+new metered attempt without inventing values for historical rows. Apply it with
+external AI disabled and preserve it during rollback for reconciliation.
+
+M29 migration `20260922120000_m29_derived_evidence_kind` follows M27 and only
+adds the `DERIVED` value to the `EvidenceSourceKind` enum for deterministic
+derived-metric and structured-table evidence. It touches no rows, requires no
+backfill, and is safe to apply with external AI disabled. Research jobs queued
+under the earlier prompt/retrieval versions fail closed after deployment by
+design; requeue them rather than editing persisted snapshots.
+
+M30 migration `20260922180000_m30_specialist_contracts` follows M29 and is
+additive: it creates the `AgentAvailability` and `ResearchClaimKind` enums and
+adds nullable `AgentRun.availability`, `ResearchClaim.kind`,
+`ResearchReport.evidenceCoverageJson`, and `ResearchReport.whatWouldChangeJson`
+columns. It touches no rows, requires no backfill, leaves historical runs and
+claims unlabelled rather than inventing values, and is safe to apply with
+external AI disabled. New jobs schedule four specialists (News, Financials,
+Competitors, Risk); jobs queued under the M29 prompt/output-schema versions
+fail closed after deployment by design.
+
+Historical M18 repository/local verification (2026-08-11) successfully applied
+both M18 migrations. Current M27 local verification (2026-08-25) found all 11
+repository migrations applied with none pending and passed all 15 dedicated AI
+database cases. They cover JSONB snapshot integrity, recorded and zero-network
+metered end-to-end persistence/privacy, citation-safe partial fallback, fresh
+reuse, the UTC-day boundary, explicit regeneration, active-run deduplication,
+complete provider-usage reconciliation, legacy hard caps, and concurrent
+global/user/job budget enforcement. This does not verify the Preview or
+Production migration state or any live external provider.
 
 ### 4. Deploy and promote
 
@@ -470,6 +577,100 @@ schedule or broad-backfill endpoint; after M15 activation, the bounded
 freshness schedule queues at most five stale companies per pass. Keep the
 schedule disabled until this controlled path is proven.
 
+### 5. Enable filing text evidence (M31)
+
+`SEC_FILING_TEXT_ENABLED` extends SEC usage to each supported company's latest
+10-K and 10-Q primary document on SEC Archives and stores those documents in
+the private R2 bucket. Enabling it in an environment is the Level 2 decision
+recorded in `docs/task-backlog-part-3.md` (M31 prerequisites): record the
+approval for the Archives usage, the additive
+`20260922230000_m31_filing_text_evidence` migration, and the expected R2
+growth before setting the flag.
+
+1. Apply the migration with the approved remote procedure and keep the flag
+   `false`. The migration is additive and needs no backfill.
+2. Set `SEC_FILING_TEXT_ENABLED=true` only where `SEC_INGESTION_ENABLED` and
+   signed background delivery are already proven.
+3. Trigger one ingestion for one ticker (the same admin request as step 3).
+   After the fact refresh completes, its result lists at most two queued
+   `SEC_FILING_FETCH` jobs, one per latest 10-K and 10-Q. Follow them in
+   `/admin`; each completes with the extracted section kinds and passage count,
+   or ends `PARTIALLY_COMPLETED`/`FAILED` with a sanitized code such as
+   `SEC_FILING_SECTIONS_NOT_FOUND` when a heading could not be located.
+4. Inspect the filing state without exposing object keys:
+
+   ```bash
+   docker compose exec postgres psql -U portfolio_scope -d portfolio_scope -c 'SELECT f."accessionNumber", f."formType", e.status, e."parserVersion", e."extractedSections", e."truncatedSections", e."chunkCount", e."errorCode", e."attemptedAt" FROM "SecFilingExtraction" e JOIN "SecFiling" f ON f.id = e."filingId" ORDER BY e."attemptedAt" DESC LIMIT 10;'
+   ```
+
+5. Confirm one new `FILING_DOCUMENT` object per fetched filing in R2 and
+   record the stored bytes. Then let the twice-daily stale-SEC schedule queue
+   the remaining companies (at most five per pass); a company whose latest
+   filings are already extracted queues nothing.
+
+A failed fetch is retried through the job's bounded attempts, and a filing
+left failed by a transient outage is queued again by a later refresh (at most
+one job per filing per six-hour bucket); a document whose expected headings
+cannot be found stays failed until a parser update or an administrator retry.
+Neither blocks fact ingestion or page rendering. To stop the capability, set
+the flag back to `false`: no page reads SEC or R2, and stored passages remain
+usable by research until they are deliberately removed.
+
+### 6. Enable current-report events (M32)
+
+`SEC_CURRENT_REPORTS_ENABLED` keeps twelve months of each supported company's
+Form 8-K metadata with item codes and fetches the Exhibit 99.1 press release
+of each Item 2.02 results filing from SEC Archives (the filing index page,
+then the exhibit) into the private R2 bucket. Enabling it in an environment
+is the Level 2 decision recorded in `docs/task-backlog-part-3.md` (M32
+prerequisites), separate from the M31 approval: record the approval for the
+8-K metadata and exhibit ingestion, the additive
+`20260923120000_m32_current_report_events` migration, and the expected R2
+growth before setting the flag. The flag is independent of
+`SEC_FILING_TEXT_ENABLED`; either can be on without the other.
+
+1. Apply the migration with the approved remote procedure and keep the flag
+   `false`. The migration is additive (an empty item-code list on existing
+   filings and a new section kind) and needs no backfill.
+2. Set `SEC_CURRENT_REPORTS_ENABLED=true` only where `SEC_INGESTION_ENABLED`
+   and signed background delivery are already proven.
+3. Trigger one ingestion for one ticker (the same admin request as step 3 of
+   the SEC section). The fact refresh now retains the company's 8-Ks from the
+   last twelve months, and its result lists one queued `SEC_FILING_FETCH` job
+   per Item 2.02 8-K (about four). Follow them in `/admin`; each completes
+   with `PRESS_RELEASE` and its passage count, or ends `FAILED` with
+   `SEC_FILING_EXHIBIT_NOT_FOUND` when the filing index lists no `EX-99.1`
+   document, which is an explicit recorded state rather than a retry.
+4. Inspect the state with the same query as step 4 of the filing-text section;
+   8-K rows show `formType` `8-K` and the extracted section `PRESS_RELEASE`.
+5. Confirm one new `FILING_DOCUMENT` object per fetched exhibit in R2 and
+   record the stored bytes, then let the twice-daily stale-SEC schedule cover
+   the remaining companies. A company whose results filings are already
+   extracted queues nothing; a new 8-K queues one fetch on the next refresh.
+
+Research uses the stored reports on the next report generation: the News
+specialist lists the newest current reports with their filing dates and
+reports `NOT_AVAILABLE` for a company with none in the window. A job whose
+snapshot holds current reports runs News as a fourth model call after the
+other three specialists settle. Every specialist call reserves the configured
+per-call output maximum, and input reservations count tokens with the pinned
+model's encoding plus a 25% margin, never above the byte count. The earlier
+reduced M32 allowances (Financials 1,200, Risk 1,200, Competitors 900, News
+800) were removed after the 2026-09-24 Production report measured outputs of
+1,652, 1,508, and 1,333 tokens, which would have been truncated. Before
+enabling the flag in Production, compare each call's settled output plus
+reasoning tokens (`AiUsage`) with `AI_MAX_OUTPUT_TOKENS_PER_CALL`: a provider
+response that hits `max_output_tokens` is recorded `UNCONFIRMED` and blocks
+further AI reservations until reconciled, so if any call is within about 30
+percent of the maximum, raise it (up to the 8,000-token schema ceiling) before
+activation. If a first-stage specialist ends `FAILED`,
+the deferred News run stays pending and the job remains partial exactly as
+for any failed specialist; an administrator retry of the failed specialist
+queues News. To stop the capability, set the flag back to `false`: 8-K
+metadata is no longer retained or fetched, stored rows and passages remain
+readable by research until they are deliberately removed, and nothing reads
+SEC or R2 at page time.
+
 ### Failure and recovery
 
 - Missing SEC/R2 configuration fails the run without exposing variable names or
@@ -501,8 +702,13 @@ rows deliberately; the second migration adds a partial unique index and will
 stop rather than guess which user request to retain.
 
 ```bash
-npm run db:deploy
+MIGRATION_TARGET=preview \
+MIGRATION_CONFIRMATION=APPLY_PREVIEW_MIGRATIONS \
+npm run db:deploy:approved
 ```
+
+For Production, repeat only after human release approval with target
+`production` and confirmation `APPLY_PRODUCTION_MIGRATIONS`.
 
 Confirm `20260721115500_m15_job_enum_extensions` completes before
 `20260721120000_m15_caching_jobs_resilience`. The first commits the new research
@@ -512,15 +718,25 @@ indexes. No seed or data backfill is required.
 ### 2. Configure isolated Upstash resources
 
 Create separate Preview and Production Redis databases and QStash credentials.
-Set all five Upstash secrets from `.env.example` in the matching server
-environment. Set `NEXT_PUBLIC_APP_URL` to that environment's stable HTTPS
-origin; QStash signs the full callback URL, so a mismatched host causes a
-controlled `401`.
+Set the five Upstash secrets from `.env.example` in the matching server
+environment. If an account uses a regional QStash API endpoint, also set
+`QSTASH_URL` to its credential-free HTTPS origin; leave it blank to preserve the
+SDK default. Set `NEXT_PUBLIC_APP_URL` to that environment's stable HTTPS origin;
+QStash signs the full callback URL, so a mismatched host causes a controlled
+`401`. For a Vercel Preview protected by Deployment Protection, also set the
+server-only `VERCEL_AUTOMATION_BYPASS_SECRET`. Preview publishes forward it as
+`x-vercel-protection-bypass` and instruct QStash to redact that header; missing
+or malformed values stop publishing before QStash accepts a message. Production
+publishes never forward this variable.
 
 The Redis keys are prefixed by environment and private identifiers are hashed.
-Cache failure degrades to the provider or PostgreSQL where safe. Mutation,
-research, and admin rate limits fail closed because silently losing an abuse
-boundary is unsafe.
+Cache failure degrades to the provider or PostgreSQL where safe. Ordinary
+authenticated portfolio, holding, watchlist, and alert mutations fall back to a
+stricter process-local 20-request-per-minute user and IP limit when Redis is
+unavailable; this keeps basic CRUD usable without disabling abuse controls.
+Restore Redis promptly because the fallback is not shared across application
+instances. Research, administrator, and worker mutation limits still fail
+closed, and public stock reads retain their existing fail-open policy.
 
 ### 3. Prove signed delivery before enabling publishers
 
@@ -563,10 +779,10 @@ npm run jobs:schedules
 The fixed IDs make the operation repeatable: rerunning overwrites those two
 schedules instead of creating duplicates.
 
-| Schedule ID | UTC cadence | Bound |
-|---|---|---|
-| `portfolioscope-recover-stale-jobs` | Hourly at minute 0 | At most 100 stale running jobs examined |
-| `portfolioscope-refresh-stale-sec` | 02:15 and 14:15 daily | At most 5 missing or >24-hour stale companies queued per run |
+| Schedule ID                         | UTC cadence           | Bound                                                        |
+| ----------------------------------- | --------------------- | ------------------------------------------------------------ |
+| `portfolioscope-recover-stale-jobs` | Hourly at minute 0    | At most 100 stale running jobs examined                      |
+| `portfolioscope-refresh-stale-sec`  | 02:15 and 14:15 daily | At most 5 missing or >24-hour stale companies queued per run |
 
 Do not create a per-company high-frequency schedule. Review Redis commands,
 QStash deliveries, and Vercel function usage monthly; pause the two schedules
@@ -590,9 +806,266 @@ before any usage can exceed the free allowances.
   its queued/retrying siblings and parent request coherently. A running child
   must observe the cancelled parent or finish safely; permanent writes are not
   interrupted halfway.
-- For rollback, disable SEC and research first, then background publishing;
-  pause the two named schedules; preserve job rows; and forward-fix the
-  additive schema.
+- For rollback, disable SEC and research first (including
+  `SEC_FILING_TEXT_ENABLED` and `SEC_CURRENT_REPORTS_ENABLED`), then
+  background publishing; pause the two named
+  schedules; preserve job rows; and forward-fix the additive schema.
+
+## M27 Preview-only validation of M18 external AI
+
+This section preserves the original Preview-only validation procedure. Its
+restriction against Production activation applied at that stage; the separately
+approved and completed Production result is recorded in the completion section
+and final rollout record below.
+
+M18 is a default-off interpretation layer over public evidence. SEC EDGAR fact
+excerpts and filing metadata, application catalog data, and deterministic signals
+remain the sources. OpenAI is not a financial-data source and the provider does
+not browse. Unsupported news and political-activity inputs remain explicit
+missing states. Generated output is educational and may not include buy, sell,
+or hold actions, stock-price targets/predictions, personalized instructions, or
+automated trading actions. Automated checks never replace mandatory human
+citation and financial-advice safety review.
+
+### 1. Satisfy prerequisites
+
+- Authentication and cross-user isolation tests pass.
+- The M14 migration, private R2 boundary, SEC identity, controlled company
+  ingestion, provenance links, and manual source review are verified.
+- M15 migrations, Redis limits, signed QStash callback, duplicate-work defense,
+  and deterministic specialist/synthesis completion are verified.
+- M16 monitoring, a backup, non-production restore, and a rollback target are
+  evidenced. Deployed M17 research/citation states are usable.
+- The `$5` global, `$1` user, `$0.25` job, and `50,000` token maximums and
+  current pinned-model pricing/deprecation status are approved.
+
+Repository implementation can be reviewed before those external prerequisites;
+external calls cannot be called active until they pass.
+
+### 2. Apply and verify the foundation
+
+1. Keep `AI_RESEARCH_ENABLED=false` and inspect migration status using the
+   isolated Preview direct URL. If both additive M18 migrations and the M27
+   provider-usage migration are already applied, do not redeploy them.
+2. Only if a required AI migration is absent, create and verify a Preview backup
+   and rollback target, then run the approved Preview migration:
+   `MIGRATION_TARGET=preview MIGRATION_CONFIRMATION=APPLY_PREVIEW_MIGRATIONS npm run db:deploy:approved`.
+3. Confirm all three AI migrations are applied in order and no Production
+   database was targeted.
+4. Using deterministic or recorded zero-network providers only, exercise
+   timeout, malformed-output, and kill-switch-before-repair behavior. These
+   failure drills must finish before live activation and must not consume the
+   single charged AAPL allowance.
+5. Run schema, type, unit, provider-contract, grounding, budget, reuse/diff, and
+   offline evaluation checks with deterministic/recorded providers.
+6. Verify old reports remain deterministic and do not gain invented provider or
+   version metadata.
+
+### 3. Configure the provider and limits
+
+Create only a separately scoped Preview OpenAI project/key during M27. Set the
+complete M18 variable set from `.env.example` in Preview. New work accepts only
+`gpt-5.4-mini-2026-03-17`. The hard maximums are `$5` global/month, `$1`
+user/month, `$0.25` per job, and 50,000 tokens per job; the checked-in defaults
+also use 2,000 output tokens per call (raised from 1,500 in M29), a 20-second
+timeout, and five user reports per UTC month. Runtime configuration may lower
+but cannot raise any hard maximum. Do not create or configure a Production key/project during M27.
+
+Open the provider console and record the reviewed pricing date/version and model
+deprecation status. Configure a provider-side alert or spending stop at or below
+the approved allowance. The application's versioned cost estimate and provider
+accounting are independent controls; neither should be treated as the other.
+
+### 4. Prove privacy, grounding, and accounting in Preview
+
+1. Review a recorded-provider case and the curated offline evaluation. Treat any
+   schema, grounding, recommendation, unsupported material claim, numerical, or
+   missing-data failure as a stop.
+2. Inspect the outbound request contract and confirm it contains only bounded
+   public-company evidence. It must not contain holdings, quantities, values,
+   allocations, cost basis, alerts, private notes/history, name, email, OAuth
+   identity, session data, or `userId`.
+3. Confirm provider prompts/evidence and secrets do not appear in logs, Sentry,
+   PostHog, diagnostics, readiness, or browser payloads.
+4. Enable `AI_RESEARCH_ENABLED=true` only in Preview after base background and
+   research flags are already proven. Request exactly one AAPL report for one
+   controlled user. No second charged report is permitted during M27.
+5. Review every material claim against its cited excerpt/source. Confirm
+   counter-evidence, disagreements, missing data, model/report versions, and the
+   source snapshot are visible and persisted.
+6. Match every provider request ID and response token count to the stored usage.
+   Recompute cost from the pinned rate tuple and require exact agreement after
+   the application's upward `$0.000001` rounding. In the isolated Preview
+   project/window, require the provider-console charge delta to be at most
+   `$0.01`. Any `UNCONFIRMED` usage or unrelated traffic fails the gate.
+7. Confirm a repeat reuses eligible work. Same-day regeneration and a changed
+   source/version fingerprint must return the daily-limit rejection without a
+   second external job or charged provider report. Active duplicates fan out
+   only once. These checks must not invoke the provider again.
+8. Immediately restore `AI_RESEARCH_ENABLED=false` after the report reaches a
+   terminal state and before any further attempt. Confirm the flag-off state,
+   ordinary stock/history usability, and the recorded zero-network proof that
+   the runner blocks the next initial or repair call. Do not perform another
+   metered attempt for timeout, malformed-output, or rollback evidence.
+
+### 5. Stop and record the separate Production decision gate
+
+Record the Preview job/report IDs, source-review notes, privacy evidence,
+version tuple, provider usage/charge, kill-switch result, reviewer, and rollback
+target, desktop/mobile review, and monitor results. Restore
+`AI_RESEARCH_ENABLED=false` and stop M27. Preview success does not authorize or
+establish Production readiness. The later Production steps required a new
+explicit approval. Do not create Production credentials, configure billing,
+migrate, deploy, enable a flag, or call the provider merely because Preview
+passes. The detailed methodology and rubric are in
+[`docs/ai-research.md`](docs/ai-research.md) and
+[`docs/ai-evaluation.md`](docs/ai-evaluation.md).
+
+### Production activation completion
+
+Production activation is complete. The Production migration state is current,
+one controlled `AAPL` research report completed successfully, AI usage and cost
+accounting reconciled, and ongoing enablement was approved. The active
+Production values are:
+
+```text
+BACKGROUND_JOBS_ENABLED=true
+RESEARCH_GENERATION_ENABLED=true
+AI_RESEARCH_ENABLED=true
+```
+
+Continued operation remains constrained to the pinned model and hard limits
+documented above. Recheck official pricing and deprecation status before a live
+model change or reactivation review. Automated validation does not replace
+human citation and financial-advice safety review. For an incident, set
+`AI_RESEARCH_ENABLED=false` first and follow **Job or cache failure** below;
+preserve additive AI usage records for reconciliation and forward-fix the
+schema.
+
+## M26 EarningsAPI.com activation
+
+The repository implementation is complete and validated Production live sync is
+enabled. The page reads normalized `UpcomingEarningsState` rows from PostgreSQL. Redis is
+ephemeral coordination only; an unavailable daily claim must prevent the
+provider request and must not prevent a valid observation inside the 72-hour
+fail-stale window from being displayed. Earnings reads and the existing
+maintenance workflow delete observations after that window.
+
+### Gate 6 caching/licensing evidence
+
+**Gate 6: COMPLETE (2026-08-24).** The operator reviewed the current official
+[EarningsAPI.com Terms & Conditions](https://www.earningsapi.com/terms),
+effective 2025-06-11; the official
+[watchlist monitor](https://www.earningsapi.com/docs/examples/watchlist-monitor),
+which selects the nearest future event and stores it with the symbol; the
+official
+[database and daily-sync guide](https://www.earningsapi.com/docs/examples/calendar-backfill-sync),
+which describes an earnings-calendar database, recurring refreshes, and stored
+responses; and the official
+[company earnings endpoint](https://www.earningsapi.com/docs/earnings), which
+records the Free limits of 60 requests/minute, 100/day, and 1,000/month.
+
+The terms permit retrieving and displaying earnings content in the operator's
+own application or website and prohibit republishing the proprietary data feed.
+M26 does not republish that feed: it validates each response, discards the raw
+payload, and stores only the normalized nearest future event date, normalized
+market session, source, and application fetch timestamps in PostgreSQL. That
+state is fresh through 36 hours, may be reused and labelled stale through 72
+hours, and is suppressed and pruned after 72 hours. Provider requests disable
+HTTP caching with `cache: "no-store"`. Redis stores only 48-hour sweep/attempt
+claims and coarse coordination outcomes, never provider earnings content.
+
+The review found no published maximum response-retention period, explicit
+attribution rule, or operative prohibition on deployed Free-tier use within its
+limits. Paid plans are marketed as built for Production; upstream provenance,
+accuracy, completeness, and availability are not guaranteed; and terms may
+change on posting. These are accepted as residual non-blocking risks for the
+bounded M26 behavior. The affirmative application-display and storage/database
+guidance is sufficient under this runbook, so written provider clarification is
+not currently required. This record completed Gate 6; Gate 7 subsequently passed.
+
+### Gate 7 completion record
+
+**Gate 7: PASS.** On 2026-08-24, the controlled failure proof was deferred
+because no safe execution path was then available within the tooling constraints;
+that blocker is resolved. The normal Production sweep completed with
+25/25 catalog coverage, 25 provider attempts, 0 retries, 0 failures, and outcome
+`AVAILABLE`. PostgreSQL verification and normal-sweep Redis verification passed,
+and provider usage reconciled exactly from 25 to 50 for both daily and monthly
+counts. The controlled Redis-unavailable fail-closed proof also passed for
+`AAPL`: the database identity matched, the persisted observation remained
+unchanged, `providerFetchCount = 0`, Redis failure was simulated, and source
+status was `COORDINATION_UNAVAILABLE`.
+
+Production earnings synchronization is enabled and validated. The final
+Production value is `EARNINGS_SYNC_ENABLED=true`.
+
+The completed activation procedure was:
+
+1. Begin with `EARNINGS_SYNC_ENABLED=false`. Review the current official endpoint,
+   terms, and free limits, and obtain any final confirmation required for
+   deployed use and normalized storage for up to 72 hours.
+2. Apply migration `20260821190000_m26_upcoming_earnings` using the guarded
+   Production migration workflow. Verify the table without adding seed data.
+3. Provision a server-only `EARNINGS_API_KEY`. Confirm that the Production Redis
+   resource is isolated and has enough free-tier headroom for 25 retained daily
+   claims. Never configure the key in Preview, development, or tests.
+4. In an explicitly approved environment, run one bounded contract check for
+   exactly the fixed 25-company registry. Record that every symbol returned a
+   schema-valid array or valid empty array, request count was no more than 25,
+   no secret appeared in output, and the published quota remained intact. Do
+   not turn this into an automated live test. The validation-only command is
+   `npm run earnings:contract-check:approved`; it imports no database, Redis,
+   synchronization, job, route, or telemetry module. Before network access it
+   requires `VERCEL_ENV=production`, `EARNINGS_SYNC_ENABLED=false`, the existing
+   server-only key, the exact approved catalog fingerprint, and the one-run
+   value
+   `M26_GATE5_LIVE_CHECK_APPROVAL=APPROVE_M26_GATE5_EXACTLY_25_REQUESTS`. It
+   executes sequentially with one attempt per symbol, no retry or fallback, a
+   10-second timeout, and manual redirect handling that never follows a 3xx.
+
+   Use the linked Vercel project and an authenticated Vercel CLI to select the
+   Production environment without writing an env file. Set the Production
+   assertion and approval only for this terminal process, run the command once,
+   then remove both temporary values:
+
+   ```powershell
+   $env:VERCEL_ENV = "production"
+   $env:M26_GATE5_LIVE_CHECK_APPROVAL = "APPROVE_M26_GATE5_EXACTLY_25_REQUESTS"
+   try {
+     vercel env run -e production -- npm run earnings:contract-check:approved
+   } finally {
+     Remove-Item Env:VERCEL_ENV -ErrorAction SilentlyContinue
+     Remove-Item Env:M26_GATE5_LIVE_CHECK_APPROVAL -ErrorAction SilentlyContinue
+   }
+   ```
+
+   The 2026-08-24 preflight established that Vercel omits the non-readable
+   Sensitive `EARNINGS_API_KEY` from `env run`. The operator subsequently used
+   approved process-memory-only injection for one execution and cleared the key
+   and approval variables afterward. The run started at
+   `2026-08-24T17:59:10.474Z`: all 25 ordered catalog symbols returned HTTP 200
+   and a contract-valid nonempty upcoming result; request count was 25, with 0
+   retries, redirect failures, transient failures, or contract failures. The
+   provider dashboard reconciled 25/100 daily requests used and 75 remaining on
+   the Free plan, with a 1,000/month limit, 60/minute rate limit, and New York
+   daily reset. No PostgreSQL, Redis, synchronization, feature-flag, deployment,
+   or secret-exposure side effect occurred. Do not use `vercel env pull`,
+   reclassify or copy the key into `.env`, or persist the approval value.
+
+5. Set `EARNINGS_SYNC_ENABLED=true` only in Production after steps 1-4 are
+   recorded. Open `/earnings` and `/app/earnings`; verify source/fetched-at
+   labels, owner scoping, deduplication, and explicit unknown/unavailable states.
+   Verify `SHOP` is labelled outside the M26 catalog and caused no request.
+6. Prove fail-closed behavior by disabling Redis in a controlled window: no
+   EarningsAPI.com request is permitted, while a valid PostgreSQL observation
+   remains visible. Restore Redis and leave the feature enabled only if quota,
+   logs, and persisted state are correct.
+
+Rollback is `EARNINGS_SYNC_ENABLED=false`. Do not delete PostgreSQL observations
+or Redis claims during an incident; valid persisted state may continue to be
+served until its stale window expires. Revoke the provider key if unexpected
+requests or licensing concerns arise.
 
 ## Health and readiness
 
@@ -627,7 +1100,7 @@ credentials, database hosts, user financial data, or raw provider responses.
 
 1. Create separate Preview and Production Sentry projects or distinguish them with the configured environment tags.
 2. Set the DSN and environment values from the matrix.
-3. Set `SENTRY_ORG`, `SENTRY_PROJECT`, and a build-only `SENTRY_AUTH_TOKEN` when source-map upload is enabled. Set the same commit SHA in `SENTRY_RELEASE` and `NEXT_PUBLIC_SENTRY_RELEASE`.
+3. Set `SENTRY_ORG`, `SENTRY_PROJECT`, and a build-only `SENTRY_AUTH_TOKEN` when source-map upload is enabled. Production normally leaves `SENTRY_RELEASE` and `NEXT_PUBLIC_SENTRY_RELEASE` unset so both server and client release detection fall back to `VERCEL_GIT_COMMIT_SHA`.
 4. Leave both trace sample rates at `0` initially. Increase them only after reviewing event volume and the free-tier budget.
 5. Redeploy; environment changes do not affect already-built deployments.
 6. In a temporary Preview-only change, trigger one controlled client error using Sentry's documented verification pattern.
@@ -639,16 +1112,21 @@ The checked-in SDK configuration sends no default PII, strips cookies, request
 bodies, and sensitive headers, hashes application user IDs, and defaults tracing
 to zero. Follow the official [Sentry Next.js manual setup and verification guide](https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/) for the temporary test.
 
+Production release verification passed after the temporary/stale
+`SENTRY_RELEASE` and `NEXT_PUBLIC_SENTRY_RELEASE` overrides were removed. New
+Production events use the `VERCEL_GIT_COMMIT_SHA` fallback; stale release
+`d7d0369` is no longer used for new Production events.
+
 ## Better Stack activation
 
 Create HTTP monitors for:
 
-| Monitor | URL | Expected result |
-| --- | --- | --- |
-| Homepage | Canonical production origin | HTTP 200 |
-| Liveness | `/api/health` | HTTP 200 and `"status":"ok"` |
-| Readiness | `/api/ready` | HTTP 200 and `"status":"ready"` |
-| Authentication entry | `/auth/signin` | HTTP 200 and sign-in heading |
+| Monitor              | URL                         | Expected result                 |
+| -------------------- | --------------------------- | ------------------------------- |
+| Homepage             | Canonical production origin | HTTP 200                        |
+| Liveness             | `/api/health`               | HTTP 200 and `"status":"ok"`    |
+| Readiness            | `/api/ready`                | HTTP 200 and `"status":"ready"` |
+| Authentication entry | `/auth/signin`              | HTTP 200 and sign-in heading    |
 
 Create separate worker, successful-backup, and failed-backup heartbeat monitors.
 Store their push URLs only in the secret stores described by the environment
@@ -709,6 +1187,15 @@ backups/postgres/{environment}/weekly/
 backups/postgres/{environment}/monthly/
 ```
 
+To classify a Production connection-preflight failure without creating a
+backup, manually dispatch the workflow with `diagnostic_only=true`. This path
+skips dependency lifecycle scripts, `pg_dump`, and all R2 backup logic. It runs
+only the PostgreSQL probe with session and transaction read-only protections
+and reports a fixed coarse success or failure category; raw PostgreSQL errors
+and connection details are never written to the workflow log. Stop after the
+diagnostic and obtain explicit Production approval before changing the secret,
+network access, or running the full backup.
+
 It retains the newest 7 daily, 4 weekly, and 3 monthly objects. Sunday creates a
 weekly generation and the first UTC day of a month creates a monthly generation.
 Run a manual backup from a trusted operator host with PostgreSQL client tools
@@ -721,6 +1208,28 @@ npm run backup:postgres
 
 Load the same variables as the workflow and set `BACKUP_ENVIRONMENT` explicitly.
 Never paste command output containing connection strings into tickets.
+
+### Production backup validation record
+
+The Production database backup workflow passed. PostgreSQL client availability
+and read-only connectivity passed preflight. The backup script was corrected to
+pass `DIRECT_URL` directly to `pg_dump`; the temporary duplicate `pg_dump`
+export preflight was removed after validation.
+
+The successful backup recorded:
+
+```text
+status = completed
+environment = production
+byteLength = 265428
+sha256 = b6cb8276e9874b84074a11712530eb30cdd692483d47b89a0dd309f105241d4f
+uploaded generation = daily
+pruned = 0
+```
+
+`/admin` detected the new logical backup. The Better Stack Production Backup
+heartbeat was manually verified as up. The backup failure monitor remains a
+separate monitor.
 
 ## Non-production restore drill
 
@@ -742,7 +1251,9 @@ npm run restore:postgres
 
 Also load the server-only `R2_*` values. Then:
 
-1. Run `npx prisma validate` and `npm run db:deploy` against the restored target.
+1. Run `npx prisma validate`, then apply migrations with
+   `MIGRATION_TARGET=restore-drill MIGRATION_CONFIRMATION=APPLY_RESTORE_DRILL_MIGRATIONS npm run db:deploy:approved`
+   against the restored target.
 2. Start the application with the restored target as both local runtime and
    migration URLs.
 3. Run the Playwright smoke tests.
@@ -760,12 +1271,17 @@ replace the real restore drill.
 ## Security and pull-request automation
 
 GitHub Actions runs database-backed checks and Playwright critical journeys.
-Dependabot proposes bounded dependency and Actions updates. CodeQL scans
-JavaScript/TypeScript, and Gitleaks scans repository history for committed
-secrets. In repository settings:
+Dependabot proposes bounded dependency and Actions updates, and Gitleaks scans
+repository history for committed secrets. CodeQL is temporarily disabled
+because GitHub Code Security is unavailable for the current private repository;
+restore the CodeQL workflow and required check if Code Security becomes
+available later. Merge Dependabot updates with repository auto-merge using a
+merge commit rather than a Dependabot-authored squash commit, which can leave
+the subsequent `push` run with a read-only token.
+In repository settings:
 
 1. Protect `main`.
-2. Require pull requests and the CI, CodeQL, and Gitleaks status checks.
+2. Require pull requests and the CI and Gitleaks status checks.
 3. Require branches to be current before merge.
 4. Prevent force pushes and deletion.
 5. Enable GitHub secret scanning and push protection where the repository plan
@@ -783,8 +1299,111 @@ mitigation, data-integrity assessment, recovery evidence, and follow-up owner.
 
 At least monthly, open every provider link in the administrator cost panel,
 compare current usage with the service free allowance and the `<$30 USD` hard
-budget, and record the review timestamp/reference. Do not add billing API
+budget, reconcile OpenAI application reservations against its console when
+enabled, and record the review timestamp/reference. Do not add billing API
 credentials merely to automate this low-frequency review.
+
+### Final Production rollout record
+
+**Status: FINANCIAL-DATA ROLLOUT COMPLETE.** No ingestion, R2-write, public-page,
+or Production-health blocker remains. Two account-console follow-up areas are
+deferred as recorded below.
+
+M26 earnings Gate 7 passed, including the controlled Redis-unavailable
+fail-closed proof recorded above. Production earnings synchronization is enabled
+and validated.
+
+M27 Production migration state is complete and the schema is current. Production
+AI research activation is complete; a controlled `AAPL` research report
+completed successfully, and AI accounting and reconciliation checks passed.
+
+The controlled Production `GOOGL`, `NVDA`, and `AMZN` SEC proof batch passed
+before the remaining supported companies were ingested in bounded sequential
+batches. The proof records were:
+
+| Ticker | Filings | Facts | Selected | Ambiguous | Result                 |
+| ------ | ------: | ----: | -------: | --------: | ---------------------- |
+| GOOGL  |      13 | 1,654 |      725 |         0 | Completed, one attempt |
+| NVDA   |      25 | 2,824 |    1,151 |         0 | Completed, one attempt |
+| AMZN   |      24 | 3,246 |    1,202 |         0 | Completed, one attempt |
+
+A final read-only Production audit confirmed 25/25 supported companies with a
+populated `lastSyncedAt`, completed latest job and run, one attempt, matching
+correlation IDs, and a QStash message ID. The universe contains 708 filings,
+69,418 normalized facts, 26,683 selected facts, and zero ambiguous facts. Every
+company has both `COMPANY_FACTS` and `SUBMISSIONS` raw sources with valid
+SHA-256 metadata, nonzero byte lengths, and JSON content types. There were no
+active or failed SEC jobs after completion.
+
+The bounded admin-ingestion rate limit was exercised without bypass: after five
+accepted requests in the configured 600-second window, the sixth request
+returned HTTP 429 and created no job. The remaining submissions succeeded after
+the natural window reset.
+
+Every `/stocks/<ticker>` URL in the 25-company registry returned HTTP 200 and
+rendered Key Metrics, three financial-trend regions, and the filing-evidence
+control. None rendered the not-loaded, failed-refresh, or application-error
+state. Hydrated checks on `GOOGL`, `JNJ`, and `INTC` also matched the requested
+ticker and rendered live financial evidence.
+
+Signed runtime delivery is verified independently of schedule inventory: all
+25 SEC jobs carried QStash message IDs and reached `COMPLETED`, while
+administrator readiness reported Redis and QStash healthy. A durable
+`RECOVER_STALE_JOBS` maintenance job completed in one attempt. Exact Upstash
+schedule inventory remains deferred because Google blocked the controlled
+browser login and no API/CLI token was available. Follow-up must verify no
+duplicates and the documented destinations, signing, retries, timeouts, and UTC
+cadence for:
+
+- `portfolioscope-recover-stale-jobs` — hourly;
+- `portfolioscope-refresh-stale-sec` — 02:15 and 14:15 UTC daily.
+
+The existing working Production R2 credential was not rotated or revoked.
+Production raw-source writes and the backup path are healthy, local `.env` has
+no Production R2 access, and local background, SEC, and manual-ingestion flags
+remain disabled. The private `portfolioscope-sec-development` bucket exists;
+creating its bucket-scoped credential, rotating the Production credential, and
+confirming Preview credential isolation in the Cloudflare dashboard remain
+deferred because Google blocked controlled-browser authentication.
+
+Before ingestion, Production backup workflow run `34875395358` completed for
+commit `7db065e`. It uploaded a non-empty 559,228-byte gzip object with SHA-256
+`9937c241ff9094f7eae69be6f667ad0f877627c40ee08c7d35e99e7f10fb8390`,
+validated the checksum and plain-SQL format, and pruned one object under the
+documented retention policy. The existing Production credential denied
+account-level bucket listing; its complete dashboard policy and rotation remain
+deferred rather than inferred from that runtime check.
+
+The final Production smoke test passed for:
+
+- `/`;
+- `/stocks/aapl`;
+- `/app`;
+- `/app/portfolio`;
+- `/app/watchlist`;
+- `/app/earnings`;
+- `/app/research`;
+- the completed `AAPL` research report;
+- `/admin`;
+- `/api/health`;
+- `/api/ready`;
+- GitHub sign-in; and
+- mobile layout checks.
+
+Temporary rollout diagnostics were removed after validation: the `/admin`
+“Runtime database target” diagnostic; database identity, schema, OID, and system
+identifier diagnostics; the temporary M26 Gate 7 runner; and the duplicate
+`pg_dump` export preflight. These debug-only tools must not be reintroduced.
+
+Final intended Production feature-flag state:
+
+```text
+BACKGROUND_JOBS_ENABLED=true
+RESEARCH_GENERATION_ENABLED=true
+AI_RESEARCH_ENABLED=true
+SEC_INGESTION_ENABLED=true
+EARNINGS_SYNC_ENABLED=true
+```
 
 ## Verification checklists
 
@@ -812,6 +1431,22 @@ credentials merely to automate this low-frequency review.
 - [ ] Redis limits return controlled `429` responses, recover after their window, and do not leak identifiers in keys.
 - [ ] Admin job details, retry/cancel authorization, correlation IDs, and ticker freshness render correctly.
 - [ ] Both named schedules exist once with the reviewed HTTPS destination and UTC cadence.
+- [ ] Required M18 and M27 AI migrations are applied with AI disabled; historical reports remain deterministic.
+- [ ] Offline AI evaluation and recorded-provider cases pass with no private inputs.
+- [ ] The single allowed AAPL external Preview report is human-reviewed for
+      citations and advice safety; counter-evidence, missing data, versions,
+      history/diff, and partial failures render.
+- [ ] Every AI request ID and response token count matches stored usage, cost
+      matches the pinned formula after upward micro-dollar rounding, provider
+      console delta is at most `$0.01`, and no `UNCONFIRMED` charge remains.
+- [ ] Eligible same-day work is reused; regeneration, source changes, and a
+      cancelled attempt cannot create a second daily external job; active
+      duplicates fan out only once.
+- [ ] Toggling `AI_RESEARCH_ENABLED=false` stops the next provider/repair attempt
+      without breaking stock pages or deterministic history.
+- [ ] Desktop and 390-pixel mobile browser review of the actual report verifies
+      Summary, Strengths, Risks, What to Watch, collapsed Evidence / Sources,
+      citation focus/link usability, and no horizontal overflow.
 - [ ] Playwright public and authenticated journeys pass against the isolated Preview database.
 - [ ] CSP, HSTS, frame, referrer, permissions, and content-type headers match policy; TradingView remains usable.
 - [ ] Preview Sentry client/server/job errors carry the reviewed release and correlation context without private payloads.
@@ -844,6 +1479,9 @@ credentials merely to automate this low-frequency review.
 - [ ] Production M15 flags were enabled in documented order after signed delivery proof.
 - [ ] A duplicate active SEC/research request reuses existing work and a completed QStash replay is a no-op.
 - [ ] Upstash usage remains inside the reviewed free allowances.
+- [ ] If external AI is approved, its separately scoped Production key, provider
+      billing control, `$5` application maximum, source/privacy review, one bounded
+      report, usage reconciliation, and kill-switch proof are recorded.
 - [ ] The previous Vercel production deployment is identifiable for rollback.
 - [ ] Production CSP/security headers are active and the TradingView widget still renders.
 - [ ] Sentry release/source-map mapping and privacy scrubbing are verified.
@@ -851,8 +1489,8 @@ credentials merely to automate this low-frequency review.
 - [ ] Worker, backup-success, and backup-failure heartbeats are visible.
 - [ ] The latest scheduled R2 backup is visible in admin diagnostics and retention remains within policy.
 - [ ] The last successful non-production restore drill is visible in admin diagnostics.
-- [ ] Dependabot, CI, CodeQL, Gitleaks, branch protection, and required checks are active.
-- [ ] Neon, R2, Redis, QStash, Vercel, Sentry, PostHog, and CI usage remains inside the monthly budget.
+- [ ] Dependabot, CI, Gitleaks, branch protection, and required checks are active.
+- [ ] Neon, R2, Redis, QStash, Vercel, Sentry, PostHog, OpenAI when enabled, and CI usage remains inside the monthly budget.
 
 ## Rollback and forward fix
 
@@ -871,21 +1509,33 @@ Vercel Hobby currently limits CLI rollback to the previous production deployment
 - Stop the release before deploying incompatible application code.
 - Prefer an additive forward-fix migration.
 - If an application rollback would be incompatible with an already-applied migration, keep the compatible application deployed and forward-fix the database or code.
-- Rerun `npm run db:deploy`; committed Prisma migrations are designed to be repeatable.
-- Rerun `npm run db:seed` only when deterministic demo records need repair. The seed is demo-scoped and idempotent.
+- After human approval, rerun the guarded Production migration command; committed
+  Prisma migrations are designed to be repeatable.
+- Rerun the guarded Production seed command only when deterministic demo records
+  need repair. The seed is demo-scoped and idempotent.
 
 ### Job or cache failure
 
-1. Set `SEC_INGESTION_ENABLED=false` and
+1. Set `EARNINGS_SYNC_ENABLED=false` if earnings quota, licensing, provider, or
+   Redis coordination is implicated. Preserve PostgreSQL earnings rows and the
+   Redis claims for investigation; never bypass the claim to refresh.
+2. Set `AI_RESEARCH_ENABLED=false` first. If credentials or unexpected billing
+   may be involved, revoke/rotate the OpenAI key and apply the provider spending
+   stop. The runner checks the flag before every external attempt and repair.
+3. Set `SEC_INGESTION_ENABLED=false` and
    `RESEARCH_GENERATION_ENABLED=false` to stop expensive publishers.
-2. Pause `portfolioscope-recover-stale-jobs` and
+4. Pause `portfolioscope-recover-stale-jobs` and
    `portfolioscope-refresh-stale-sec` in QStash.
-3. Set `BACKGROUND_JOBS_ENABLED=false` if generic delivery itself is unsafe.
-4. Do not delete job, attempt, or control-event rows. Use `/admin` to capture
+5. Set `BACKGROUND_JOBS_ENABLED=false` if generic delivery itself is unsafe.
+6. Do not delete job, attempt, usage, claim, evidence, or control-event rows.
+   Preserve provider request IDs and reconcile `UNCONFIRMED` charges. Use `/admin` to capture
    correlation IDs and sanitized errors.
-5. Allow running work to finish or time out. Cancel only queued/retrying work.
-6. Forward-fix code or configuration, redeploy, prove one signed Preview job,
+7. Allow running work to finish or time out. Cancel only queued/retrying work.
+8. Forward-fix code or configuration, redeploy, prove one signed Preview job,
    then retry eligible failed jobs and restore flags/schedules gradually.
+
+Do not down-migrate the additive M18 tables during an incident. A compatible
+application rollback may ignore them; otherwise deploy a forward fix.
 
 ### Monitoring failure
 
@@ -893,37 +1543,57 @@ Sentry and Better Stack are optional application dependencies. A monitoring outa
 
 ## External activation record
 
-Complete this table during the real deployment. Do not mark an item complete without direct evidence.
+This table preserves the itemized deployment evidence. Do not mark an item
+complete without direct evidence. M27's historical Preview-only boundary and
+completed Production gate are recorded in the M27 section above.
+Rows that remain unverified preserve narrower historical or recurring
+operational checks; they do not supersede the final rollout completion record.
 
-| Item | Status | Evidence |
-| --- | --- | --- |
-| Vercel project connected | Not verified | Deployment URL and timestamp |
-| Preview deployment isolated | Not verified | Preview URL and non-production database confirmation |
-| Neon production database provisioned | Not verified | Project/branch recorded outside source control |
-| Production migrations applied | Not verified | Command output or deployment log |
-| Production seed completed | Not verified | Demo smoke test |
-| GitHub OAuth callback verified | Not verified | Disposable sign-in and callback timestamp |
-| Google OAuth callback verified | Not verified | Disposable sign-in and callback timestamp |
-| Session revocation verified | Not verified | Disposable multi-session test |
-| Account deletion verified | Not verified | Disposable user and cascade check |
-| Private R2 bucket and least-privilege token verified | Not verified | Bucket policy and test object metadata |
-| SEC user-agent/contact verified | Not verified | Controlled request and operator review |
-| M15 migrations applied | Not verified | Deployment log showing both ordered migration names |
-| Preview Redis/QStash isolated | Not verified | Resource identifiers recorded outside source control |
-| Signed QStash delivery verified | Not verified | Preview job ID, attempt, and terminal status |
-| M15 rate limits verified | Not verified | Controlled `429` and recovery timestamp |
-| Maintenance schedules configured | Not verified | Two named schedule IDs and reviewed UTC cadence |
-| M14 migration and supported registry seed applied | Not verified | Migration log and 25-company count |
-| Initial SEC backfill reviewed | Not verified | Per-ticker run IDs and filing comparison checklist |
-| TradingView attribution/failure state verified | Not verified | Production stock-page smoke test |
-| Custom domain and HTTPS active | Not verified | Canonical URL and certificate check |
-| Sentry controlled error received | Not verified | Sentry event ID |
-| Better Stack monitor active | Not verified | Monitor ID and test notification |
-| Better Stack worker heartbeat active | Not verified | Heartbeat ID, success, missed signal, and recovery timestamps |
-| Better Stack backup heartbeats active | Not verified | Success/failure heartbeat IDs and notification evidence |
-| PostHog privacy review complete | Not verified | Event/property export reviewed in Preview |
-| First automated R2 backup complete | Not verified | Object key prefix, timestamp, size, and checksum metadata |
-| Non-production restore drill complete | Not verified | Timestamp and non-secret evidence reference |
-| Security headers and TradingView CSP verified | Not verified | Header capture and widget smoke-test timestamp |
-| Security automation and branch protection active | Not verified | Required-check names and repository settings review |
-| Previous Vercel deployment restored/tested | Not verified | Rollback drill date and deployment ID |
+| Item                                                      | Status              | Evidence                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel project connected                                  | Verified 2026-09-15 | Production deployment `dpl_7X1PYYc56BTJuLjYH4SFNzr5FDg5` was Ready at the canonical alias; liveness and readiness returned HTTP 200                                                                                                                                                                                                           |
+| Preview deployment isolated                               | Not verified        | Preview URL and non-production database confirmation                                                                                                                                                                                                                                                                                          |
+| Neon production database provisioned                      | Not verified        | Project/branch recorded outside source control                                                                                                                                                                                                                                                                                                |
+| Production migrations applied                             | Verified            | Production migration state complete and schema current                                                                                                                                                                                                                                                                                        |
+| Production seed completed                                 | Not verified        | Demo smoke test                                                                                                                                                                                                                                                                                                                               |
+| GitHub OAuth callback verified                            | Verified            | Final Production GitHub sign-in smoke test passed                                                                                                                                                                                                                                                                                             |
+| Google OAuth callback verified                            | Not verified        | Disposable sign-in and callback timestamp                                                                                                                                                                                                                                                                                                     |
+| Session revocation verified                               | Not verified        | Disposable multi-session test                                                                                                                                                                                                                                                                                                                 |
+| Account deletion verified                                 | Not verified        | Disposable user and cascade check                                                                                                                                                                                                                                                                                                             |
+| Private R2 runtime access verified                        | Verified 2026-09-15 | Existing Production access completed the SEC raw-source and logical-backup paths; account-level bucket listing was denied; credential scope, policy, and rotation review remain deferred                                                                                                                                                      |
+| SEC user-agent/contact verified                           | Not verified        | Controlled request and operator review                                                                                                                                                                                                                                                                                                        |
+| M15 migrations applied                                    | Not verified        | Deployment log showing both ordered migration names                                                                                                                                                                                                                                                                                           |
+| Preview required AI migrations applied with AI disabled   | Blocked             | 2026-08-24 value check found placeholder Preview database URLs; 2026-08-25 inventory recheck found no isolated service configuration; no backup/migration attempted; 11 local migrations pass                                                                                                                                                 |
+| Production AI migrations applied with AI disabled         | Verified            | Production migration state complete and schema current                                                                                                                                                                                                                                                                                        |
+| OpenAI pinned-model pricing/deprecation reviewed          | Verified            | 2026-08-25 official model page: `$0.75`/`$0.075`/`$4.50` per 1M input/cached/output; prior snapshot deprecated                                                                                                                                                                                                                                |
+| OpenAI Preview project/key and billing control configured | Blocked             | 2026-08-25: no scoped Preview project/key or billing control in the Preview inventory; no provider call made                                                                                                                                                                                                                                  |
+| Offline AI evaluation and manual rubric passed            | Partial             | 2026-08-25: automated gates passed; named human reviewer and disposition pending                                                                                                                                                                                                                                                              |
+| External-AI private-data exclusion reviewed               | Not verified        | Outbound-contract/log/browser/analytics inspection record                                                                                                                                                                                                                                                                                     |
+| Bounded Preview AAPL AI report source/advice-reviewed     | Not verified        | Single report/job, request IDs, version tuple, claim checklist, and mandatory human reviewer                                                                                                                                                                                                                                                  |
+| Preview AI usage reconciled                               | Not verified        | Exact tokens and formula; provider-console delta at most `$0.01`; zero `UNCONFIRMED` usage                                                                                                                                                                                                                                                    |
+| AI kill switch and degradation verified                   | Partial             | Offline next-call proof passed; live flag-off, page, rollback, and monitor evidence pending                                                                                                                                                                                                                                                   |
+| Production AI explicitly approved and bounded             | Verified            | Controlled AAPL report completed; accounting and reconciliation passed; Production activation complete                                                                                                                                                                                                                                        |
+| Preview Redis/QStash isolated                             | Not verified        | Resource identifiers recorded outside source control                                                                                                                                                                                                                                                                                          |
+| Signed QStash delivery verified                           | Verified Production | 25/25 Production SEC jobs carried QStash message IDs, matched their completed ingestion runs, and completed in one attempt                                                                                                                                                                                                                    |
+| M15 rate limits verified                                  | Verified 2026-09-15 | The sixth bounded admin-ingestion request returned `429`; submission succeeded after the documented 600-second window reset without bypassing the guard                                                                                                                                                                                       |
+| Maintenance schedules configured                          | Deferred            | Controlled Upstash browser login was blocked by Google and no API/CLI token was available; verify the two named schedules, destinations, cadence, signing, retry/timeout settings, deliveries, and duplicate absence                                                                                                                          |
+| M14 migration and supported registry seed applied         | Verified 2026-09-15 | 25/25 supported companies resolved and completed SEC jobs/runs; final universe audit recorded 708 filings and 69,418 normalized facts                                                                                                                                                                                                         |
+| M26 earnings migration applied with sync disabled         | Verified            | Migration was applied under the guarded activation sequence; final sync state is enabled                                                                                                                                                                                                                                                      |
+| EarningsAPI.com free quota confirmed                      | Verified 2026-08-24 | Owner dashboard: Free/$0; 60/minute, 100/day, 1,000/month; 0% usage; New York reset; no API request                                                                                                                                                                                                                                           |
+| EarningsAPI.com terms/cache permission confirmed          | Verified 2026-08-24 | Gate 6 complete: dated official terms, storage/database workflows, endpoint limits, bounded retention, and residual-risk review; written clarification not required                                                                                                                                                                           |
+| Bounded 25-symbol earnings contract check passed          | Verified 2026-08-24 | `2026-08-24T17:59:10.474Z`: 25/25 ordered symbols; 25 requests; HTTP 200 and contract-valid nonempty result for every symbol; 0 retries/redirect/transient/contract failures; dashboard 25/100 daily used, 75 remaining, Free, 1,000/month, 60/minute, New York reset; no DB/Redis/sync/config writes; flag remained false; no secret exposed |
+| Earnings Redis fail-closed behavior verified              | Verified            | Gate 7 PASS: controlled AAPL Redis failure; database identity matched; observation unchanged; `providerFetchCount = 0`; source `COORDINATION_UNAVAILABLE`                                                                                                                                                                                     |
+| Production earnings activation explicitly approved        | Verified            | `EARNINGS_SYNC_ENABLED=true`; Production synchronization and final page smoke test passed                                                                                                                                                                                                                                                     |
+| Bounded Production SEC ingestion reviewed                 | Verified 2026-09-15 | `GOOGL`/`NVDA`/`AMZN` proof then bounded registry backfill; 25/25 completed in one attempt, 708 filings, 69,418 facts, 26,683 selected, 0 ambiguous; both raw-source kinds and public pages verified                                                                                                                                          |
+| TradingView attribution verified                          | Verified 2026-09-15 | Hydrated `INTC` page exposed the labelled chart region, TradingView source link and attribution, and live SEC fundamentals; the explicit widget-failure path was not exercised                                                                                                                                                                |
+| Canonical Vercel domain and HTTPS active                  | Verified 2026-09-15 | `https://portfolio-scope.vercel.app` and the 25 stock-page routes returned HTTP 200 over HTTPS; a separately owned custom domain was not verified                                                                                                                                                                                             |
+| Sentry Production release verified                        | Verified            | Explicit release overrides removed; new events use `VERCEL_GIT_COMMIT_SHA`; stale `d7d0369` no longer used                                                                                                                                                                                                                                    |
+| Better Stack monitor active                               | Not verified        | Monitor ID and test notification                                                                                                                                                                                                                                                                                                              |
+| Better Stack worker heartbeat active                      | Not verified        | Heartbeat ID, success, missed signal, and recovery timestamps                                                                                                                                                                                                                                                                                 |
+| Better Stack Production Backup heartbeat active           | Verified            | Success heartbeat manually verified up; failure monitor remains separate                                                                                                                                                                                                                                                                      |
+| PostHog privacy review complete                           | Not verified        | Event/property export reviewed in Preview                                                                                                                                                                                                                                                                                                     |
+| Production logical database backup complete               | Verified 2026-09-14 | Workflow `34875395358`; 559,228 bytes; checksum and plain-SQL format valid; one object pruned under retention; account-level bucket listing denied                                                                                                                                                                                            |
+| Non-production restore drill complete                     | Not verified        | Timestamp and non-secret evidence reference                                                                                                                                                                                                                                                                                                   |
+| Security headers and TradingView CSP verified             | Verified 2026-09-15 | Production HEAD response included HSTS, `nosniff`, `X-Frame-Options: DENY`, and a CSP permitting the attributed TradingView integration                                                                                                                                                                                                       |
+| Security automation and branch protection active          | Not verified        | Required-check names and repository settings review                                                                                                                                                                                                                                                                                           |
+| Previous Vercel deployment restored/tested                | Not verified        | Rollback drill date and deployment ID                                                                                                                                                                                                                                                                                                         |

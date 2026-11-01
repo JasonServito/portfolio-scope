@@ -29,7 +29,7 @@ describe("research synthesis", () => {
   it("returns an explicit missing-data report without specialist results", () => {
     expect(synthesizeResearch("Example Corp", [])).toMatchObject({
       confidence: 0,
-      missingData: ["All specialist agent outputs are missing."],
+      missingData: ["The report has no completed topic results."],
     });
   });
 

@@ -1,60 +1,50 @@
-# PortfolioScope demo script
+# PortfolioScope demo guide
 
-This script keeps a recruiter or interviewer walkthrough focused on the product's strongest engineering signals. Allow about three minutes.
+## Try It Online
 
-## Before the demo
+Open [portfolio-scope.vercel.app](https://portfolio-scope.vercel.app).
 
-1. Start PostgreSQL and apply the current migrations.
-2. Run `npm run db:seed` so the dataset is deterministic.
-3. Run the final quality checks and start the app.
-4. Use a desktop viewport around 1440 x 900 and a clean browser window.
-5. Open `/` and keep `/dashboard` available as a fallback.
+- Select **Explore the read-only demo** to try the core product without an
+  account.
+- Sign in with GitHub or Google to manage private portfolios and watchlists.
+- Demo market and portfolio values are seeded or cached examples, not live
+  quotes.
 
-Do not describe the seeded market data as live. Do not frame research output as financial advice or a recommendation.
+PortfolioScope is an educational analytics project. It does not place trades or
+provide financial advice.
 
-## Walkthrough
+## Two-Minute Tour
 
-### 1. Position the product — 20 seconds
+1. Start on the dashboard and review portfolio value, return, allocation, and
+   active alerts.
+2. Change the performance period and open **Holdings** to compare positions.
+3. Open AAPL to review market context, portfolio exposure, SEC-backed
+   financials, and trends.
+4. Open **Sample research** to review the summary, strengths, risks, missing
+   information, and sources.
+5. Visit **Watchlist**, **Earnings**, and **Alerts** to see the remaining core
+   workflows.
 
-From the landing page, explain that PortfolioScope emphasizes period-based portfolio analytics and explainable research rather than trading. Select **Continue as demo investor**.
+The public demo is read-only. Account changes and private research require
+sign-in.
 
-### 2. Show portfolio analytics — 45 seconds
+## Run Locally
 
-On the dashboard, call out total value, selected-period return, allocation, and winners/losers. Change the period once to demonstrate that the chart and rankings use the same typed analytics layer rather than component-local calculations.
+Follow the [README setup instructions](README.md#local-development), seed the
+database, and open [http://localhost:3000](http://localhost:3000).
 
-### 3. Compare holdings — 30 seconds
+If the demo redirect is slow, open
+[http://localhost:3000/dashboard?demo=true](http://localhost:3000/dashboard?demo=true)
+directly.
 
-Open **Holdings**. Show the return windows, market value, and total gain/loss columns. Explain that deterministic snapshots make the demo repeatable and calculations testable.
+## Refresh Demo Assets
 
-### 4. Explain a risk — 30 seconds
+With the seeded app running locally on port 3100:
 
-Open **Alerts**, choose a seeded alert, and follow its ticker link. Emphasize that each risk has a visible trigger and severity instead of an opaque score.
+```powershell
+$env:E2E_BASE_URL = "http://127.0.0.1:3100"
+npm run demo:capture
+```
 
-### 5. Trace research evidence — 45 seconds
-
-On the stock detail page, open the research area. Move from the overview to one specialist tab and then sources. Explain the pipeline: seeded providers supply facts, focused agents shape findings, and synthesis combines those outputs while retaining warnings and evidence.
-
-### 6. Close on engineering depth — 10 seconds
-
-Summarize the boundaries: Next.js route handlers, domain services, deterministic providers, Prisma/PostgreSQL persistence, focused tests, Docker, and CI. Note that live providers or LLMs can replace seeded adapters later without moving business logic into the UI.
-
-## Screenshot checklist
-
-Store approved images in `public/screenshots/` with descriptive kebab-case names.
-
-- `landing.png` — hero, demo CTA, and product preview visible
-- `dashboard.png` — summary, period selector, chart, and supporting cards
-- `holdings.png` — table headers and several complete rows
-- `alerts.png` — multiple severities and at least one ticker link
-- `stock-detail.png` — stock context, chart, position, and related risks
-- `research.png` — overview plus visible specialist navigation
-- `architecture.png` — rendered README architecture diagram, if a static asset is needed
-- `ci.png` — a real passing workflow run with no sensitive repository details
-
-Capture only real application states. Avoid cropped labels, transient loading states, browser notifications, local paths, secrets, and placeholder data. Re-capture screenshots whenever seeded values or primary layouts materially change.
-
-## Fallbacks
-
-- If the demo redirect is slow, open `/dashboard?demo=true` directly.
-- If a chart animation distracts from the walkthrough, wait for it to settle before speaking or capturing.
-- If the database is unavailable, stop and restore the seeded environment; do not present error states as the intended demo.
+Capture only real application states. Keep secrets, private account data,
+browser notifications, and local paths out of screenshots and recordings.

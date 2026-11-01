@@ -50,7 +50,7 @@ function isMaintenanceExcluded(pathname: string) {
   );
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const requestId = requestIdentifier(request.headers.get("x-request-id"));
   const correlationId = requestIdentifier(
     request.headers.get("x-correlation-id"),

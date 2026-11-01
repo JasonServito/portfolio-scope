@@ -18,7 +18,7 @@ export type LogContext = {
 };
 
 const sensitiveKey =
-  /authorization|cookie|password|secret|token|credential|api[-_]?key|database[-_]?url|connection[-_]?string/i;
+  /authorization|cookie|password|secret|token|credential|api[-_]?key|database[-_]?url|connection[-_]?string|x[-_.]?vercel[-_.]?protection[-_.]?bypass/i;
 const bearerValue = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
 const credentialUrl = /([a-z][a-z0-9+.-]*:\/\/)[^@\s/]+@/gi;
 const maximumStringLength = 500;
@@ -103,9 +103,7 @@ export function writeLog(
     message: redactString(message),
     environment: environmentName(),
     ...(context.requestId ? { requestId: context.requestId } : {}),
-    ...(context.correlationId
-      ? { correlationId: context.correlationId }
-      : {}),
+    ...(context.correlationId ? { correlationId: context.correlationId } : {}),
     ...(context.route ? { route: context.route } : {}),
     ...(context.method ? { method: context.method } : {}),
     ...(context.statusCode !== undefined

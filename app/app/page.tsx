@@ -1,53 +1,63 @@
 import type { Metadata } from "next";
-import { Database, ShieldCheck, UserRound } from "lucide-react";
+import Link from "next/link";
+import { Suspense } from "react";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
+import { PageShell } from "@/components/layout/page-shell";
 import { PortfolioManager } from "@/components/portfolios/portfolio-manager";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { AuthenticatedPageLoading } from "@/components/ui/authenticated-page-loading";
 import { requireUser } from "@/lib/auth/session";
-import { listPortfolios } from "@/lib/portfolio/management";
+import { listUserAlerts } from "@/lib/portfolio/alerts-service";
+import { getUserWatchlist, listPortfolios } from "@/lib/portfolio/management";
 
-export const metadata: Metadata = { title: "Private workspace" };
+export const metadata: Metadata = { title: "Dashboard" };
 
-export default async function PrivateWorkspacePage() {
+export default function PrivateWorkspacePage() {
+  return (
+    <Suspense fallback={<AuthenticatedPageLoading />}>
+      <PrivateDashboardContent />
+    </Suspense>
+  );
+}
+
+async function PrivateDashboardContent() {
   const user = await requireUser("/app");
-  const portfolios = await listPortfolios(user.id);
+  const [portfolios, watchlist, alerts] = await Promise.all([
+    listPortfolios(user.id),
+    getUserWatchlist(user.id),
+    listUserAlerts(user.id, { reconcileTargetCrossings: false }),
+  ]);
+  const activeAlertCount = alerts.filter(
+    (alert) => alert.status === "ACTIVE",
+  ).length;
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
-      <AnalyticsEvent
-        name="sign_in_completed"
-        oncePerSession
-        properties={{}}
-      />
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">Authenticated workspace</p>
-          <h1 className="mt-2 text-3xl font-semibold">Welcome, {user.name ?? "investor"}</h1>
-          <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-            Create and manage portfolios that are scoped to your authenticated
-            identity at every server-side data boundary.
-          </p>
-        </div>
-        <Badge variant="outline">{user.role}</Badge>
-      </div>
-
+    <PageShell
+      description="Manage your portfolios, follow stocks, and review alerts in one place"
+      eyebrow={user.name ? `${user.name} · Your account` : "Your account"}
+      title="Dashboard"
+    >
+      <AnalyticsEvent name="sign_in_completed" oncePerSession properties={{}} />
       <section className="grid gap-4 md:grid-cols-3">
         <StatusCard
-          description="GitHub and Google identities connect through Auth.js."
-          icon={UserRound}
-          title="OAuth identity"
+          count={portfolios.length}
+          description="Create portfolios and keep their holdings organized"
+          title="Portfolios"
         />
         <StatusCard
-          description="The active session is persisted in PostgreSQL and can be revoked immediately."
-          icon={Database}
-          title="Database session"
+          count={watchlist.length}
+          description="A short list of companies you want to follow"
+          href="/app/watchlist"
+          linkLabel="Open watchlist"
+          title="Watchlist"
         />
         <StatusCard
-          description="Role and resource ownership are server-controlled; foreign identifiers do not grant access."
-          icon={ShieldCheck}
-          title="Role boundary"
+          count={activeAlertCount}
+          description="Portfolio and stock signals that may need attention"
+          href="/app/alerts"
+          linkLabel="Review alerts"
+          title="Active alerts"
         />
       </section>
 
@@ -60,27 +70,40 @@ export default async function PrivateWorkspacePage() {
           updatedAt: portfolio.updatedAt.toISOString(),
         }))}
       />
-    </main>
+    </PageShell>
   );
 }
 
 function StatusCard({
+  count,
   description,
-  icon: Icon,
+  href,
+  linkLabel,
   title,
 }: {
+  count: number;
   description: string;
-  icon: React.ComponentType<{ className?: string }>;
+  href?: string;
+  linkLabel?: string;
   title: string;
 }) {
   return (
     <Card>
-      <CardHeader>
-        <Icon className="size-5 text-muted-foreground" />
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="leading-6 text-muted-foreground">
-        {description}
+      <CardContent>
+        <p className="text-sm text-muted-foreground">{title}</p>
+        <p className="mt-2 text-[28px] leading-none font-medium tabular-nums">
+          {count}
+        </p>
+        <p className="mt-3 text-sm text-muted-foreground">{description}</p>
+        {href && linkLabel ? (
+          <Link
+            className="mt-3 inline-flex text-sm font-medium text-primary hover:underline"
+            href={href}
+            prefetch={false}
+          >
+            {linkLabel}
+          </Link>
+        ) : null}
       </CardContent>
     </Card>
   );

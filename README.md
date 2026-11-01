@@ -1,85 +1,163 @@
 # PortfolioScope
 
-PortfolioScope is a full-stack portfolio analytics and explainable stock-research demo built for long-term investors. It combines period-based performance, holding contribution analysis, deterministic risk alerts, and specialist research agents in a polished recruiter-ready experience.
+PortfolioScope is a full-stack stock dashboard for tracking portfolios,
+following companies, and reviewing evidence-backed stock research.
 
-> This is an educational analytics demo, not a brokerage or financial-advice product. PortfolioScope fundamentals come from SEC EDGAR when ingested, market charts are attributed TradingView widgets, and portfolio/research fixtures remain deterministic and seeded. The app does not place trades, predict prices, or issue buy/sell/hold recommendations.
+**Live application:** [portfolio-scope.vercel.app](https://portfolio-scope.vercel.app)
 
-## Product highlights
+![PortfolioScope portfolio dashboard](public/screenshots/dashboard.png)
 
-- Portfolio performance across 1D, 1W, 1M, 3M, and 1Y periods
-- Holding-level returns, gain/loss, allocation, and contribution analysis
-- Winners, losers, sector allocation, and portfolio value history
-- Explainable, rule-based concentration, drawdown, price-move, and watchlist alerts
-- Stock detail views with attributed TradingView charts and SEC-derived fundamentals
-- Filing-level source, period, retrieval, freshness, and normalization provenance
-- Private R2 retention for raw SEC submissions and Company Facts payloads
-- Structured research agents for news, financials, competitors, political activity, and risk
-- Deterministic seeded data for a stable, repeatable demo
-- GitHub and Google OAuth through Auth.js with revocable database sessions
-- Server-controlled USER and ADMIN roles, protected routes, and account deletion
-- Owner-scoped private portfolios, holdings, watchlists, alerts, and research history
-- A database-marked public demo that stays read-only in every environment
-- PostgreSQL-authoritative jobs with signed QStash delivery, bounded retries, attempt history, and admin controls
-- Redis-backed short caches, per-company locks, and per-user/IP abuse limits without permanent Redis state
-- Responsive Next.js UI backed by typed services, APIs, Prisma, and PostgreSQL
+_Portfolio performance, allocation, gain/loss, and active alerts in the
+read-only demo._
 
-## Product tour
+> Educational analytics project only. PortfolioScope is not a brokerage and
+> does not provide financial advice or investment recommendations.
 
-Screenshot assets are kept in [`public/screenshots`](public/screenshots). The recommended capture set is documented in [`DEMO.md`](DEMO.md); images can be added without changing README copy.
+## Overview
 
-| View         | What it demonstrates                                            |
-| ------------ | --------------------------------------------------------------- |
-| Landing      | Clear product positioning and one-click demo entry              |
-| Dashboard    | Period analytics, allocation, winners/losers, and alert context |
-| Holdings     | Comparable return windows and position-level performance        |
-| Alerts       | Transparent risk rules with links to affected securities        |
-| Stock detail | Price, position, risks, and explainable specialist research     |
+PortfolioScope helps beginner-to-intermediate investors understand their
+holdings, follow companies, and review key financial and research context. The
+project also demonstrates how to build, secure, test, and operate a deployed
+full-stack application.
 
-## Architecture
+## Live Demo
+
+[Open the Production application](https://portfolio-scope.vercel.app). Explore
+the seeded, read-only demo without an account, or sign in with GitHub or Google
+to manage private data.
+
+## Key Features
+
+- Tracks portfolios, holdings, cost basis, allocation, and gain/loss.
+- Compares portfolio and holding performance across common time periods.
+- Manages watchlists with notes, cached prices, and price targets.
+- Tracks upcoming earnings for companies in holdings and watchlists.
+- Shows company profiles, attributed market charts, SEC-backed financials, and
+  financial trends.
+- Surfaces concentration, drawdown, volatility, price, and target alerts.
+- Provides a public sample report and optional AI-assisted research with
+  evidence, confidence, risks, and missing information.
+- Supports GitHub and Google sign-in, private accounts, and a server-enforced
+  read-only demo.
+
+## Screenshots
+
+### Stock detail
+
+![PortfolioScope stock detail page](public/screenshots/stock-detail.png)
+
+_Market context, portfolio exposure, company information, and links to
+financials and research._
+
+### Research report
+
+![Scrolling through a PortfolioScope AI-assisted research report](public/screenshots/research.gif)
+
+_An AI-assisted report with changes from the previous run, a summary,
+strengths, risks, items to watch, and expandable sources._
+
+## Tech Stack
+
+- Next.js 16, React 19, and TypeScript
+- PostgreSQL and Prisma
+- Auth.js with GitHub and Google OAuth
+- Upstash Redis and QStash
+- OpenAI Responses API
+- Vercel
+
+## How It Works
+
+- Authenticated users manage owner-scoped portfolio, watchlist, alert, and
+  research data.
+- Provider data is validated and normalized before it reaches the UI.
+- Stock research combines deterministic company data, SEC facts, and optional
+  AI-assisted analysis.
+- Background jobs handle longer-running ingestion, research, and maintenance
+  work.
+
+## Application Architecture
+
+PortfolioScope is a modular Next.js application backed by durable PostgreSQL
+data and a small set of managed services.
 
 ```mermaid
-flowchart LR
-  UI[Next.js App Router UI] --> API[Route handlers]
-  UI --> TV[Attributed TradingView widget]
-  API --> Services[Portfolio, research, and SEC services]
-  Services --> Jobs[Durable job dispatcher]
-  Jobs --> QStash[Signed QStash delivery]
-  QStash --> Worker[Verified worker route]
-  Worker --> Services
-  Services --> Redis[(Ephemeral Redis cache, limits, locks)]
-  Services --> Providers[Seeded and SEC provider adapters]
-  Services --> Prisma[Prisma ORM]
-  Providers --> SEC[SEC EDGAR]
-  Providers --> R2[(Private Cloudflare R2)]
-  Providers --> Agents[Specialist research agents]
-  Agents --> Synthesis[Research synthesis]
-  Prisma --> Postgres[(PostgreSQL)]
+flowchart TD
+    User["Browser"] --> App["PortfolioScope on Vercel<br/>Next.js UI and server APIs"]
+
+    App --> Auth["Auth.js<br/>GitHub and Google sign-in"]
+    App --> Database["PostgreSQL<br/>users, portfolios, alerts, research, and jobs"]
+    App --> Cache["Redis<br/>cache, rate limits, and locks"]
+    App --> Jobs["QStash background jobs<br/>ingestion, research, and maintenance"]
+    App --> Providers["External services<br/>SEC, earnings, TradingView, and optional OpenAI"]
+
+    Jobs --> Database
+    Jobs --> Providers
+    Jobs --> Storage["R2 object storage<br/>raw SEC data"]
 ```
 
-The application keeps presentation, orchestration, domain calculations, providers, and persistence separate. Providers supply facts; specialist agents interpret structured inputs; synthesis combines their outputs while preserving findings, confidence, warnings, and sources.
+PostgreSQL is the source of truth. Redis holds only temporary cache, rate-limit,
+lock, and deduplication data.
 
-## Tech stack
+## AI Research Multi-Agent Workflow
 
-- Next.js 15, React 19, and TypeScript
-- Tailwind CSS and shadcn/ui-style components
-- Recharts for portfolio and stock visualizations
-- Prisma ORM and PostgreSQL
-- Auth.js with the Prisma adapter and GitHub/Google OAuth
-- Zod for runtime validation
-- SEC EDGAR submissions and Company Facts APIs
-- Cloudflare R2 through the server-only AWS S3 client
-- Upstash Redis and QStash for ephemeral coordination and signed delivery
-- Attributed TradingView widgets for public market charts
-- Vitest for unit and route-level integration tests
-- ESLint, Docker, and GitHub Actions
+The research layer runs focused specialists in parallel, then combines their
+structured results into one evidence-grounded report.
 
-## Run locally
+```mermaid
+flowchart TD
+    Request["Authenticated research request"] --> Job["Durable background job"]
+    Evidence["Public company evidence<br/>SEC facts and company data"] --> FanOut["Run specialists in parallel"]
+    Job --> FanOut
 
-Prerequisites: Node.js 20.19+, npm, and Docker Desktop (or another PostgreSQL 16 instance).
+    subgraph Specialists["Specialist agents"]
+        direction LR
+        Financials["Financials"]
+        Competitors["Competitors"]
+        Risk["Risk"]
+        News["News"]
+        Politics["Political activity"]
+    end
+
+    FanOut --> Financials
+    FanOut --> Competitors
+    FanOut --> Risk
+    FanOut --> News
+    FanOut --> Politics
+
+    Financials --> Synthesis["Synthesis"]
+    Competitors --> Synthesis
+    Risk --> Synthesis
+    News --> Synthesis
+    Politics --> Synthesis
+
+    Synthesis --> Validation["Validate claims and citations"]
+    Validation --> Report["Saved research report"]
+    Report --> UI["Research UI"]
+```
+
+Deterministic and recorded providers keep development and tests reproducible;
+optional model generation is default-off. Private portfolio data stays outside
+model input, every material claim must cite supplied evidence, and the output
+cannot issue investment recommendations. See the
+[AI research design](docs/ai-research.md) for full details.
+
+## Project Highlights
+
+- Deployed full-stack application with a public read-only demo
+- Private user data with server-side ownership checks
+- Validated financial data with source and freshness information
+- Durable background jobs with retry and duplicate-delivery controls
+- Default-off AI generation with strict usage and cost limits
+- Automated tests, CI checks, monitoring, and backups
+
+## Local Development
+
+Prerequisites: Node.js 24, npm, and Docker Desktop or another PostgreSQL 16
+instance.
 
 ```bash
-git clone <your-repository-url>
-cd PortfolioScope
+git clone https://github.com/JasonServito/portfolio-scope.git
+cd portfolio-scope
 cp .env.example .env
 npm ci
 docker compose up -d postgres
@@ -88,92 +166,32 @@ npm run db:seed
 npm run dev
 ```
 
-On Windows PowerShell, replace the copy command with `Copy-Item .env.example .env`.
+On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
 
-Open [http://localhost:3000](http://localhost:3000), then select **Continue as demo investor**. The default `.env.example` credentials match the local Docker database.
+Open [http://localhost:3000](http://localhost:3000) and select **Explore the
+read-only demo**. The seeded demo does not require OAuth, Redis, QStash, SEC, or
+OpenAI credentials. Optional integrations are documented in `.env.example` and
+the linked technical docs.
 
-The demo does not require OAuth. To test real sign-in locally, generate
-`AUTH_SECRET`, create local GitHub and Google OAuth applications, and configure
-the callback URLs documented in [`RUNBOOK.md`](RUNBOOK.md). Never reuse
-Production OAuth credentials in Preview or local environments.
-
-SEC ingestion is optional for the seeded local demo. To exercise M14, configure
-the SEC and R2 values from `.env.example`, apply migrations and seed the
-supported-company registry, assign a trusted test identity `ADMIN`, then use the
-single-ticker `POST /api/admin/sec/ingest` operation documented in
-[`RUNBOOK.md`](RUNBOOK.md). Page rendering never makes a live SEC request.
-
-M15 background work is also opt-in. Keep its three feature flags `false` for
-the normal seeded demo. To exercise jobs, configure environment-isolated Redis
-and QStash credentials, apply both M15 migrations, verify the signed callback,
-then enable workloads in the order documented in [`RUNBOOK.md`](RUNBOOK.md).
-
-## Quality checks
+Run the standard local checks with:
 
 ```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run test:integration
-npm run build
+npm run verify
 ```
 
-CI runs the same checks against PostgreSQL after applying migrations and loading deterministic demo data.
+## Documentation
 
-## Demo guide
+- [Demo guide](DEMO.md)
+- [Architecture](docs/architecture.md)
+- [SEC data design](docs/sec-data.md)
+- [AI research design](docs/ai-research.md)
 
-The focused recruiter walkthrough takes about three minutes:
+## Next Steps
 
-1. Enter demo mode and establish the product’s analytics-first positioning.
-2. Change the dashboard period to show server-side performance recalculation.
-3. Compare holding returns and contribution across time windows.
-4. Open an alert and explain the deterministic trigger.
-5. Open a stock’s research tabs and trace a synthesis insight back to specialist findings and sources.
-
-Detailed talking points, fallback steps, and screenshot framing are in [`DEMO.md`](DEMO.md).
-
-## Deployment
-
-The M11 deployment foundation targets Vercel and Neon PostgreSQL. Runtime traffic uses the pooled `DATABASE_URL`; Prisma migration commands use the direct `DIRECT_URL`. Preview and production must use different Neon databases and environment-scoped Vercel variables.
-
-The repository includes:
-
-- GitHub Actions checks backed by PostgreSQL
-- Safe, repeatable Prisma migrations and an idempotent demo-seed integration check
-- `GET /api/health` for liveness and `GET /api/ready` for database readiness
-- Optional Sentry client, server, edge, and App Router error instrumentation
-- Durable demo-owner identification with collision-safe legacy seed adoption
-- Auth.js GitHub/Google OAuth, database sessions, protected application/admin routes, and account lifecycle controls
-- Centralized authorization helpers plus cross-user route, service, and PostgreSQL isolation tests
-- A curated 25-company ticker/CIK registry and controlled admin-only SEC ingestion
-- Private content-addressed R2 raw-source storage and normalized PostgreSQL facts
-- Explicit missing, ambiguous, stale, failed, and unsupported fundamentals states
-- Durable SEC, deterministic research, snapshot, and maintenance jobs with signed callbacks and admin diagnostics
-- Redis cache/lock/rate-limit policies plus two bounded QStash maintenance schedules
-- Privacy-safe structured logs, request correlation, Sentry release/error context, and an admin-only dependency dashboard
-- Explicit PostHog event contracts with autocapture, replay, and person profiles disabled
-- CSP and production security headers with deliberate TradingView allowances
-- Scheduled compressed PostgreSQL backups in private R2 storage, guarded non-production restore tooling, and retention tests
-- Playwright critical-journey coverage plus Dependabot, CodeQL, Gitleaks, and dependency-audit automation
-- A multi-stage production `Dockerfile` and local PostgreSQL in `docker-compose.yml`
-
-Follow [`RUNBOOK.md`](RUNBOOK.md) for the environment matrix, first deployment, monitoring, smoke tests, and rollback procedure.
-
-No public demo URL is claimed here until a deployment is verified.
-
-## Project documentation
-
-- [`README.md`](README.md) — product, architecture, setup, deployment, and roadmap
-- [`DEMO.md`](DEMO.md) — recruiter walkthrough and screenshot capture checklist
-
-- [`RUNBOOK.md`](RUNBOOK.md) — production deployment, monitoring, and rollback
-- [`docs/sec-data.md`](docs/sec-data.md) — SEC contracts, normalization, provenance, freshness, and operations
-
-## Roadmap
-
-- Activate and verify the implemented Redis/QStash M15 layer in Preview and Production
-- Activate and externally verify M16 monitors, analytics, backup delivery, restore evidence, and rollback controls
-- Replaceable licensed market-data providers when justified
-- Benchmarking, dividends, and portfolio import
-
-Brokerage connectivity, trading, price prediction, and investment recommendations remain outside the product’s scope.
+- Refine the frontend and UI, including accessibility and overall usability.
+- Improve AI research output so investors at different experience levels can
+  understand the current state of a ticker.
+- Improve onboarding for new users.
+- Expand company coverage and available financial and earnings data.
+- Improve portfolio insights, visualizations, and mobile usability.
+- Add more customization to research and alerts.

@@ -132,6 +132,18 @@ export async function getDemoPortfolioAnalytics(
   );
 }
 
+export async function getDemoPortfolioAnalyticsByPeriods(
+  periods: ReadonlyArray<PerformancePeriod>,
+): Promise<Array<PortfolioAnalytics | null>> {
+  return getPortfolioAnalyticsByPeriods(
+    {
+      name: demoPortfolioName,
+      user: { isDemo: true },
+    },
+    periods,
+  );
+}
+
 export async function getOwnedPortfolioAnalytics(
   userId: string,
   portfolioId: string,
@@ -144,21 +156,38 @@ async function getPortfolioAnalytics(
   where: Prisma.PortfolioWhereInput,
   period: PerformancePeriod,
 ): Promise<PortfolioAnalytics | null> {
+  return (await getPortfolioAnalyticsByPeriods(where, [period]))[0] ?? null;
+}
+
+async function getPortfolioAnalyticsByPeriods(
+  where: Prisma.PortfolioWhereInput,
+  periods: ReadonlyArray<PerformancePeriod>,
+): Promise<Array<PortfolioAnalytics | null>> {
   const portfolio = await db.portfolio.findFirst({
     where,
     include: analyticsInclude,
   });
 
   if (!portfolio) {
-    return null;
+    return periods.map(() => null);
   }
 
   const currentSnapshot = getLatestSnapshot(portfolio.snapshots);
 
   if (!currentSnapshot) {
-    return null;
+    return periods.map(() => null);
   }
 
+  return periods.map((period) =>
+    buildPortfolioAnalytics(portfolio, currentSnapshot, period),
+  );
+}
+
+function buildPortfolioAnalytics(
+  portfolio: AnalyticsPortfolio,
+  currentSnapshot: AnalyticsPortfolio["snapshots"][number],
+  period: PerformancePeriod,
+): PortfolioAnalytics {
   const periodStartDate = getPeriodStartDate(currentSnapshot.timestamp, period);
   const periodStartSnapshot =
     findSnapshotAtOrBefore(portfolio.snapshots, periodStartDate) ??

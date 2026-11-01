@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
+    inputs:
+      diagnostic_only:
+        description: "Run only the sanitized read-only connection diagnostic"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,21 +25,35 @@ jobs:
     environment: production
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20.19
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
+        if: ${{ github.event_name == 'schedule' || inputs.diagnostic_only != true }}
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
         run: npm ci
 
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
 
+      - name: Classify PostgreSQL connection readiness
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: node scripts/diagnose-postgres-connection.mjs
+
+      - name: Verify PostgreSQL backup tooling
+        if: ${{ github.event_name == 'schedule' || inputs.diagnostic_only != true }}
+        run: pg_dump --version
+
       - name: Create compressed logical backup
+        if: ${{ github.event_name == 'schedule' || inputs.diagnostic_only != true }}
         env:
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

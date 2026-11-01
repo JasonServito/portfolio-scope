@@ -3,6 +3,7 @@ import { BackgroundJobStatus } from "@prisma/client";
 import { getRedis, isRedisConfigured } from "@/lib/cache/redis";
 import { db } from "@/lib/db";
 import { getCostReview } from "@/lib/operations/cost-policy";
+import { getGlobalAiUsageSummary } from "@/lib/research/ai/budget";
 import {
   getFeatureFlagSummary,
   isFeatureEnabled,
@@ -49,10 +50,7 @@ function heartbeatConfigured(kind: HeartbeatKind) {
   return Boolean(getHeartbeatUrl(kind));
 }
 
-function configuredStatus(
-  configured: boolean,
-  detail: string,
-): ServiceStatus {
+function configuredStatus(configured: boolean, detail: string): ServiceStatus {
   return configured
     ? { status: "ok", detail }
     : { status: "unconfigured", detail: `${detail} is not configured.` };
@@ -159,9 +157,7 @@ async function r2Status() {
     const unconfigured = error instanceof R2ConfigurationError;
     return {
       service: {
-        status: unconfigured
-          ? ("unconfigured" as const)
-          : ("failed" as const),
+        status: unconfigured ? ("unconfigured" as const) : ("failed" as const),
         detail: unconfigured
           ? "Private object storage is not configured."
           : "Private object storage did not respond.",
@@ -183,10 +179,11 @@ function restoreDrill() {
 }
 
 export async function getOperationalDiagnostics() {
-  const [database, redis, r2] = await Promise.all([
+  const [database, redis, r2, aiUsage] = await Promise.all([
     databaseDiagnostics(),
     redisStatus(),
     r2Status(),
+    getGlobalAiUsageSummary().catch(() => null),
   ]);
   const jobsEnabled = isFeatureEnabled("BACKGROUND_JOBS_ENABLED");
   const qstashConfigured = hasValues([
@@ -196,7 +193,7 @@ export async function getOperationalDiagnostics() {
   ]);
   const sentryConfigured = Boolean(
     process.env.SENTRY_DSN?.trim() ||
-      process.env.NEXT_PUBLIC_SENTRY_DSN?.trim(),
+    process.env.NEXT_PUBLIC_SENTRY_DSN?.trim(),
   );
   const posthogConfigured = hasValues([
     "NEXT_PUBLIC_POSTHOG_KEY",
@@ -247,6 +244,7 @@ export async function getOperationalDiagnostics() {
     lastBackup: r2.lastBackup,
     lastRestoreDrill: restoreDrill(),
     costReview: getCostReview(),
+    aiUsage,
     featureFlags: getFeatureFlagSummary(),
   };
 }

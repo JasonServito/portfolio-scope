@@ -1,169 +1,178 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import {
-  ArrowRight,
-  Bell,
-  LineChart,
-  ShieldCheck,
-  WalletCards,
-} from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { AnalyticsLink } from "@/components/analytics/analytics-link";
-import { SessionControls } from "@/components/auth/session-controls";
+import { PublicSiteShell } from "@/components/layout/public-site-shell";
+import { ProductPreview } from "@/components/marketing/product-preview";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { siteConfig } from "@/lib/site";
+
+export const metadata: Metadata = {
+  title: "Portfolio and stock dashboard",
+  description: siteConfig.description,
+  alternates: { canonical: "/" },
+};
+
+const capabilities = [
+  {
+    title: "Understand your portfolio",
+    description:
+      "Review value, return, allocation, and each holding's contribution over the same selected period.",
+    detail: "Portfolio overview and holdings",
+  },
+  {
+    title: "Follow stocks",
+    description:
+      "Keep companies on a watchlist and open stock pages for market context and financial fundamentals.",
+    detail: "Watchlist and stock detail",
+  },
+  {
+    title: "Review clear signals",
+    description:
+      "See alerts, research findings, risks, counterpoints, missing information, and supporting sources.",
+    detail: "Alerts and stock research",
+  },
+] as const;
+
+const journey = [
+  [
+    "01",
+    "Portfolio",
+    "Change the period and see the whole dashboard reconcile.",
+  ],
+  ["02", "Holding", "Open a major position and inspect its contribution."],
+  ["03", "Stock", "Review market context, fundamentals, risks, and research."],
+] as const;
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center gap-4 px-6 lg:px-8">
-          <Link className="flex items-center gap-2 text-sm font-semibold" href="/">
-            <span className="size-3 rounded-full bg-emerald-500" />
-            PortfolioScope
-          </Link>
-          <nav className="ml-auto flex items-center gap-2">
-            <AnalyticsLink
-              className={buttonVariants({ variant: "ghost", size: "sm" })}
-              eventName="demo_opened"
-              eventProperties={{ entryPoint: "navigation" }}
-              href="/dashboard?demo=true"
-            >
-              Demo
-            </AnalyticsLink>
-            <SessionControls />
-          </nav>
-        </div>
-      </header>
-      <section className="mx-auto grid min-h-[88vh] w-full max-w-7xl items-center gap-10 px-6 py-12 lg:grid-cols-[1fr_0.9fr] lg:px-8">
-        <div className="space-y-7">
-          <div className="inline-flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-            <span className="size-2 rounded-full bg-emerald-500" />
-            Demo-first portfolio analytics workspace
-          </div>
-
-          <div className="space-y-4">
-            <h1 className="max-w-3xl text-4xl font-semibold tracking-normal sm:text-5xl">
-              PortfolioScope
+    <PublicSiteShell>
+      <section className="border-b">
+        <div className="mx-auto grid min-h-[calc(100vh-4.5rem)] w-full max-w-7xl items-center gap-12 px-6 py-14 lg:grid-cols-[0.9fr_1.1fr] lg:px-8 lg:py-20">
+          <div>
+            <h1 className="max-w-3xl text-5xl leading-[1.04] font-medium tracking-[-0.03em] text-balance sm:text-6xl lg:text-[4rem]">
+              Know what moved your portfolio—and why
             </h1>
-            <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-              Analyze portfolio performance, understand risk, and explore
-              evidence-backed stock research in one recruiter-ready full-stack
-              product.
+            <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
+              PortfolioScope shows what a portfolio is worth, which positions
+              moved it, and what each company&apos;s filings say, in one
+              read-only dashboard built for newer investors.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <AnalyticsLink
+                className={buttonVariants({
+                  size: "lg",
+                  className: "min-h-11 px-5",
+                })}
+                eventName="demo_opened"
+                eventProperties={{ entryPoint: "landing" }}
+                href="/dashboard?demo=true"
+                prefetch={false}
+              >
+                Explore the read-only demo
+                <ArrowRight className="size-4" />
+              </AnalyticsLink>
+              <Link
+                className={buttonVariants({
+                  variant: "outline",
+                  size: "lg",
+                  className: "min-h-11 px-5",
+                })}
+                href="/stocks/aapl"
+                prefetch={false}
+              >
+                Explore a stock
+              </Link>
+            </div>
+            <p className="mt-6 flex flex-wrap gap-x-2 gap-y-1 text-sm text-muted-foreground">
+              <span>No account required</span>
+              <span aria-hidden="true">·</span>
+              <span>Read-only sample data</span>
+              <span aria-hidden="true">·</span>
+              <span>Two-minute guided path</span>
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <AnalyticsLink
-              className={buttonVariants({ size: "lg" })}
-              eventName="demo_opened"
-              eventProperties={{ entryPoint: "landing" }}
-              href="/dashboard?demo=true"
-            >
-              Continue as demo investor
-              <ArrowRight className="size-4" />
-            </AnalyticsLink>
-            <Link
-              className={buttonVariants({ variant: "outline", size: "lg" })}
-              href="/auth/signin"
-            >
-              Sign in to your workspace
-            </Link>
-          </div>
+          <ProductPreview />
+        </div>
+      </section>
 
-          <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
-            {[
-              "Period analytics",
-              "Risk monitoring",
-              "Explainable research",
-            ].map((item) => (
-              <div
-                className="rounded-lg border bg-card px-4 py-3 text-sm font-medium"
-                key={item}
-              >
-                {item}
-              </div>
+      <section className="border-b">
+        <div className="mx-auto w-full max-w-7xl px-6 py-16 lg:px-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Product tour</p>
+              <h2 className="mt-2 text-3xl font-medium tracking-[-0.01em]">
+                See the core product in three stops
+              </h2>
+            </div>
+            <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+              The public journey stays available without an account and focuses
+              on the tasks an investor comes here to complete.
+            </p>
+          </div>
+          <ol className="mt-8 grid gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-3">
+            {journey.map(([number, title, description]) => (
+              <li className="bg-card p-5" key={number}>
+                <span className="font-mono text-xs text-muted-foreground">
+                  {number}
+                </span>
+                <p className="mt-6 font-medium">{title}</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {description}
+                </p>
+              </li>
             ))}
-          </div>
-        </div>
-
-        <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <div className="rounded-lg border bg-muted/30 p-4">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Demo portfolio</p>
-                <p className="mt-1 text-3xl font-semibold">$128,420.18</p>
-              </div>
-              <span className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-                +8.6% 1Y
-              </span>
-            </div>
-
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              {[
-                ["AAPL", "24.4%", "bg-emerald-500"],
-                ["MSFT", "18.1%", "bg-sky-500"],
-                ["NVDA", "15.8%", "bg-violet-500"],
-              ].map(([ticker, value, color]) => (
-                <div
-                  className="rounded-lg border bg-background p-3"
-                  key={ticker}
-                >
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{ticker}</span>
-                    <span className="text-muted-foreground">{value}</span>
-                  </div>
-                  <div className="mt-3 h-2 rounded-full bg-muted">
-                    <div className={`${color} h-2 w-2/3 rounded-full`} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          </ol>
         </div>
       </section>
 
-      <section className="mx-auto grid w-full max-w-7xl gap-4 px-6 pb-12 lg:grid-cols-4 lg:px-8">
-        {[
-          {
-            title: "Portfolio",
-            description: "Track holdings, contribution, and allocation.",
-            icon: WalletCards,
-          },
-          {
-            title: "Performance",
-            description: "Compare returns across five time periods.",
-            icon: LineChart,
-          },
-          {
-            title: "Alerts",
-            description: "Understand transparent rule-based risk signals.",
-            icon: Bell,
-          },
-          {
-            title: "Research",
-            description: "Trace structured insights back to their evidence.",
-            icon: ShieldCheck,
-          },
-        ].map(({ description, icon: Icon, title }) => (
-          <Card key={title}>
-            <CardHeader>
-              <Icon className="size-4 text-muted-foreground" />
-              <CardTitle>{title}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              {description}
-            </CardContent>
-          </Card>
-        ))}
+      <section className="mx-auto w-full max-w-7xl px-6 py-20 lg:px-8">
+        <div className="max-w-3xl">
+          <p className="text-sm text-muted-foreground">Built around decisions</p>
+          <h2 className="mt-2 text-4xl font-medium tracking-[-0.02em] text-balance">
+            A portfolio dashboard that shows its work
+          </h2>
+          <p className="mt-4 text-base leading-7 text-muted-foreground">
+            Every major surface answers a practical investing question and keeps
+            the next action clear.
+          </p>
+        </div>
+        <div className="mt-10 grid gap-8 lg:grid-cols-3">
+          {capabilities.map(({ description, detail, title }) => (
+            <article className="border-t pt-6" key={title}>
+              <h3 className="text-lg font-medium">{title}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {description}
+              </p>
+              <p className="mt-4 text-xs text-muted-foreground">{detail}</p>
+            </article>
+          ))}
+        </div>
       </section>
-      <footer className="border-t">
-        <p className="mx-auto w-full max-w-7xl px-6 py-6 text-xs leading-5 text-muted-foreground lg:px-8">
-          PortfolioScope uses optional, privacy-limited product analytics to
-          measure a small set of navigation events. Portfolio values, holding
-          quantities, transactions, research contents, credentials, and session
-          data are never included.
-        </p>
-      </footer>
-    </main>
+
+      <section className="mx-auto w-full max-w-7xl px-6 pb-20 lg:px-8">
+        <div className="grid gap-5 rounded-xl border bg-card p-6 md:grid-cols-[1fr_auto] md:items-center md:p-8">
+          <div>
+            <p className="font-medium">Ready to inspect the product?</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Start with the read-only demo, open a holding, and review a
+              stock&apos;s fundamentals, risks, and research.
+            </p>
+          </div>
+          <AnalyticsLink
+            className={buttonVariants({ className: "min-h-10 px-4" })}
+            eventName="demo_opened"
+            eventProperties={{ entryPoint: "landing" }}
+            href="/dashboard?demo=true"
+            prefetch={false}
+          >
+            Start the product tour
+            <ArrowRight className="size-4" />
+          </AnalyticsLink>
+        </div>
+      </section>
+    </PublicSiteShell>
   );
 }

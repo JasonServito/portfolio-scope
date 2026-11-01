@@ -1,9 +1,10 @@
 import type { Session } from "next-auth";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 import { auth } from "@/auth";
 
-export async function getCurrentUser() {
+export const getCurrentUser = cache(async function getCurrentUser() {
   try {
     const session = await auth();
     return session?.user?.id ? session.user : null;
@@ -17,7 +18,7 @@ export async function getCurrentUser() {
 
     throw error;
   }
-}
+});
 
 export async function requireUser(callbackUrl = "/app") {
   const user = await getCurrentUser();

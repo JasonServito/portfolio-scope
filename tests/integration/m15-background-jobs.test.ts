@@ -6,12 +6,24 @@ import {
   BackgroundJobStatus,
   BackgroundJobType,
   ResearchStatus,
+  SecIngestionStatus,
 } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+const secJobMocks = vi.hoisted(() => ({
+  queueSecIngestion: vi.fn(),
+}));
+
+vi.mock("@/lib/sec/jobs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/sec/jobs")>();
+  return { ...original, queueSecIngestion: secJobMocks.queueSecIngestion };
+});
+
 import { db } from "@/lib/db";
 import { JobExecutionError } from "@/lib/jobs/errors";
+import { executeBackgroundJobHandler } from "@/lib/jobs/handlers";
 import type { JobPublisher } from "@/lib/jobs/qstash";
+import type { ClaimedBackgroundJob } from "@/lib/jobs/repository";
 import {
   cancelBackgroundJob,
   enqueueBackgroundJob,
@@ -24,6 +36,9 @@ const prefix = `m15-${runId}`;
 const userId = `${prefix}-user`;
 const stockId = `${prefix}-stock`;
 const fixtureTicker = `Z${runId.slice(0, 4).toUpperCase()}`;
+const secBatchTickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"] as const;
+const secBatchCikSeed = Number.parseInt(runId.slice(0, 8), 16);
+let secBatchCompanies: Array<{ id: string; secEntityId: string }> = [];
 const environment = {
   NODE_ENV: "test",
   NEXT_PUBLIC_APP_URL: "https://portfolioscope.invalid",
@@ -31,6 +46,12 @@ const environment = {
   RESEARCH_GENERATION_ENABLED: "true",
   SEC_INGESTION_ENABLED: "true",
 } as NodeJS.ProcessEnv;
+
+function secBatchCik(index: number) {
+  return ((secBatchCikSeed + index) % 10_000_000_000)
+    .toString()
+    .padStart(10, "0");
+}
 
 function publisher() {
   return {
@@ -56,11 +77,15 @@ async function cleanup() {
         { idempotencyKey: { startsWith: prefix } },
         { userId },
         { researchJob: { userId } },
+        { company: { slug: { startsWith: `${prefix}-sec-batch-` } } },
       ],
     },
   });
   await db.user.deleteMany({ where: { id: userId } });
   await db.stock.deleteMany({ where: { id: stockId } });
+  await db.company.deleteMany({
+    where: { slug: { startsWith: `${prefix}-sec-batch-` } },
+  });
 }
 
 beforeAll(async () => {
@@ -89,11 +114,174 @@ beforeAll(async () => {
       exchange: "TEST",
     },
   });
+  secBatchCompanies = [];
+  for (const [index, ticker] of secBatchTickers.entries()) {
+    const company = await db.company.create({
+      data: {
+        slug: `${prefix}-sec-batch-${ticker.toLowerCase()}`,
+        name: `M15 SEC batch fixture ${ticker}`,
+        isActive: true,
+        isSupported: true,
+        secEntity: {
+          create: {
+            cik: secBatchCik(index),
+            legalName: `M15 SEC batch fixture ${ticker}`,
+          },
+        },
+      },
+      select: { id: true, secEntity: { select: { id: true } } },
+    });
+    if (!company.secEntity) {
+      throw new Error("The M15 SEC batch fixture is missing its SEC entity.");
+    }
+    secBatchCompanies.push({
+      id: company.id,
+      secEntityId: company.secEntity.id,
+    });
+  }
 });
 
 afterAll(cleanup);
 
 describe("M15 durable background jobs", () => {
+  it("queues and completes five scheduled SEC children without correlation collisions", async () => {
+    const transport = publisher();
+    const parentCorrelationId = `${prefix}:scheduled-sec-refresh`;
+    const maintenanceJob = {
+      id: `${prefix}-maintenance-job`,
+      type: BackgroundJobType.MAINTENANCE_CLEANUP,
+      status: BackgroundJobStatus.RUNNING,
+      payloadJson: { operation: "REFRESH_STALE_SEC" },
+      correlationId: parentCorrelationId,
+      attemptCount: 1,
+      maxAttempts: 2,
+      timeoutMs: 60_000,
+      companyId: null,
+      portfolioId: null,
+      researchJobId: null,
+      userId: null,
+      agentName: null,
+    } satisfies ClaimedBackgroundJob;
+    const companySelection = secBatchTickers.map((ticker) => ({
+      securities: [{ ticker }],
+    }));
+    const companyFindMany = vi
+      .spyOn(db.company, "findMany")
+      .mockResolvedValue(companySelection as never);
+    const earningsDeleteMany = vi
+      .spyOn(db.upcomingEarningsState, "deleteMany")
+      .mockResolvedValue({ count: 0 });
+    const originalSecIngestionFlag = process.env.SEC_INGESTION_ENABLED;
+    process.env.SEC_INGESTION_ENABLED = "true";
+    secJobMocks.queueSecIngestion.mockImplementation(
+      async (ticker: string, input: { correlationId?: string } = {}) => {
+        const index = secBatchTickers.indexOf(
+          ticker as (typeof secBatchTickers)[number],
+        );
+        const correlationId = input.correlationId;
+        if (index < 0 || !correlationId) {
+          throw new Error("The scheduled SEC queue input is invalid.");
+        }
+        return enqueueBackgroundJob(
+          {
+            type: BackgroundJobType.SEC_SUBMISSIONS_SYNC,
+            idempotencyKey: `sec:${secBatchCompanies[index].id}:2026-09-12T18:00:00.000Z`,
+            correlationId,
+            payload: { ticker },
+            companyId: secBatchCompanies[index].id,
+          },
+          { publisher: transport, environment },
+        );
+      },
+    );
+
+    try {
+      await expect(
+        executeBackgroundJobHandler(
+          maintenanceJob,
+          new AbortController().signal,
+        ),
+      ).resolves.toEqual({ earningsDeleted: 0, queued: 5 });
+      await expect(
+        executeBackgroundJobHandler(
+          maintenanceJob,
+          new AbortController().signal,
+        ),
+      ).resolves.toEqual({ earningsDeleted: 0, queued: 5 });
+
+      expect(secJobMocks.queueSecIngestion).toHaveBeenCalledTimes(10);
+      expect(transport.publishJSON).toHaveBeenCalledTimes(5);
+
+      const jobs = await db.backgroundJob.findMany({
+        where: {
+          companyId: { in: secBatchCompanies.map(({ id }) => id) },
+          type: BackgroundJobType.SEC_SUBMISSIONS_SYNC,
+        },
+        orderBy: { queuedAt: "asc" },
+      });
+      expect(jobs).toHaveLength(5);
+      expect(new Set(jobs.map(({ correlationId }) => correlationId)).size).toBe(
+        5,
+      );
+      expect(
+        jobs.every(({ correlationId }) =>
+          correlationId.startsWith(`${parentCorrelationId}:sec:`),
+        ),
+      ).toBe(true);
+
+      for (const job of jobs) {
+        const fixture = secBatchCompanies.find(
+          ({ id }) => id === job.companyId,
+        );
+        if (!fixture) throw new Error("The queued SEC fixture is missing.");
+        await expect(
+          executeBackgroundJob(job.id, {
+            handler: async (claimedJob) => {
+              await db.secIngestionRun.create({
+                data: {
+                  secEntityId: fixture.secEntityId,
+                  status: SecIngestionStatus.COMPLETED,
+                  trigger: "TEST",
+                  correlationId: claimedJob.correlationId,
+                  completedAt: new Date(),
+                },
+              });
+              return { stored: true };
+            },
+          }),
+        ).resolves.toMatchObject({
+          status: BackgroundJobStatus.COMPLETED,
+          duplicate: false,
+        });
+      }
+
+      const runs = await db.secIngestionRun.findMany({
+        where: {
+          secEntityId: {
+            in: secBatchCompanies.map(({ secEntityId }) => secEntityId),
+          },
+        },
+        select: { correlationId: true },
+      });
+      expect(runs).toHaveLength(5);
+      expect(new Set(runs.map(({ correlationId }) => correlationId)).size).toBe(
+        5,
+      );
+      expect(runs.map(({ correlationId }) => correlationId).sort()).toEqual(
+        jobs.map(({ correlationId }) => correlationId).sort(),
+      );
+    } finally {
+      companyFindMany.mockRestore();
+      earningsDeleteMany.mockRestore();
+      secJobMocks.queueSecIngestion.mockReset();
+      if (originalSecIngestionFlag === undefined) {
+        delete process.env.SEC_INGESTION_ENABLED;
+      } else {
+        process.env.SEC_INGESTION_ENABLED = originalSecIngestionFlag;
+      }
+    }
+  });
+
   it("persists before delivery, deduplicates, records attempts, and acknowledges replay", async () => {
     const transport = publisher();
     const input = maintenanceInput("completed");

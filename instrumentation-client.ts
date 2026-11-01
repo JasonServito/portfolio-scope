@@ -2,9 +2,10 @@ import * as Sentry from "@sentry/nextjs";
 import posthog from "posthog-js";
 
 import {
-  getSentryRelease,
   getSentryTracesSampleRate,
+  scrubSentryBreadcrumb,
   scrubSentryEvent,
+  scrubSentrySpan,
 } from "@/lib/observability/sentry-config";
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -14,9 +15,12 @@ Sentry.init({
   enabled: Boolean(dsn),
   environment: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
   sendDefaultPii: false,
-  release: getSentryRelease(),
+  release: process.env.NEXT_PUBLIC_SENTRY_RELEASE?.trim() || undefined,
   tracesSampleRate: getSentryTracesSampleRate(),
+  beforeBreadcrumb: scrubSentryBreadcrumb,
   beforeSend: scrubSentryEvent,
+  beforeSendSpan: scrubSentrySpan,
+  beforeSendTransaction: scrubSentryEvent,
 });
 
 const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;

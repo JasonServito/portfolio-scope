@@ -1,13 +1,57 @@
 import type { Metadata } from "next";
+import { IBM_Plex_Mono, Inter } from "next/font/google";
+
+import { getSiteUrl, siteConfig } from "@/lib/site";
+
 import "./globals.css";
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  variable: "--font-plex-mono",
+  weight: ["400", "500"],
+});
+
 export const metadata: Metadata = {
+  metadataBase: getSiteUrl(),
   title: {
-    default: "PortfolioScope",
+    default: "PortfolioScope · Portfolio and stock dashboard",
     template: "%s | PortfolioScope",
   },
-  description:
-    "Portfolio analytics, deterministic risk alerts, and explainable stock research in a polished full-stack demo.",
+  description: siteConfig.description,
+  applicationName: siteConfig.name,
+  authors: [{ name: "Jason Servito", url: siteConfig.repositoryUrl }],
+  creator: "Jason Servito",
+  keywords: [
+    "portfolio analytics",
+    "stock dashboard",
+    "watchlist",
+    "investment research",
+  ],
+  openGraph: {
+    type: "website",
+    title: "PortfolioScope · Portfolio and stock dashboard",
+    description: siteConfig.description,
+    siteName: siteConfig.name,
+    images: [
+      {
+        url: "/og.png",
+        width: 1600,
+        height: 840,
+        alt: "PortfolioScope portfolio and stock dashboard",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "PortfolioScope · Portfolio and stock dashboard",
+    description: siteConfig.description,
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({
@@ -16,7 +60,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html
+      lang="en"
+      className={`${inter.variable} ${plexMono.variable} h-full antialiased`}
+      data-scroll-behavior="smooth"
+    >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
   );

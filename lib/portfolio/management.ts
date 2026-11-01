@@ -411,7 +411,17 @@ export async function deleteHolding(userId: string, holdingId: string) {
 export async function getDemoWatchlist() {
   return db.watchlistItem.findMany({
     where: { user: { isDemo: true } },
-    include: { stock: true },
+    include: {
+      stock: {
+        include: {
+          prices: {
+            orderBy: { timestamp: "desc" },
+            select: { close: true, id: true, timestamp: true },
+            take: 1,
+          },
+        },
+      },
+    },
     orderBy: { stock: { ticker: "asc" } },
   });
 }
@@ -419,7 +429,17 @@ export async function getDemoWatchlist() {
 export async function getUserWatchlist(userId: string) {
   return db.watchlistItem.findMany({
     where: { userId },
-    include: { stock: true },
+    include: {
+      stock: {
+        include: {
+          prices: {
+            orderBy: { timestamp: "desc" },
+            select: { close: true, id: true, timestamp: true },
+            take: 1,
+          },
+        },
+      },
+    },
     orderBy: { stock: { ticker: "asc" } },
   });
 }

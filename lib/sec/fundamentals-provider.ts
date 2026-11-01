@@ -58,6 +58,8 @@ export type FundamentalsSnapshot = {
   freshness: FundamentalsFreshness;
   retrievedAt: string | null;
   facts: CanonicalFundamentalFact[];
+  trendPeriods: string[];
+  trendFacts: CanonicalFundamentalFact[];
   missingMetrics: string[];
   ambiguousMetrics: string[];
   lastErrorCode: string | null;
@@ -96,6 +98,8 @@ export class SecEdgarFundamentalsProvider implements FundamentalsProvider {
         freshness: "UNSUPPORTED",
         retrievedAt: null,
         facts: [],
+        trendPeriods: [],
+        trendFacts: [],
         missingMetrics: expectedMetricNames,
         ambiguousMetrics: [],
         lastErrorCode: null,
@@ -171,6 +175,8 @@ export class SecEdgarFundamentalsProvider implements FundamentalsProvider {
         freshness: "MISSING",
         retrievedAt: null,
         facts: [],
+        trendPeriods: [],
+        trendFacts: [],
         missingMetrics: expectedMetricNames,
         ambiguousMetrics: [],
         lastErrorCode: null,
@@ -181,10 +187,74 @@ export class SecEdgarFundamentalsProvider implements FundamentalsProvider {
     const retrievedAt =
       company.secEntity.rawSources[0]?.lastRetrievedAt ?? null;
     const resolvedKeys = new Set<string>();
+    const resolvedTrendPeriods = new Set<string>();
+    const resolvedTrendKeys = new Set<string>();
     const selectedFacts: CanonicalFundamentalFact[] = [];
+    const trendPeriods: string[] = [];
+    const trendFacts: CanonicalFundamentalFact[] = [];
     const ambiguousMetrics = new Set<string>();
 
+    const toCanonicalFact = (
+      fact: (typeof company.secEntity.financialFacts)[number],
+    ): CanonicalFundamentalFact => ({
+      metric: fact.canonicalMetric,
+      label: fact.label,
+      value: fact.normalizedValue.toNumber(),
+      unit: fact.normalizedUnit,
+      originalValue: fact.originalValue.toString(),
+      originalUnit: fact.originalUnit,
+      taxonomy: fact.taxonomy,
+      concept: fact.concept,
+      periodStart: fact.periodStart?.toISOString() ?? null,
+      periodEnd: fact.periodEnd.toISOString(),
+      periodKind: fact.periodKind,
+      fiscalYear: fact.fiscalYear,
+      fiscalPeriod: fact.fiscalPeriod,
+      formType: fact.formType,
+      filedAt: fact.filedAt.toISOString(),
+      accessionNumber: fact.accessionNumber,
+      sourceUrl: fact.sourceUrl,
+      observedAt: fact.observedAt.toISOString(),
+      normalizationVersion: fact.normalizationVersion,
+      isDerived: fact.isDerived,
+      selection: fact.selection,
+    });
+
     for (const fact of company.secEntity.financialFacts) {
+      const isTrendMetric = [
+        "REVENUE",
+        "DILUTED_EPS",
+        "OPERATING_CASH_FLOW",
+        "CAPITAL_EXPENDITURES",
+      ].includes(fact.canonicalMetric);
+      const trendPeriod = fact.periodEnd.toISOString();
+      const trendKey = `${fact.canonicalMetric}:${trendPeriod}`;
+
+      if (
+        isTrendMetric &&
+        fact.periodKind === "QUARTERLY" &&
+        !resolvedTrendPeriods.has(trendPeriod) &&
+        trendPeriods.length < 8
+      ) {
+        trendPeriods.push(trendPeriod);
+        resolvedTrendPeriods.add(trendPeriod);
+      }
+
+      if (
+        isTrendMetric &&
+        fact.periodKind === "QUARTERLY" &&
+        fact.selection === "SELECTED" &&
+        !resolvedTrendKeys.has(trendKey)
+      ) {
+        const metricFactCount = trendFacts.filter(
+          (candidate) => candidate.metric === fact.canonicalMetric,
+        ).length;
+        if (metricFactCount < 8) {
+          trendFacts.push(toCanonicalFact(fact));
+          resolvedTrendKeys.add(trendKey);
+        }
+      }
+
       const key = `${fact.canonicalMetric}:${fact.periodKind}`;
       if (resolvedKeys.has(key)) continue;
       resolvedKeys.add(key);
@@ -194,29 +264,7 @@ export class SecEdgarFundamentalsProvider implements FundamentalsProvider {
         continue;
       }
 
-      selectedFacts.push({
-        metric: fact.canonicalMetric,
-        label: fact.label,
-        value: fact.normalizedValue.toNumber(),
-        unit: fact.normalizedUnit,
-        originalValue: fact.originalValue.toString(),
-        originalUnit: fact.originalUnit,
-        taxonomy: fact.taxonomy,
-        concept: fact.concept,
-        periodStart: fact.periodStart?.toISOString() ?? null,
-        periodEnd: fact.periodEnd.toISOString(),
-        periodKind: fact.periodKind,
-        fiscalYear: fact.fiscalYear,
-        fiscalPeriod: fact.fiscalPeriod,
-        formType: fact.formType,
-        filedAt: fact.filedAt.toISOString(),
-        accessionNumber: fact.accessionNumber,
-        sourceUrl: fact.sourceUrl,
-        observedAt: fact.observedAt.toISOString(),
-        normalizationVersion: fact.normalizationVersion,
-        isDerived: fact.isDerived,
-        selection: fact.selection,
-      });
+      selectedFacts.push(toCanonicalFact(fact));
     }
 
     const availableMetrics = new Set(selectedFacts.map((fact) => fact.metric));
@@ -235,6 +283,10 @@ export class SecEdgarFundamentalsProvider implements FundamentalsProvider {
       freshness,
       retrievedAt: retrievedAt?.toISOString() ?? null,
       facts: selectedFacts,
+      trendPeriods,
+      trendFacts: trendFacts.filter((fact) =>
+        resolvedTrendPeriods.has(fact.periodEnd),
+      ),
       missingMetrics: expectedMetricNames.filter(
         (metric) => !availableMetrics.has(metric),
       ),
@@ -260,6 +312,8 @@ export class SeededFinancialsProvider implements FundamentalsProvider {
         freshness: "MISSING" as const,
         retrievedAt: null,
         facts: [],
+        trendPeriods: [],
+        trendFacts: [],
         missingMetrics: expectedMetricNames,
         ambiguousMetrics: [],
         lastErrorCode: null,
@@ -288,10 +342,13 @@ const canonicalFundamentalFactSchema = z
     formType: z.string(),
     filedAt: z.string().datetime(),
     accessionNumber: z.string().regex(/^\d{10}-\d{2}-\d{6}$/),
-    sourceUrl: z.string().url().refine((value) => {
-      const hostname = new URL(value).hostname;
-      return hostname === "sec.gov" || hostname.endsWith(".sec.gov");
-    }),
+    sourceUrl: z
+      .string()
+      .url()
+      .refine((value) => {
+        const hostname = new URL(value).hostname;
+        return hostname === "sec.gov" || hostname.endsWith(".sec.gov");
+      }),
     observedAt: z.string().datetime(),
     normalizationVersion: z.string(),
     isDerived: z.boolean(),
@@ -303,7 +360,10 @@ const fundamentalsSnapshotSchema: z.ZodType<FundamentalsSnapshot> = z
   .object({
     ticker: z.string().regex(/^[A-Z][A-Z0-9.-]{0,9}$/),
     companyName: z.string(),
-    cik: z.string().regex(/^\d{10}$/).nullable(),
+    cik: z
+      .string()
+      .regex(/^\d{10}$/)
+      .nullable(),
     provider: z.enum(["SEC_EDGAR", "SEEDED_FIXTURE"]),
     freshness: z.enum([
       "CURRENT",
@@ -316,6 +376,8 @@ const fundamentalsSnapshotSchema: z.ZodType<FundamentalsSnapshot> = z
     ]),
     retrievedAt: z.string().datetime().nullable(),
     facts: z.array(canonicalFundamentalFactSchema),
+    trendPeriods: z.array(z.string().datetime()).max(8),
+    trendFacts: z.array(canonicalFundamentalFactSchema).max(32),
     missingMetrics: z.array(z.string()),
     ambiguousMetrics: z.array(z.string()),
     lastErrorCode: z.string().nullable(),

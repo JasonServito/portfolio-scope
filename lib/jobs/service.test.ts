@@ -2,11 +2,15 @@ import { BackgroundJobStatus, BackgroundJobType } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import { JobExecutionError } from "@/lib/jobs/errors";
-import { type JobPublisher } from "@/lib/jobs/qstash";
+import {
+  createQstashDeduplicationId,
+  type JobPublisher,
+} from "@/lib/jobs/qstash";
 import { PrismaBackgroundJobRepository } from "@/lib/jobs/repository";
 import {
   enqueueBackgroundJob,
   executeBackgroundJob,
+  retryBackgroundJob,
 } from "@/lib/jobs/service";
 
 const environment = {
@@ -75,7 +79,13 @@ describe("background job service", () => {
       enqueueBackgroundJob(input, { repository, publisher, environment }),
     ).resolves.toMatchObject({ jobId: "job-a", reused: true });
     expect(repository.createOrReuse).toHaveBeenCalledTimes(2);
+    expect(repository.createOrReuse).toHaveBeenNthCalledWith(1, input);
     expect(publisher.publishJSON).toHaveBeenCalledOnce();
+    expect(publisher.publishJSON).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deduplicationId: createQstashDeduplicationId(input.idempotencyKey),
+      }),
+    );
     expect(repository.recordPublished).toHaveBeenCalledWith(
       "job-a",
       "message-a",
@@ -103,7 +113,135 @@ describe("background job service", () => {
         { repository, publisher, environment },
       ),
     ).rejects.toMatchObject({ code: "JOB_PUBLISH_FAILED", status: 503 });
-    expect(repository.recordPublishFailure).toHaveBeenCalledOnce();
+    expect(repository.recordPublishFailure).toHaveBeenCalledWith(
+      "job-a",
+      "JOB_PUBLISH_FAILED",
+      "QStash did not accept the background job.",
+    );
+  });
+
+  it("persists a redacted provider diagnostic for Preview manual retries", async () => {
+    const repository = {
+      prepareManualRetry: vi.fn().mockResolvedValue(job()),
+      recordPublished: vi.fn(),
+      recordPublishFailure: vi.fn(),
+    } as unknown as PrismaBackgroundJobRepository;
+    const publisherError = Object.assign(
+      new Error("invalid token preview-token"),
+      { name: "QstashError", status: 401 },
+    );
+    const publisher = {
+      publishJSON: vi.fn().mockRejectedValue(publisherError),
+    } as JobPublisher;
+
+    const failure = await retryBackgroundJob("job-a", "admin-a", {
+      repository,
+      publisher,
+      environment: {
+        ...environment,
+        VERCEL_ENV: "preview",
+        QSTASH_URL: "https://qstash-us-east-1.upstash.io",
+        QSTASH_TOKEN: "preview-token",
+        VERCEL_AUTOMATION_BYPASS_SECRET: "preview-bypass-secret",
+      } as NodeJS.ProcessEnv,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      code: "JOB_PUBLISH_FAILED",
+      status: 503,
+      cause: {
+        name: "QstashPublishDiagnosticError",
+        message:
+          "QStash publish failed: host=qstash-us-east-1.upstash.io; error=QstashError; status=401; message=invalid token [REDACTED]",
+      },
+    });
+    expect(JSON.stringify(failure)).not.toContain("preview-token");
+    expect(repository.recordPublishFailure).toHaveBeenCalledWith(
+      "job-a",
+      "JOB_PUBLISH_FAILED",
+      "QStash publish failed: host=qstash-us-east-1.upstash.io; error=QstashError; status=401; message=invalid token [REDACTED]",
+    );
+  });
+
+  it("publishes a QStash-safe deduplication ID for a NEWS manual retry", async () => {
+    const applicationIdempotencyKey =
+      "research:cmtjd3d8d0001ju04sxjp4plb:agent:NEWS";
+    const repository = {
+      prepareManualRetry: vi.fn().mockResolvedValue(
+        job({
+          id: "cmtjd3da10008ju04e2v34ev2",
+          type: BackgroundJobType.RESEARCH_AGENT_RUN,
+          idempotencyKey: applicationIdempotencyKey,
+          researchJobId: "cmtjd3d8d0001ju04sxjp4plb",
+          agentName: "NEWS",
+        }),
+      ),
+      recordPublished: vi.fn(),
+      recordPublishFailure: vi.fn(),
+    } as unknown as PrismaBackgroundJobRepository;
+    const publishJSON = vi
+      .fn()
+      .mockResolvedValue({ messageId: "message-news" });
+    const publisher = { publishJSON } satisfies JobPublisher;
+
+    const retry = () =>
+      retryBackgroundJob("cmtjd3da10008ju04e2v34ev2", "admin-a", {
+        repository,
+        publisher,
+        environment,
+      });
+
+    await expect(retry()).resolves.toMatchObject({
+      jobId: "cmtjd3da10008ju04e2v34ev2",
+      status: BackgroundJobStatus.QUEUED,
+    });
+    await expect(retry()).resolves.toMatchObject({
+      jobId: "cmtjd3da10008ju04e2v34ev2",
+      status: BackgroundJobStatus.QUEUED,
+    });
+    expect(publishJSON).toHaveBeenCalledTimes(2);
+    const providerIds = publishJSON.mock.calls.map(
+      ([request]) => request.deduplicationId,
+    );
+    expect(providerIds).toEqual([
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+    ]);
+    expect(providerIds[0]).not.toBe(providerIds[1]);
+    expect(providerIds.join("")).not.toContain(":");
+    expect(providerIds.join("")).not.toContain(applicationIdempotencyKey);
+    expect(repository.recordPublished).toHaveBeenCalledTimes(2);
+    expect(repository.recordPublished).toHaveBeenLastCalledWith(
+      "cmtjd3da10008ju04e2v34ev2",
+      "message-news",
+    );
+  });
+
+  it("preserves the original publish error as the Production cause", async () => {
+    const repository = {
+      prepareManualRetry: vi.fn().mockResolvedValue(job()),
+      recordPublished: vi.fn(),
+      recordPublishFailure: vi.fn(),
+    } as unknown as PrismaBackgroundJobRepository;
+    const publisherError = new Error("production provider detail");
+    const publisher = {
+      publishJSON: vi.fn().mockRejectedValue(publisherError),
+    } as JobPublisher;
+
+    const failure = await retryBackgroundJob("job-a", "admin-a", {
+      repository,
+      publisher,
+      environment: {
+        ...environment,
+        VERCEL_ENV: "production",
+      } as NodeJS.ProcessEnv,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      code: "JOB_PUBLISH_FAILED",
+      status: 503,
+      cause: publisherError,
+    });
   });
 
   it("keeps an accepted delivery queued when message metadata cannot be recorded", async () => {
@@ -146,13 +284,15 @@ describe("background job service", () => {
     await expect(
       executeBackgroundJob("job-a", {
         repository,
-        handler: vi.fn().mockRejectedValue(
-          new JobExecutionError(
-            "SEC_PROVIDER_UNAVAILABLE",
-            true,
-            "SEC is temporarily unavailable.",
+        handler: vi
+          .fn()
+          .mockRejectedValue(
+            new JobExecutionError(
+              "SEC_PROVIDER_UNAVAILABLE",
+              true,
+              "SEC is temporarily unavailable.",
+            ),
           ),
-        ),
       }),
     ).resolves.toMatchObject({
       status: BackgroundJobStatus.RETRYING,

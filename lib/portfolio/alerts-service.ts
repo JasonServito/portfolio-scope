@@ -6,12 +6,25 @@ import {
 } from "@/lib/auth/authorization";
 import { db } from "@/lib/db";
 import { ManagementError } from "@/lib/portfolio/management";
+import { reconcileUserTargetAlerts } from "@/lib/portfolio/target-alerts";
 
 export const alertStatusInputSchema = z
   .object({ status: z.enum(["ACTIVE", "RESOLVED"]) })
   .strict();
 
-export async function listUserAlerts(userId: string) {
+export async function listUserAlerts(
+  userId: string,
+  options: { reconcileTargetCrossings?: boolean } = {},
+) {
+  if (options.reconcileTargetCrossings !== false) {
+    try {
+      await reconcileUserTargetAlerts(userId);
+    } catch {
+      // Existing alerts remain useful when optional crossing reconciliation
+      // cannot read or write the cached demo observations. A later read retries.
+    }
+  }
+
   return db.alert.findMany({
     where: {
       userId,

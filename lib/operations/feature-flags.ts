@@ -4,9 +4,12 @@ export const featureFlagNames = [
   "AUTH_GOOGLE_ENABLED",
   "BACKGROUND_JOBS_ENABLED",
   "SEC_INGESTION_ENABLED",
+  "SEC_FILING_TEXT_ENABLED",
+  "SEC_CURRENT_REPORTS_ENABLED",
   "PUBLIC_STOCK_PAGES_ENABLED",
   "RESEARCH_GENERATION_ENABLED",
   "AI_RESEARCH_ENABLED",
+  "EARNINGS_SYNC_ENABLED",
   "PORTFOLIO_EXPORT_ENABLED",
   "MAINTENANCE_MODE",
 ] as const;
@@ -19,9 +22,16 @@ const localDefaults: Record<FeatureFlagName, boolean> = {
   AUTH_GOOGLE_ENABLED: true,
   BACKGROUND_JOBS_ENABLED: true,
   SEC_INGESTION_ENABLED: true,
+  // Filing-document retrieval extends SEC Archives usage and R2 storage, so
+  // it stays an explicit opt-in in every environment.
+  SEC_FILING_TEXT_ENABLED: false,
+  // 8-K current-report retention and press-release exhibit retrieval extend
+  // SEC usage further and carry their own approval, so they are also opt-in.
+  SEC_CURRENT_REPORTS_ENABLED: false,
   PUBLIC_STOCK_PAGES_ENABLED: true,
   RESEARCH_GENERATION_ENABLED: true,
   AI_RESEARCH_ENABLED: false,
+  EARNINGS_SYNC_ENABLED: false,
   PORTFOLIO_EXPORT_ENABLED: false,
   MAINTENANCE_MODE: false,
 };
@@ -30,9 +40,7 @@ export function isFeatureEnabled(
   name: FeatureFlagName,
   environment: NodeJS.ProcessEnv = process.env,
 ) {
-  const parsed = booleanFlag.safeParse(
-    environment[name]?.trim().toLowerCase(),
-  );
+  const parsed = booleanFlag.safeParse(environment[name]?.trim().toLowerCase());
   if (parsed.success) return parsed.data === "true";
 
   if (environment.NODE_ENV === "production") return false;
@@ -47,17 +55,13 @@ export function getFeatureFlagSummary(
       name,
       {
         enabled: isFeatureEnabled(name, environment),
-        source: booleanFlag.safeParse(
-          environment[name]?.trim().toLowerCase(),
-        ).success
+        source: booleanFlag.safeParse(environment[name]?.trim().toLowerCase())
+          .success
           ? "environment"
           : environment.NODE_ENV === "production"
             ? "safe-production-default"
             : "local-default",
       },
     ]),
-  ) as Record<
-    FeatureFlagName,
-    { enabled: boolean; source: string }
-  >;
+  ) as Record<FeatureFlagName, { enabled: boolean; source: string }>;
 }
