@@ -146,7 +146,7 @@ function PublicSiteFooter() {
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-6 py-5 text-xs text-background/55 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <p>Educational project. Not investment advice or a brokerage.</p>
           <p>
-            SEC EDGAR facts · Attributed TradingView widgets · Seeded demo data
+            SEC EDGAR facts · Attributed TradingView widgets · Sample demo data
           </p>
         </div>
       </div>

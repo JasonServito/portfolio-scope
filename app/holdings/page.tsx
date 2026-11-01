@@ -1,12 +1,13 @@
-import { AlertTriangle } from "lucide-react";
-
 import { DemoJourney } from "@/components/demo/demo-journey";
 import { HoldingsTable } from "@/components/holdings/holdings-table";
 import { AddHoldingForm } from "@/components/holdings/holding-actions";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
+import { AsOfStamp } from "@/components/ui/as-of-stamp";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataState } from "@/components/ui/data-state";
+import { signTone, StatCard } from "@/components/ui/stat-card";
 import {
   formatCurrency,
   formatSignedCurrency,
@@ -23,68 +24,56 @@ export default async function HoldingsPage() {
   return (
     <AppLayout>
       <PageShell
-        description="Explore public demo positions, allocation, cost basis, and period returns without changing the seeded portfolio."
-        eyebrow="Portfolio"
+        description="Every position in the sample portfolio, with its cost, value, and return over each period"
+        eyebrow="North Star Portfolio · Read-only demo"
         title="Holdings"
       >
         <DemoJourney currentStep={2} />
         {!data ? (
           <Card>
-            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-              <span className="flex size-11 items-center justify-center rounded-md bg-muted">
-                <AlertTriangle className="size-5" />
-              </span>
-              <div>
-                <p className="font-medium">Holdings data is unavailable.</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Seed the database to load demo portfolio positions.
-                </p>
-              </div>
+            <CardContent>
+              <DataState
+                description="The sample portfolio could not be loaded. No positions have been made up."
+                kind="missing"
+                title="Holdings data is unavailable"
+              />
             </CardContent>
           </Card>
         ) : (
           <>
-            <section className="grid gap-4 md:grid-cols-3">
-              {[
-                [
-                  "Portfolio value",
-                  formatCurrency(
+            <div className="space-y-3">
+              <AsOfStamp asOf={data.asOf} note="Sample portfolio and prices" />
+              <section
+                aria-label="Holdings summary"
+                className="grid gap-4 md:grid-cols-3"
+              >
+                <StatCard
+                  detail="Current market value"
+                  label="Portfolio value"
+                  value={formatCurrency(
                     data.summary.marketValue,
                     data.portfolio.baseCurrency,
-                  ),
-                  "Current seeded market value",
-                ],
-                [
-                  "Unrealized gain",
-                  formatSignedCurrency(
+                  )}
+                />
+                <StatCard
+                  change={formatSignedPercent(data.summary.unrealizedGainPercent)}
+                  changeTone={signTone(data.summary.unrealizedGainPercent)}
+                  detail="vs cost basis"
+                  label="Unrealized gain"
+                  value={formatSignedCurrency(
                     data.summary.unrealizedGain,
                     data.portfolio.baseCurrency,
-                  ),
-                  formatSignedPercent(data.summary.unrealizedGainPercent),
-                ],
-                [
-                  "Positions",
-                  String(data.holdings.length),
-                  "Seeded demo holdings",
-                ],
-              ].map(([title, value, detail]) => (
-                <Card key={title}>
-                  <CardHeader>
-                    <CardTitle className="text-sm text-muted-foreground">
-                      {title}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-3xl font-semibold tracking-normal">
-                      {value}
-                    </p>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {detail}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
-            </section>
+                  )}
+                />
+                <StatCard
+                  detail={`Across ${
+                    new Set(data.holdings.map((holding) => holding.sector)).size
+                  } sectors`}
+                  label="Positions"
+                  value={String(data.holdings.length)}
+                />
+              </section>
+            </div>
 
             <Card>
               <CardHeader>
@@ -95,8 +84,8 @@ export default async function HoldingsPage() {
                     <AddHoldingForm readOnly={readOnly} />
                   </div>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground md:hidden">
-                  Scroll horizontally to compare every return period.
+                <p className="mt-1 text-xs text-muted-foreground md:hidden">
+                  Scroll sideways to compare every return period
                 </p>
               </CardHeader>
               <CardContent>

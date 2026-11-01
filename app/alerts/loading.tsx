@@ -7,8 +7,8 @@ export default function AlertsLoading() {
   return (
     <AppLayout>
       <PageShell
-        description="Loading deterministic portfolio risk signals."
-        eyebrow="Risk monitoring"
+        description="Positions and watchlist stocks that crossed a concentration, drawdown, price move, volatility, or target check"
+        eyebrow="North Star Portfolio · Read-only demo"
         title="Alerts"
       >
         <Card>

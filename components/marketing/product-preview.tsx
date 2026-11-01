@@ -1,137 +1,67 @@
-import { ArrowDownRight, ArrowUpRight, ShieldCheck } from "lucide-react";
+import { PositionWeights } from "@/components/dashboard/allocation-chart";
+import type { AllocationItem } from "@/lib/portfolio/types";
 
-const performanceBars = [28, 34, 31, 42, 47, 45, 58, 64, 61, 72, 78, 84];
+// Figures from the read-only demo seed: North Star Portfolio, 1M period as of
+// Jun 26, 2026, so the preview matches what the demo shows.
+const positions: AllocationItem[] = [
+  { key: "MSFT", label: "MSFT", value: 11_676.64, percentage: 0.2277 },
+  { key: "NVDA", label: "NVDA", value: 11_634, percentage: 0.2269 },
+  { key: "AAPL", label: "AAPL", value: 8_760.58, percentage: 0.1708 },
+  { key: "COST", label: "COST", value: 7_452.53, percentage: 0.1453 },
+  { key: "GOOGL", label: "GOOGL", value: 6_048.78, percentage: 0.118 },
+  { key: "AMZN", label: "AMZN", value: 5_705.38, percentage: 0.1113 },
+];
+
+const stats = [
+  ["Total value", "$51,277.90"],
+  ["1M return", "+1.35%"],
+  ["Active alerts", "3"],
+] as const;
+
+const contributors = [
+  ["NVDA", "+$259.35"],
+  ["MSFT", "+$150.23"],
+  ["AAPL", "+$92.36"],
+] as const;
 
 export function ProductPreview() {
   return (
     <div
       aria-label="Preview of the PortfolioScope demo dashboard"
-      className="relative overflow-hidden rounded-[1.5rem] border border-foreground/10 bg-[#0d1a19] p-3 text-white shadow-[0_30px_80px_rgba(8,25,23,0.24)] sm:p-5"
+      className="overflow-hidden rounded-xl border bg-card shadow-[0_8px_24px_rgba(0,0,0,0.06)]"
       role="img"
     >
-      <div className="flex items-center justify-between border-b border-white/10 px-1 pb-4">
-        <div className="flex items-center gap-2">
-          <span className="size-2.5 rounded-full bg-[#6ee7b7]" />
-          <span className="text-xs font-semibold">North Star Portfolio</span>
-        </div>
-        <span className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] text-white/65">
-          Read-only demo
-        </span>
+      <div className="flex items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
+        <p className="text-sm font-medium">North Star Portfolio</p>
+        <p className="font-mono text-xs text-muted-foreground">
+          As of Jun 26, 2026
+        </p>
       </div>
-
-      <div className="grid gap-3 py-4 sm:grid-cols-3">
-        <PreviewMetric label="Portfolio value" value="$128,420" />
-        <PreviewMetric label="1Y return" positive value="+8.6%" />
-        <PreviewMetric label="Active risks" value="3" />
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-[1.45fr_0.8fr]">
-        <div className="rounded-xl border border-white/10 bg-white/[0.055] p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium">Portfolio performance</p>
-              <p className="mt-1 text-[10px] text-white/50">
-                Period-aware, reproducible snapshots
-              </p>
-            </div>
-            <span className="text-xs font-semibold text-[#6ee7b7]">+$10,184</span>
+      <dl className="grid grid-cols-3 divide-x border-b">
+        {stats.map(([label, value]) => (
+          <div className="px-3 py-4 sm:px-5" key={label}>
+            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dd className="mt-1 text-base font-medium tabular-nums sm:text-xl">
+              {value}
+            </dd>
           </div>
-          <div className="mt-6 flex h-28 items-end gap-1.5" aria-hidden="true">
-            {performanceBars.map((height, index) => (
-              <span
-                className="min-w-0 flex-1 rounded-t-sm bg-[#6ee7b7]"
-                key={`${height}-${index}`}
-                style={{ height: `${height}%`, opacity: 0.28 + index * 0.045 }}
-              />
+        ))}
+      </dl>
+      <div className="grid gap-6 p-4 sm:grid-cols-[1.5fr_1fr] sm:p-5">
+        <PositionWeights currency="USD" positions={positions} showValues={false} />
+        <div>
+          <h3 className="text-sm font-medium">Top contributors</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Over the past month</p>
+          <ul className="mt-3 divide-y text-xs">
+            {contributors.map(([ticker, value]) => (
+              <li className="flex items-center justify-between py-2" key={ticker}>
+                <span className="font-mono font-medium">{ticker}</span>
+                <span className="text-positive tabular-nums">{value}</span>
+              </li>
             ))}
-          </div>
-          <div className="mt-2 flex justify-between text-[9px] text-white/40">
-            <span>Jul</span>
-            <span>Oct</span>
-            <span>Jan</span>
-            <span>Apr</span>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-white/[0.055] p-4">
-          <p className="text-xs font-medium">Holding contribution</p>
-          <div className="mt-4 space-y-3">
-            <HoldingRow
-              icon={<ArrowUpRight className="size-3" />}
-              ticker="NVDA"
-              value="+$2,814"
-            />
-            <HoldingRow
-              icon={<ArrowUpRight className="size-3" />}
-              ticker="MSFT"
-              value="+$1,326"
-            />
-            <HoldingRow
-              icon={<ArrowDownRight className="size-3" />}
-              negative
-              ticker="DIS"
-              value="-$412"
-            />
-          </div>
-          <div className="mt-5 flex gap-2 rounded-lg border border-[#6ee7b7]/20 bg-[#6ee7b7]/8 p-3">
-            <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-[#6ee7b7]" />
-            <p className="text-[10px] leading-4 text-white/60">
-              Each fundamental retains filing, period, source, and freshness.
-            </p>
-          </div>
+          </ul>
         </div>
       </div>
-    </div>
-  );
-}
-
-function PreviewMetric({
-  label,
-  positive,
-  value,
-}: {
-  label: string;
-  positive?: boolean;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.055] p-3">
-      <p className="text-[10px] text-white/50">{label}</p>
-      <p className={positive ? "mt-1 text-lg font-semibold text-[#6ee7b7]" : "mt-1 text-lg font-semibold"}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function HoldingRow({
-  icon,
-  negative,
-  ticker,
-  value,
-}: {
-  icon: React.ReactNode;
-  negative?: boolean;
-  ticker: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-[11px]">
-      <span className="flex items-center gap-2 font-medium">
-        <span
-          className={
-            negative
-              ? "flex size-6 items-center justify-center rounded-md bg-rose-400/10 text-rose-300"
-              : "flex size-6 items-center justify-center rounded-md bg-[#6ee7b7]/10 text-[#6ee7b7]"
-          }
-        >
-          {icon}
-        </span>
-        {ticker}
-      </span>
-      <span className={negative ? "text-rose-300" : "text-[#6ee7b7]"}>
-        {value}
-      </span>
     </div>
   );
 }

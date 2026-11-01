@@ -12,7 +12,7 @@ export default function HoldingsError({
   return (
     <RouteError
       error={error}
-      message="The holdings table could not load its deterministic portfolio data."
+      message="The holdings table could not load the sample portfolio."
       reset={reset}
     />
   );

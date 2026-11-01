@@ -12,7 +12,7 @@ export default function AlertsError({
   return (
     <RouteError
       error={error}
-      message="The deterministic risk queue could not load its current signals."
+      message="The alerts list could not load its current signals."
       reset={reset}
     />
   );

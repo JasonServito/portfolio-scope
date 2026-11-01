@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ArrowRight, Check, Circle } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const steps = [
@@ -27,14 +28,15 @@ export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 }) {
   return (
     <section
       aria-labelledby="demo-journey-heading"
-      className="overflow-hidden rounded-2xl border bg-foreground text-background"
+      className="rounded-xl border bg-card px-5 py-4"
     >
-      <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-center">
-        <div className="lg:w-52 lg:shrink-0">
-          <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#6ee7b7]">
-            Two-minute tour
-          </p>
-          <h2 className="mt-2 font-semibold" id="demo-journey-heading">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        <div className="lg:w-48 lg:shrink-0">
+          <p className="text-xs text-muted-foreground">Two-minute tour</p>
+          <h2
+            className="mt-0.5 text-sm font-medium"
+            id="demo-journey-heading"
+          >
             Explore the dashboard
           </h2>
         </div>
@@ -49,32 +51,25 @@ export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 }) {
                 <Link
                   aria-current={active ? "step" : undefined}
                   className={cn(
-                    "flex min-h-14 items-center gap-3 rounded-xl border border-white/10 px-3 py-2 text-sm transition hover:border-white/25 hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-[#6ee7b7]",
-                    active && "border-[#6ee7b7]/45 bg-[#6ee7b7]/8",
+                    "flex min-h-12 items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    active && "bg-muted ring-1 ring-foreground/5",
                   )}
                   href={step.href}
                   prefetch={false}
                 >
                   <span
                     className={cn(
-                      "flex size-6 shrink-0 items-center justify-center rounded-full border border-white/20 text-[10px] text-white/55",
-                      (active || complete) &&
-                        "border-[#6ee7b7]/40 text-[#6ee7b7]",
+                      "flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-xs text-muted-foreground",
+                      active &&
+                        "border-primary bg-primary text-primary-foreground",
+                      complete && "border-primary/40 text-primary",
                     )}
                   >
-                    {complete ? (
-                      <Check className="size-3" />
-                    ) : active ? (
-                      <Circle className="size-2 fill-current" />
-                    ) : (
-                      number
-                    )}
+                    {complete ? <Check className="size-3.5" /> : number}
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-xs font-medium">
-                      {step.label}
-                    </span>
-                    <span className="mt-0.5 block truncate text-[10px] text-white/45">
+                    <span className="block font-medium">{step.label}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
                       {step.shortLabel}
                     </span>
                   </span>
@@ -85,12 +80,15 @@ export function DemoJourney({ currentStep }: { currentStep: 1 | 2 | 3 }) {
         </ol>
         {next ? (
           <Link
-            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-background px-3 text-xs font-semibold text-foreground transition hover:bg-background/90"
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "shrink-0 self-start lg:self-center",
+            )}
             href={next.href}
             prefetch={false}
           >
             Next
-            <ArrowRight className="size-3.5" />
+            <ArrowRight className="size-4" />
           </Link>
         ) : null}
       </div>

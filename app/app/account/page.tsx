@@ -6,6 +6,7 @@ import {
   deleteAccountAction,
   revokeAllSessionsAction,
 } from "@/app/auth/actions";
+import { PageShell } from "@/components/layout/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,18 +35,11 @@ export default async function AccountPage({ searchParams }: AccountPageProps) {
   const error = Array.isArray(params?.error) ? params.error[0] : params?.error;
 
   return (
-    <main className="mx-auto w-full max-w-4xl space-y-6 px-6 py-10">
-      <div>
-        <p className="text-sm font-medium text-muted-foreground">
-          Identity and privacy
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold">Account settings</h1>
-        <p className="mt-2 leading-7 text-muted-foreground">
-          Review your profile and sign-in methods, sign out active sessions, or
-          permanently remove your account and portfolio data.
-        </p>
-      </div>
-
+    <PageShell
+      description="Review your profile and sign-in methods, sign out active sessions, or permanently remove your account and portfolio data"
+      eyebrow="Identity and privacy"
+      title="Account settings"
+    >
       {error === "confirmation" ? (
         <Alert variant="destructive">
           <AlertTitle>Confirmation did not match</AlertTitle>
@@ -169,6 +163,6 @@ export default async function AccountPage({ searchParams }: AccountPageProps) {
           </form>
         </CardContent>
       </Card>
-    </main>
+    </PageShell>
   );
 }

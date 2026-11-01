@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Clock3, Database } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
 import { DemoJourney } from "@/components/demo/demo-journey";
@@ -11,15 +11,11 @@ import { SummaryCards } from "@/components/dashboard/summary-cards";
 import { WinnersLosers } from "@/components/dashboard/winners-losers";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
-import { Badge } from "@/components/ui/badge";
+import { AsOfStamp } from "@/components/ui/as-of-stamp";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataState } from "@/components/ui/data-state";
-import {
-  formatCurrency,
-  formatSignedCurrency,
-  formatSignedPercent,
-} from "@/lib/formatters";
+import { formatCurrency, formatSignedPercent } from "@/lib/formatters";
 import { getDemoDashboardData } from "@/lib/portfolio/dashboard-data";
 import { isPerformancePeriod } from "@/lib/portfolio/performance";
 
@@ -65,7 +61,7 @@ export default async function DashboardPage({
             <ArrowRight className="size-4" />
           </Link>
         }
-        description="A deterministic overview of portfolio value, performance, allocation, holding contribution, and active risk signals."
+        description="What the sample portfolio is worth, how it moved, and which positions need a closer look"
         eyebrow="North Star Portfolio · Read-only demo"
         title="Dashboard"
       >
@@ -74,7 +70,7 @@ export default async function DashboardPage({
           <Card>
             <CardContent>
               <DataState
-                description="The deterministic database seed is missing or unavailable. No portfolio values have been fabricated."
+                description="The sample portfolio could not be loaded. No portfolio values have been made up."
                 kind="missing"
                 title="Demo portfolio data is unavailable"
               />
@@ -82,29 +78,24 @@ export default async function DashboardPage({
           </Card>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border bg-card px-4 py-3 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Clock3 className="size-3.5 text-primary" />
-                As of{" "}
-                <time dateTime={analytics.asOf}>
-                  {new Date(analytics.asOf).toLocaleString("en-US")}
-                </time>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Database className="size-3.5 text-primary" />
-                Seeded portfolio and market fixtures
-              </span>
-              <span>Selected period: {analytics.period}</span>
+            <div className="space-y-3">
+              <AsOfStamp
+                asOf={analytics.asOf}
+                note="Sample portfolio and prices"
+              />
+              <SummaryCards
+                analytics={analytics}
+                alertCount={activeAlertCount}
+              />
             </div>
-            <SummaryCards analytics={analytics} alertCount={activeAlertCount} />
 
             <section className="grid gap-4 xl:grid-cols-[1.55fr_1fr]">
               <Card>
                 <CardHeader>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <CardTitle>Portfolio performance</CardTitle>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                      <p className="mt-1 text-sm text-muted-foreground tabular-nums">
                         {formatSignedPercent(analytics.summary.periodReturn)}{" "}
                         from{" "}
                         {formatCurrency(
@@ -121,7 +112,7 @@ export default async function DashboardPage({
                     <PeriodSelector selectedPeriod={analytics.period} />
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="flex flex-1 flex-col">
                   <PortfolioPerformanceChart
                     currency={analytics.portfolio.baseCurrency}
                     data={analytics.performance}
@@ -131,66 +122,34 @@ export default async function DashboardPage({
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Allocation by sector</CardTitle>
+                  <CardTitle>Allocation</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <AllocationChart
                     currency={analytics.portfolio.baseCurrency}
-                    data={analytics.allocationBySector}
+                    positions={analytics.allocationByHolding}
+                    sectors={analytics.allocationBySector}
                   />
                 </CardContent>
               </Card>
             </section>
 
-            <section className="grid gap-4 xl:grid-cols-3">
-              <WinnersLosers
-                currency={analytics.portfolio.baseCurrency}
-                items={analytics.topWinners}
-                title="Top winners"
-              />
-              <WinnersLosers
-                currency={analytics.portfolio.baseCurrency}
-                items={analytics.topLosers}
-                title="Top losers"
-              />
+            <section className="grid gap-4 xl:grid-cols-[1.55fr_1fr] xl:items-start">
+              <Card>
+                <CardContent className="grid gap-6 sm:grid-cols-2">
+                  <WinnersLosers
+                    currency={analytics.portfolio.baseCurrency}
+                    items={analytics.topWinners}
+                    title="Top contributors"
+                  />
+                  <WinnersLosers
+                    currency={analytics.portfolio.baseCurrency}
+                    items={analytics.topLosers}
+                    title="Bottom contributors"
+                  />
+                </CardContent>
+              </Card>
               <AlertsPreview alerts={alerts} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-3">
-              {analytics.allocationByHolding.slice(0, 3).map((holding) => (
-                <Card key={holding.key}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between gap-3">
-                      <CardTitle>{holding.label}</CardTitle>
-                      <Badge variant="outline">
-                        {formatSignedCurrency(
-                          analytics.holdings.find(
-                            (item) => item.ticker === holding.key,
-                          )?.dollarContribution ?? 0,
-                          analytics.portfolio.baseCurrency,
-                        )}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{
-                          width: `${Math.min(holding.percentage * 100, 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <p className="mt-3 text-sm text-muted-foreground">
-                      {formatCurrency(
-                        holding.value,
-                        analytics.portfolio.baseCurrency,
-                      )}{" "}
-                      current market value
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
             </section>
           </>
         )}

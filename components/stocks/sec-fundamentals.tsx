@@ -190,7 +190,7 @@ export function SecFundamentals({ data }: { data: FundamentalsSnapshot }) {
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle>
-            <h2 id="key-metrics-heading">Key Metrics</h2>
+            <h2 id="key-metrics-heading">Key metrics</h2>
           </CardTitle>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
             A focused view of the latest reliable financial information. Missing
@@ -209,15 +209,18 @@ export function SecFundamentals({ data }: { data: FundamentalsSnapshot }) {
       </CardHeader>
       <CardContent className="space-y-5">
         {data.provider === "SEEDED_FIXTURE" ? (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-            Demo financial fixture. These values are not live production filing
-            data.
-          </div>
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full bg-caution"
+            />
+            Sample financial data. These values are not live filing data.
+          </p>
         ) : null}
 
         {data.freshness === "UNSUPPORTED" ? (
           <div className="rounded-lg border bg-muted/30 p-4">
-            <p className="font-medium">Financial metrics are not supported.</p>
+            <p className="font-medium">Financial metrics are not supported</p>
             <p className="mt-2 text-sm text-muted-foreground">
               This company is outside the current curated U.S. issuer coverage.
             </p>
@@ -228,8 +231,8 @@ export function SecFundamentals({ data }: { data: FundamentalsSnapshot }) {
           <div className="rounded-lg border bg-muted/30 p-4">
             <p className="font-medium">
               {data.freshness === "FAILED"
-                ? "Financial metrics are unavailable after a failed refresh."
-                : "Financial metrics have not been loaded yet."}
+                ? "Financial metrics are unavailable after a failed refresh"
+                : "Financial metrics have not been loaded yet"}
             </p>
             <p className="mt-2 text-sm text-muted-foreground">
               Missing values remain unavailable; PortfolioScope does not replace
@@ -239,9 +242,9 @@ export function SecFundamentals({ data }: { data: FundamentalsSnapshot }) {
         ) : null}
 
         {hasFacts && data.freshness === "FAILED" ? (
-          <div className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          <div className="flex gap-3 rounded-lg border p-4 text-sm">
             <AlertTriangle
-              className="mt-0.5 size-4 shrink-0"
+              className="mt-0.5 size-4 shrink-0 text-caution"
               aria-hidden="true"
             />
             <p>
@@ -253,31 +256,29 @@ export function SecFundamentals({ data }: { data: FundamentalsSnapshot }) {
 
         <section
           aria-labelledby="key-metrics-heading"
-          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+          className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-2 lg:grid-cols-5"
         >
           {metrics.map((metric) => (
-            <Card data-headline-metric={metric.id} key={metric.id} size="sm">
-              <CardHeader>
-                <h3 className="text-sm font-medium text-muted-foreground">
-                  {metric.label}
-                </h3>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xl font-semibold tabular-nums">
-                  {formatHeadlineValue(metric)}
+            <div
+              className="bg-card p-4"
+              data-headline-metric={metric.id}
+              key={metric.id}
+            >
+              <h3 className="text-xs text-muted-foreground">{metric.label}</h3>
+              <p className="mt-2 text-xl font-medium tabular-nums">
+                {formatHeadlineValue(metric)}
+              </p>
+              <MetricPeriod metric={metric} />
+              <details className="mt-3 border-t pt-3 text-xs">
+                <summary className="flex cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
+                  <Info className="size-3.5" aria-hidden="true" />
+                  What this means
+                </summary>
+                <p className="mt-2 leading-5 text-muted-foreground">
+                  {metric.explanation}
                 </p>
-                <MetricPeriod metric={metric} />
-                <details className="mt-3 border-t pt-3 text-xs">
-                  <summary className="flex cursor-pointer items-center gap-1.5 rounded-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-                    <Info className="size-3.5" aria-hidden="true" />
-                    What this means
-                  </summary>
-                  <p className="mt-2 leading-5 text-muted-foreground">
-                    {metric.explanation}
-                  </p>
-                </details>
-              </CardContent>
-            </Card>
+              </details>
+            </div>
           ))}
         </section>
 

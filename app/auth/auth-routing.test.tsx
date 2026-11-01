@@ -24,6 +24,10 @@ vi.mock("@/lib/auth/session", () => ({
   requireUser: mocks.requireUser,
 }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("next/font/google", () => ({
+  IBM_Plex_Mono: () => ({ variable: "font-plex-mono" }),
+  Inter: () => ({ variable: "font-inter" }),
+}));
 
 import ProtectedAppLayout from "@/app/app/layout";
 import SignInPage from "@/app/auth/signin/page";

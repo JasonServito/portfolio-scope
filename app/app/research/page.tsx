@@ -1,3 +1,4 @@
+import { PageShell } from "@/components/layout/page-shell";
 import { PrivateResearch } from "@/components/research/private-research";
 import { requireUser } from "@/lib/auth/session";
 import {
@@ -15,18 +16,11 @@ export default async function PrivateResearchPage() {
   ]);
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-10">
-      <div>
-        <p className="text-sm font-medium text-muted-foreground">
-          Private research history
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold">Your research</h1>
-        <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Start stock research and revisit each report&apos;s summary,
-          strengths, risks, what to watch, and supporting evidence. Reports here
-          are private to your account.
-        </p>
-      </div>
+    <PageShell
+      description="Start stock research and revisit each report's summary, strengths, risks, what to watch, and supporting evidence. Reports here are private to your account."
+      eyebrow="Private research history"
+      title="Your research"
+    >
       <PrivateResearch
         workspace={workspace}
         jobs={jobs.map((job) => {
@@ -40,6 +34,6 @@ export default async function PrivateResearchPage() {
           };
         })}
       />
-    </main>
+    </PageShell>
   );
 }

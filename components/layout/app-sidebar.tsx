@@ -88,16 +88,16 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
         />
       </nav>
 
-      <div className="m-3 rounded-lg border bg-background p-4">
+      <div className="m-3 rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-medium">Demo Mode</p>
+          <p className="text-sm font-medium">Demo mode</p>
           <Badge variant="outline">Read-only</Badge>
         </div>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           Browse the sample portfolio without an account. Changes are disabled.
         </p>
         <Link
-          className="mt-3 inline-flex text-xs font-semibold text-primary hover:underline"
+          className="mt-3 inline-flex text-xs font-medium text-primary hover:underline"
           href="/research"
           prefetch={false}
         >
@@ -125,9 +125,7 @@ function NavGroup({
 }) {
   return (
     <div className="space-y-2">
-      <p className="px-2 text-xs font-medium uppercase text-muted-foreground">
-        {label}
-      </p>
+      <p className="px-2 text-xs font-medium text-muted-foreground">{label}</p>
       <div className="space-y-1">
         {items.map((item) => {
           const Icon = item.icon;
@@ -139,8 +137,9 @@ function NavGroup({
           return (
             <Link
               className={cn(
-                "flex h-9 items-center gap-3 rounded-lg px-2 text-sm font-medium text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+                "flex h-9 items-center gap-3 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                isActive &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-foreground/5",
               )}
               href={item.href}
               key={item.href}

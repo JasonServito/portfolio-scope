@@ -12,6 +12,16 @@ await Promise.all([
   mkdir(demoDir, { recursive: true }),
 ]);
 
+// The Next.js dev indicator only renders on a local dev server; keep it out of
+// the recruiter assets when capturing against one.
+function hideDevOverlay() {
+  document.addEventListener("DOMContentLoaded", () => {
+    const style = document.createElement("style");
+    style.textContent = "nextjs-portal { display: none !important; }";
+    document.head.append(style);
+  });
+}
+
 const browser = await chromium.launch({ headless: true });
 
 const screenshotContext = await browser.newContext({
@@ -19,6 +29,7 @@ const screenshotContext = await browser.newContext({
   deviceScaleFactor: 1,
   viewport: { width: 1440, height: 1000 },
 });
+await screenshotContext.addInitScript(hideDevOverlay);
 const screenshotPage = await screenshotContext.newPage();
 
 const captures = [
@@ -48,6 +59,17 @@ for (const { route, filename, fullPage } of captures) {
       timeout: 10_000,
     });
   }
+  if (route.startsWith("/stocks/")) {
+    // The TradingView widget draws into a canvas inside its iframe; wait for it
+    // so the capture does not show the loading placeholder.
+    await screenshotPage
+      .frameLocator('iframe[id^="tradingview"], iframe[src*="tradingview"]')
+      .first()
+      .locator("canvas")
+      .first()
+      .waitFor({ timeout: 20_000 })
+      .catch(() => {});
+  }
   await screenshotPage.waitForTimeout(
     route.startsWith("/stocks/") ? 2_500 : 1_500,
   );
@@ -72,6 +94,7 @@ const videoContext = await browser.newContext({
   },
   viewport: { width: 1280, height: 720 },
 });
+await videoContext.addInitScript(hideDevOverlay);
 const videoPage = await videoContext.newPage();
 const video = videoPage.video();
 

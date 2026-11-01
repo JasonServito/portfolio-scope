@@ -90,17 +90,18 @@ export function AppHeader({
           <input
             aria-describedby={searchError ? "header-search-error" : undefined}
             aria-invalid={searchError ? true : undefined}
-            className="h-10 w-full rounded-lg border bg-muted/40 pr-16 pl-9 text-sm outline-none transition placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            aria-label="Search a ticker or page"
+            className="h-9 w-full rounded-lg border bg-muted/40 pr-16 pl-9 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             onChange={(event) => {
               setSearchQuery(event.target.value);
               if (searchError) setSearchError("");
             }}
-            placeholder="Search tickers, holdings, or alerts"
+            placeholder="Search"
             type="search"
             value={searchQuery}
           />
           <button
-            className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-sm border bg-card px-1.5 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             type="submit"
           >
             Go
@@ -125,20 +126,6 @@ export function AppHeader({
               prefetch={false}
             >
               <Home className="size-4" />
-            </Link>
-            <Link
-              className={buttonVariants({ variant: "ghost", size: "sm" })}
-              href="/stocks/aapl"
-              prefetch={false}
-            >
-              AAPL
-            </Link>
-            <Link
-              className={buttonVariants({ variant: "ghost", size: "sm" })}
-              href="/stocks/msft"
-              prefetch={false}
-            >
-              MSFT
             </Link>
             <Link
               aria-label="Open alerts"
