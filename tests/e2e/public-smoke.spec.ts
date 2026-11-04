@@ -57,7 +57,7 @@ test.describe("public production smoke @smoke", () => {
     await expect(
       page.getByRole("heading", { name: "Stock research report", level: 2 }),
     ).toBeVisible();
-    for (const section of ["Summary", "Strengths", "Risks", "What to Watch"]) {
+    for (const section of ["Summary", "Strengths", "Risks", "What to watch"]) {
       await expect(
         page.getByRole("heading", { name: section, level: 3 }),
       ).toBeVisible();

@@ -126,7 +126,7 @@ export function applyClaimVerification(
     ...(changed
       ? {
           summary:
-            "The claim support check found limitations in the draft analysis. The retained strengths and risks are shown below; partial support and disagreements require review of the cited sources.",
+            "Some draft points did not fully match their sources, so the overall summary was left out. The points below passed the source check; check the cited sources for any marked as partially supported.",
           confidence: Math.min(
             output.confidence,
             ...claims.map((claim) => claim.confidence),

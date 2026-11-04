@@ -13,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { plainNumbers } from "@/lib/research/plain-numbers";
 import {
   RECENT_EVENTS_LABEL,
   type ResearchClaim,
@@ -259,11 +260,77 @@ function ClaimCard({
   );
 }
 
-function ReportListSection({
+// The report is read by beginner investors: each section leads with a few
+// short points, and everything secondary sits behind "More detail".
+const VISIBLE_POINTS = 4;
+
+function shortNotice(research: StockResearch) {
+  const date = new Date(research.generatedAt).toLocaleDateString("en-US");
+  return research.generationMode === "EXTERNAL"
+    ? `AI-assisted summary of the cited filings, prepared ${date}. It can contain mistakes, so check the sources. Not investment advice.`
+    : `Sample report prepared ${date}. Not investment advice.`;
+}
+
+function SectionTitle({
+  children,
+  emoji,
+}: {
+  children: ReactNode;
+  emoji: string;
+}) {
+  return (
+    <CardTitle aria-level={3} role="heading">
+      <span aria-hidden="true" className="mr-1.5">
+        {emoji}
+      </span>
+      {children}
+    </CardTitle>
+  );
+}
+
+function PointList({
+  items,
+  limit = VISIBLE_POINTS,
+}: {
+  items: string[];
+  limit?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? items : items.slice(0, limit);
+  const hidden = items.length - visible.length;
+
+  return (
+    <>
+      <ul className="space-y-2.5 text-sm leading-6">
+        {visible.map((item, index) => (
+          <li className="flex gap-2" key={`${item}-${index}`}>
+            <span aria-hidden className="text-muted-foreground">
+              •
+            </span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 ? (
+        <button
+          className="mt-3 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          onClick={() => setExpanded(true)}
+          type="button"
+        >
+          Show {hidden} more
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function PointSection({
+  emoji,
   emptyMessage,
   items,
   title,
 }: {
+  emoji: string;
   emptyMessage: string;
   items: string[];
   title: string;
@@ -271,20 +338,11 @@ function ReportListSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle aria-level={3} role="heading">
-          {title}
-        </CardTitle>
+        <SectionTitle emoji={emoji}>{title}</SectionTitle>
       </CardHeader>
       <CardContent>
         {items.length ? (
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            {items.map((item, index) => (
-              <li className="flex gap-2" key={`${item}-${index}`}>
-                <span aria-hidden>•</span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+          <PointList items={items} />
         ) : (
           <p className="text-sm text-muted-foreground">{emptyMessage}</p>
         )}
@@ -300,70 +358,107 @@ function WhatToWatch({ research }: { research: StockResearch }) {
       label: RECENT_EVENTS_LABEL,
       items: (research.report.recentEvents ?? []).map(
         (event) =>
-          `${formatDate(event.filingDate) ?? event.filingDate} (Form ${event.formType}): ${labelPartialClaim(event.statement, research)}`,
+          `${formatDate(event.filingDate) ?? event.filingDate} (Form ${event.formType}): ${plainNumbers(labelPartialClaim(event.statement, research))}`,
       ),
     },
     {
       label: "What would change this analysis",
-      items: research.report.whatWouldChange ?? [],
+      items: (research.report.whatWouldChange ?? []).map(plainNumbers),
     },
     {
       label: "Upcoming earnings",
       items: earnings
         ? [
-            `An earnings event is recorded for ${formatDate(earnings.eventDate) ?? earnings.eventDate}${earningsSessionLabel(earnings.marketSession)}. The date comes from a third-party calendar and may change.`,
+            `Next earnings expected ${formatDate(earnings.eventDate) ?? earnings.eventDate}${earningsSessionLabel(earnings.marketSession)}. The date may change.`,
           ]
         : [],
-    },
-    {
-      label: "Counterpoints",
-      items: research.report.bearCase.map((item) =>
-        labelPartialClaim(item, research),
-      ),
-    },
-    { label: "Missing information", items: research.report.missingData },
-    {
-      label: "Areas of disagreement",
-      items: research.report.disagreements ?? [],
     },
   ].filter((group) => group.items.length);
 
   return (
-    <Card className="lg:col-span-2">
+    <Card>
       <CardHeader>
-        <CardTitle aria-level={3} role="heading">
-          What to Watch
-        </CardTitle>
+        <SectionTitle emoji="👀">What to watch</SectionTitle>
       </CardHeader>
       <CardContent>
         {groups.length ? (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {groups.map((group) => (
               <section key={group.label}>
-                <h4 className="text-sm font-medium">{group.label}</h4>
-                <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
-                  {group.items.map((item, index) => (
-                    <li className="flex gap-2" key={`${item}-${index}`}>
-                      <span aria-hidden>•</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
+                <h4 className="mb-2 text-sm font-medium">{group.label}</h4>
+                <PointList items={group.items} limit={3} />
               </section>
             ))}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            No additional items were identified from the available evidence.
+            No upcoming items were identified from the available evidence.
           </p>
         )}
-        {research.report.contradictedClaims?.length ? (
-          <section className="mt-5 space-y-4">
-            <h4 className="text-sm font-medium">
-              Claims with conflicting evidence
-            </h4>
-            {research.report.contradictedClaims.map((claim) => (
-              <article className="rounded-lg border p-4 text-sm" key={claim.id}>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DetailList({ items, label }: { items: string[]; label: string }) {
+  if (!items.length) return null;
+  return (
+    <section>
+      <h4 className="font-medium">{label}</h4>
+      <ul className="mt-2 space-y-1.5 text-muted-foreground">
+        {items.map((item, index) => (
+          <li className="flex gap-2" key={`${item}-${index}`}>
+            <span aria-hidden>•</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ReportDetails({
+  notes,
+  research,
+}: {
+  notes: string[];
+  research: StockResearch;
+}) {
+  const report = research.report;
+  const coverage = report.evidenceCoverage ?? null;
+
+  return (
+    <details className="rounded-xl bg-card ring-1 ring-foreground/10">
+      <summary className="cursor-pointer rounded-xl px-4 py-4 font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+        More detail
+        <span className="ml-2 text-xs font-normal text-muted-foreground">
+          Gaps, disagreements, and how this report was checked
+        </span>
+      </summary>
+      <div className="space-y-5 border-t p-4 text-sm leading-6">
+        {notes.length ? (
+          <section>
+            <h4 className="font-medium">Report notes</h4>
+            <ul
+              aria-label="Report notes"
+              className="mt-2 space-y-1.5 text-muted-foreground"
+            >
+              {notes.map((note, index) => (
+                <li key={`${note}-${index}`}>{note}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        <DetailList items={report.missingData} label="Missing information" />
+        <DetailList
+          items={report.disagreements ?? []}
+          label="Areas of disagreement"
+        />
+        {report.contradictedClaims?.length ? (
+          <section className="space-y-4">
+            <h4 className="font-medium">Claims with conflicting evidence</h4>
+            {report.contradictedClaims.map((claim) => (
+              <article className="rounded-lg border p-4" key={claim.id}>
                 <p className="font-medium">
                   Draft claim — not retained as a finding
                 </p>
@@ -402,8 +497,32 @@ function WhatToWatch({ research }: { research: StockResearch }) {
             ))}
           </section>
         ) : null}
-      </CardContent>
-    </Card>
+        <section className="space-y-2 text-muted-foreground">
+          <h4 className="font-medium text-foreground">About this report</h4>
+          {coverage ? (
+            <p>
+              Evidence coverage {Math.round(coverage.score * 100)}% · Newest
+              filing{" "}
+              {coverage.newestFilingDate
+                ? formatDate(coverage.newestFilingDate)
+                : "date unavailable"}
+            </p>
+          ) : null}
+          {isAiGenerated(research) ? (
+            <p>
+              {report.verificationCompleted
+                ? "Claim support was checked against cited evidence. This automated check does not replace human source review."
+                : "Claim support is unverified. Check the cited sources independently."}
+            </p>
+          ) : null}
+          <p>{generationDescription(research)}</p>
+          <p>
+            Research context only—not investment advice or a buy, sell, or
+            hold recommendation.
+          </p>
+        </section>
+      </div>
+    </details>
   );
 }
 
@@ -412,90 +531,67 @@ function ReportSummary({ research }: { research: StockResearch }) {
   const coverage = report.evidenceCoverage ?? null;
   const completeness = reportCompleteness(research);
   const notes = reportNotes(research);
-  const risks = report.risks.filter((item) => !notes.includes(item));
+  const readable = (item: string) =>
+    plainNumbers(labelPartialClaim(item, research));
+  const strengths = report.bullCase.map(readable);
+  // Counterpoints read as cautions to a beginner, so they join the risks.
+  const risks = [
+    ...report.risks.filter((item) => !notes.includes(item)),
+    ...report.bearCase,
+  ].map(readable);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card className="lg:col-span-2">
+    <div className="space-y-4">
+      <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle aria-level={3} role="heading">
-              Summary
-            </CardTitle>
-            <div className="flex flex-wrap gap-2">
-              {completeness.partial ? (
-                <Badge variant="outline">Partial analysis</Badge>
-              ) : null}
-              {coverage ? (
-                <Badge variant="secondary">
-                  Evidence coverage {Math.round(coverage.score * 100)}%
-                </Badge>
-              ) : null}
-            </div>
+            <SectionTitle emoji="📌">Summary</SectionTitle>
+            {completeness.partial ? (
+              <Badge variant="outline">Partial analysis</Badge>
+            ) : null}
           </div>
-          {coverage ? (
-            <p className="text-xs leading-5 text-muted-foreground">
-              Newest filing{" "}
-              {coverage.newestFilingDate
-                ? formatDate(coverage.newestFilingDate)
-                : "date unavailable"}
+          {coverage?.newestFilingDate ? (
+            <p className="text-xs text-muted-foreground">
+              Based on filings through {formatDate(coverage.newestFilingDate)}
             </p>
           ) : null}
         </CardHeader>
         <CardContent>
-          <p className="leading-7 text-muted-foreground">{report.overview}</p>
-          {notes.length ? (
-            <ul
-              aria-label="Report notes"
-              className="mt-3 space-y-1 text-sm text-muted-foreground"
+          <p className="leading-7">{plainNumbers(report.overview)}</p>
+          {completeness.partial ? (
+            <div
+              className="mt-4 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+              role="status"
             >
-              {notes.map((note, index) => (
-                <li key={`${note}-${index}`}>{note}</li>
-              ))}
-            </ul>
-          ) : null}
-          {research.generationMode === "EXTERNAL" ||
-          research.generationMode === "RECORDED" ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              {report.verificationCompleted
-                ? "Claim support was checked against cited evidence. This automated check does not replace human source review."
-                : "Claim support is unverified. Check the cited sources independently."}
-            </p>
+              <AlertTriangle
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0"
+              />
+              {partialReportMessage(completeness)}
+            </div>
           ) : null}
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
-            {generationDescription(research)}
-          </p>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Research context only—not investment advice or a buy, sell, or hold
-            recommendation.
+            {shortNotice(research)}
           </p>
         </CardContent>
       </Card>
 
-      {completeness.partial ? (
-        <div
-          className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100 lg:col-span-2"
-          role="status"
-        >
-          <AlertTriangle
-            aria-hidden="true"
-            className="mt-0.5 size-4 shrink-0"
-          />
-          {partialReportMessage(completeness)}
-        </div>
-      ) : null}
-
-      <ReportListSection
-        emptyMessage="No strengths were identified from the available evidence."
-        items={report.bullCase.map((item) => labelPartialClaim(item, research))}
-        title="Strengths"
-      />
-      <ReportListSection
-        emptyMessage="No specific risks were identified from the available evidence."
-        items={risks.map((item) => labelPartialClaim(item, research))}
-        title="Risks"
-      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <PointSection
+          emoji="✅"
+          emptyMessage="No strengths were identified from the available evidence."
+          items={strengths}
+          title="Strengths"
+        />
+        <PointSection
+          emoji="⚠️"
+          emptyMessage="No specific risks were identified from the available evidence."
+          items={risks}
+          title="Risks"
+        />
+      </div>
       <WhatToWatch research={research} />
+      <ReportDetails notes={notes} research={research} />
     </div>
   );
 }
@@ -811,8 +907,8 @@ function ResearchReportContent({
             </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review the summary, strengths, risks, what to watch, and supporting
-            sources.
+            The main points from the company&apos;s filings, each linked to its
+            source below.
           </p>
         </div>
         {action}

@@ -137,14 +137,84 @@ describe("numeric agreement with cited excerpts", () => {
     ).toEqual([]);
   });
 
+  it("accepts correct rounding with at least two significant digits", () => {
+    const margin = evidence(
+      "ev_m",
+      "Operating margin was 22.7 percent; debt-to-equity was 0.66; free cash flow was -31,796,000,000 USD.",
+    );
+    const byId = new Map([
+      [supporting.id, supporting],
+      [margin.id, margin],
+    ]);
+    for (const statement of [
+      "Revenue was $391 billion for fiscal 2025.",
+      "Revenue was $391.0 billion for fiscal 2025.",
+      "Revenue was about $0.39 trillion.",
+    ]) {
+      expect(unsupportedNumericTokens(claim({ statement }), byId)).toEqual(
+        [],
+      );
+    }
+    for (const statement of [
+      "Operating margin was about 23%.",
+      "Debt-to-equity was 0.66.",
+      "Free cash flow was -$31.8 billion.",
+    ]) {
+      expect(
+        unsupportedNumericTokens(claim({ statement, evidenceIds: ["ev_m"] }), byId),
+      ).toEqual([]);
+    }
+  });
+
+  it("rejects wrong rounding, lost precision, and a changed unit family", () => {
+    const margin = evidence(
+      "ev_m",
+      "Operating margin was 22.7 percent; debt-to-equity was 0.66.",
+    );
+    const byId = new Map([
+      [supporting.id, supporting],
+      [margin.id, margin],
+    ]);
+    expect(
+      unsupportedNumericTokens(
+        claim({ statement: "Revenue was $392 billion." }),
+        byId,
+      ),
+    ).toEqual(["392billion"]);
+    expect(
+      unsupportedNumericTokens(
+        claim({ statement: "Revenue was $400 billion." }),
+        byId,
+      ),
+    ).toEqual(["400billion"]);
+    expect(
+      unsupportedNumericTokens(
+        claim({ statement: "Revenue was $391 million." }),
+        byId,
+      ),
+    ).toEqual(["391million"]);
+    expect(
+      unsupportedNumericTokens(
+        claim({ statement: "Debt-to-equity was 0.7.", evidenceIds: ["ev_m"] }),
+        byId,
+      ),
+    ).toEqual(["0.7"]);
+    expect(
+      unsupportedNumericTokens(
+        claim({ statement: "Margin was 23.", evidenceIds: ["ev_m"] }),
+        byId,
+      ),
+    ).toEqual(["23"]);
+  });
+
   it("reports numbers or units absent from the cited supporting excerpts", () => {
     const byId = new Map([[supporting.id, supporting]]);
     expect(
       unsupportedNumericTokens(
-        claim({ statement: "Revenue was 391 billion USD." }),
+        claim({ statement: "Revenue was 391 trillion USD." }),
         byId,
       ),
-    ).toEqual(["391billion"]);
+    ).toEqual(["391trillion"]);
     expect(
       unsupportedNumericTokens(
         claim({ statement: "Revenue grew 30 percent." }),
