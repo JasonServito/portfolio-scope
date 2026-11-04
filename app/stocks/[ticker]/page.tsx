@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
@@ -10,13 +10,14 @@ import {
 import { DemoJourney } from "@/components/demo/demo-journey";
 import { SecFundamentals } from "@/components/stocks/sec-fundamentals";
 import { TradingViewWidget } from "@/components/stocks/tradingview-widget";
-import { ResearchTabs } from "@/components/research/research-tabs";
+import { ResearchSignInNotice } from "@/components/research/research-sign-in-notice";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageShell } from "@/components/layout/page-shell";
 import { AsOfStamp } from "@/components/ui/as-of-stamp";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { signTone, StatCard } from "@/components/ui/stat-card";
+import { getCurrentUser } from "@/lib/auth/session";
 import {
   formatCurrency,
   formatPercent,
@@ -25,7 +26,6 @@ import {
 } from "@/lib/formatters";
 import { getDemoStockDetail } from "@/lib/portfolio/stock-detail";
 import { PERFORMANCE_PERIODS } from "@/lib/portfolio/types";
-import { getLatestResearch } from "@/lib/research/orchestrator";
 import { secEdgarFundamentalsProvider } from "@/lib/sec/fundamentals-provider";
 import { isFeatureEnabled } from "@/lib/operations/feature-flags";
 import { cn } from "@/lib/utils";
@@ -44,9 +44,9 @@ export default async function StockPage({ params }: StockPageProps) {
   }
 
   const { ticker } = await params;
-  const [data, research, fundamentals] = await Promise.all([
+  const [data, user, fundamentals] = await Promise.all([
     getDemoStockDetail(ticker),
-    getLatestResearch(ticker),
+    getCurrentUser(),
     secEdgarFundamentalsProvider.getFundamentals(ticker),
   ]);
 
@@ -64,30 +64,18 @@ export default async function StockPage({ params }: StockPageProps) {
         name="stock_page_viewed"
         properties={{ ticker: stock.ticker }}
       />
-      {research ? (
-        <AnalyticsEvent
-          name="research_report_viewed"
-          properties={{ reportMode: "demo", ticker: stock.ticker }}
-        />
-      ) : null}
       <PageShell
         actions={
-          <>
-            <Link
-              className={buttonVariants({ variant: "ghost" })}
-              href="/holdings"
-              prefetch={false}
-            >
-              <ArrowLeft className="size-4" />
-              Holdings
-            </Link>
-            <a className={buttonVariants()} href="#research">
-              View research
-              <ArrowRight className="size-4" />
-            </a>
-          </>
+          <Link
+            className={buttonVariants({ variant: "ghost" })}
+            href="/holdings"
+            prefetch={false}
+          >
+            <ArrowLeft className="size-4" />
+            Holdings
+          </Link>
         }
-        description={`${stock.companyName} price, position, filings, and research in one place`}
+        description={`${stock.companyName} price, position, and filings in one place`}
         eyebrow={`${stock.companyName} · ${stock.exchange}`}
         title={stock.ticker}
       >
@@ -378,22 +366,8 @@ export default async function StockPage({ params }: StockPageProps) {
           </Card>
         </section>
 
-        <section className="scroll-mt-28 space-y-4" id="research">
-          <div>
-            <p className="text-sm text-muted-foreground">Stock research</p>
-            <h2 className="mt-1 text-2xl font-medium">
-              Explainable stock research
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Review the summary, strengths, risks, what to watch, and
-              supporting evidence available for this company.
-            </p>
-          </div>
-          <ResearchTabs
-            initialResearch={research}
-            readOnly
-            ticker={stock.ticker}
-          />
+        <section className="scroll-mt-28" id="research">
+          <ResearchSignInNotice signedIn={Boolean(user)} />
         </section>
       </PageShell>
     </AppLayout>

@@ -17,33 +17,32 @@ function normalizeTicker(ticker: string) {
   return /^[A-Z]{1,5}$/.test(symbol) ? symbol : null;
 }
 
-export async function GET(_request: Request, { params }: ResearchRouteContext) {
-  const symbol = normalizeTicker((await params).ticker);
-  if (!symbol)
-    return NextResponse.json(
-      { error: "Ticker format is invalid." },
-      { status: 400 },
-    );
-
+export async function GET(request: Request, { params }: ResearchRouteContext) {
   try {
+    // Research reports are a signed-in feature, including the demo sample.
+    await requireApiUser();
+    const symbol = normalizeTicker((await params).ticker);
+    if (!symbol)
+      return NextResponse.json(
+        { error: "Ticker format is invalid." },
+        { status: 400 },
+      );
+
     await enforceRateLimit({
       category: "publicStock",
-      identifier: `ip:${getRequestIp(_request)}`,
+      identifier: `ip:${getRequestIp(request)}`,
     });
-  } catch (error) {
-    return apiErrorResponse(
-      error,
-      "Public research is temporarily unavailable.",
-    );
-  }
 
-  const research = await getLatestResearch(symbol);
-  if (!research)
-    return NextResponse.json(
-      { error: "Research is unavailable for this ticker." },
-      { status: 404 },
-    );
-  return NextResponse.json(research);
+    const research = await getLatestResearch(symbol);
+    if (!research)
+      return NextResponse.json(
+        { error: "Research is unavailable for this ticker." },
+        { status: 404 },
+      );
+    return NextResponse.json(research);
+  } catch (error) {
+    return apiErrorResponse(error, "Research is temporarily unavailable.");
+  }
 }
 
 export async function POST(request: Request, { params }: ResearchRouteContext) {

@@ -129,7 +129,6 @@ function PublicSiteFooter() {
             ["/dashboard?demo=true", "Read-only demo"],
             ["/holdings", "Holdings"],
             ["/watchlist", "Watchlist"],
-            ["/research", "Sample research"],
           ]}
           title="Explore"
         />
