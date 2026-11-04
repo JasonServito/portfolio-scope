@@ -8,9 +8,13 @@ import { cn } from "@/lib/utils";
 
 type PeriodSelectorProps = {
   selectedPeriod: PerformancePeriod;
+  basePath?: string;
 };
 
-export function PeriodSelector({ selectedPeriod }: PeriodSelectorProps) {
+export function PeriodSelector({
+  basePath = "/dashboard",
+  selectedPeriod,
+}: PeriodSelectorProps) {
   return (
     <nav
       aria-label="Performance period"
@@ -27,7 +31,7 @@ export function PeriodSelector({ selectedPeriod }: PeriodSelectorProps) {
               active &&
                 "bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.05)] ring-1 ring-foreground/5",
             )}
-            href={`/dashboard?period=${period}`}
+            href={`${basePath}?period=${period}`}
             key={period}
             prefetch={false}
           >
