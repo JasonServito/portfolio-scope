@@ -30,7 +30,7 @@ function contentSecurityPolicy(value: string) {
     "img-src 'self' blob: data: https:",
     "font-src 'self' data:",
     "connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io https://*.posthog.com https://*.tradingview.com wss://*.tradingview.com",
-    "frame-src https://s.tradingview.com https://*.tradingview.com",
+    "frame-src https://s.tradingview.com https://*.tradingview.com https://www.tradingview-widget.com",
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

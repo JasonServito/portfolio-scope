@@ -52,4 +52,32 @@ describe("request correlation and security proxy", () => {
       "http://localhost:3000/dashboard?demo=true",
     );
   });
+
+  it("keeps the strict script policy and allows the TradingView chart frame", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const response = proxy(
+      new NextRequest("http://localhost:3000/stocks/aapl"),
+    );
+    const directives = new Map(
+      response.headers
+        .get("Content-Security-Policy")!
+        .split("; ")
+        .map((directive) => {
+          const [name, ...sources] = directive.split(" ");
+          return [name, sources] as const;
+        }),
+    );
+
+    expect(directives.get("script-src")).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^'nonce-[A-Za-z0-9+/]+=*'$/),
+        "'strict-dynamic'",
+      ]),
+    );
+    expect(directives.get("script-src")).not.toContain("'unsafe-inline'");
+    expect(directives.get("script-src")).not.toContain("'unsafe-eval'");
+    expect(directives.get("frame-src")).toContain(
+      "https://www.tradingview-widget.com",
+    );
+  });
 });
