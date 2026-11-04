@@ -52,7 +52,7 @@ export default function Home() {
         <div className="mx-auto grid min-h-[calc(100vh-4.5rem)] w-full max-w-7xl items-center gap-12 px-6 py-14 lg:grid-cols-[0.9fr_1.1fr] lg:px-8 lg:py-20">
           <div>
             <h1 className="max-w-3xl text-5xl leading-[1.04] font-medium tracking-[-0.03em] text-balance sm:text-6xl lg:text-[4rem]">
-              Know what moved your portfolio—and why
+              Know what moved your portfolio, and why
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
               PortfolioScope shows what a portfolio is worth, which positions

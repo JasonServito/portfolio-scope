@@ -81,6 +81,12 @@ function jsonArray<T>(value: Prisma.JsonValue | null): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+// Stored evidence titles are also model prompt inputs, so em dashes are
+// reworded only in the copy shown to readers.
+function displayTitle(title: string) {
+  return title.replace(/\s*\u2014\s*/g, ", ");
+}
+
 function asAgentResult(
   run: ResearchJobWithResults["agentRuns"][number],
 ): AgentResult {
@@ -92,7 +98,10 @@ function asAgentResult(
     availability: run.availability ?? null,
     summary: run.summary,
     findings: jsonArray<ResearchFinding>(run.findingsJson),
-    sources: jsonArray<ResearchSource>(run.sourcesJson),
+    sources: jsonArray<ResearchSource>(run.sourcesJson).map((source) => ({
+      ...source,
+      title: displayTitle(source.title),
+    })),
     warnings: jsonArray<string>(run.warningsJson),
     claims: jsonArray<NonNullable<AgentResult["claims"]>[number]>(
       run.claimsJson,
@@ -115,7 +124,7 @@ function shapeEvidence(
     id: evidence.referenceKey,
     role: evidence.role,
     sourceKind: evidence.sourceKind,
-    title: evidence.title,
+    title: displayTitle(evidence.title),
     sourceReference: evidence.sourceReference,
     sourceUrl: evidence.sourceUrl,
     accessionNumber: evidence.accessionNumber,
@@ -164,7 +173,7 @@ function shapeEvidenceRegistry(
   return evidence.map((item) => ({
     id: item.id,
     sourceKind: item.sourceKind,
-    title: item.title,
+    title: displayTitle(item.title),
     sourceReference: item.sourceReference,
     sourceUrl: item.sourceUrl,
     accessionNumber: item.accessionNumber,

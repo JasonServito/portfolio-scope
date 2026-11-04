@@ -365,7 +365,7 @@ function WhatToWatch({ research }: { research: StockResearch }) {
             {research.report.contradictedClaims.map((claim) => (
               <article className="rounded-lg border p-4 text-sm" key={claim.id}>
                 <p className="font-medium">
-                  Draft claim — not retained as a finding
+                  Draft claim (not retained as a finding)
                 </p>
                 <p className="mt-2">{claim.statement}</p>
                 <p className="mt-3 font-medium">Conflicting cited evidence</p>
@@ -466,7 +466,7 @@ function ReportSummary({ research }: { research: StockResearch }) {
             {generationDescription(research)}
           </p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Research context only—not investment advice or a buy, sell, or hold
+            Research context only. Not investment advice or a buy, sell, or hold
             recommendation.
           </p>
         </CardContent>
