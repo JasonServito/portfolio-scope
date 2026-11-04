@@ -15,6 +15,13 @@ import type { AgentAvailability, ResearchRating } from "@/lib/research/types";
  * their year (so "September 27, 2025" matches "2025-09-27" and "FY2025"
  * matches a period ending in 2025), form types and quarter labels are not
  * values, and "negative" or the Unicode minus is read as a sign.
+ *
+ * A claim number that is not an exact cited value is still supported when it
+ * is a correct rounding of one at the precision the claim states, after
+ * converting thousand/million/billion/trillion to the claim's scale, so
+ * "$71.3 billion" matches "71,340,000,000 USD". The rounding keeps the sign
+ * and the percent unit, never adds precision, and needs at least two
+ * significant digits, so "0.7" does not stand in for 0.66.
  */
 const NUMBER_PATTERN =
   /[-+]?(?:[$€£])?\d[\d,]*(?:\.\d+)?(?:\s*(?:%|(?:percent|thousand|million|billion|trillion|bn|tn|k|m|b)(?![a-z])))?/gi;
@@ -76,12 +83,41 @@ function canonicalUnit(raw: string) {
   return "";
 }
 
-/** Numeric tokens normalized to `${number}${unit}`, e.g. `6.4%` or `-31796000000`, plus whole dates. */
-export function numericTokens(value: string) {
-  const { stripped, tokens } = extractDates(
+const UNIT_SCALE: Record<string, number> = {
+  "": 1,
+  thousand: 1e3,
+  million: 1e6,
+  billion: 1e9,
+  trillion: 1e12,
+};
+const MIN_ROUNDED_SIGNIFICANT_DIGITS = 2;
+
+type StatedNumber = {
+  token: string;
+  value: number;
+  unit: string;
+  decimals: number;
+  significantDigits: number;
+};
+
+/** Decimal places and significant digits as written; integer trailing zeros are not significant. */
+function writtenPrecision(numeric: string) {
+  const [whole, fraction = ""] = numeric.replace(/^[-+]/, "").split(".");
+  const digits = `${whole}${fraction}`.replace(/^0+/, "");
+  return {
+    decimals: fraction.length,
+    significantDigits: fraction
+      ? digits.length
+      : digits.replace(/0+$/, "").length,
+  };
+}
+
+function readNumbers(value: string) {
+  const { stripped, tokens: dates } = extractDates(
     value.replaceAll("−", "-").replaceAll(NEGATIVE_WORD_PATTERN, "-"),
   );
   const residual = stripped.replaceAll(NON_VALUE_LABEL_PATTERN, " ");
+  const numbers: StatedNumber[] = [];
   for (const match of residual.matchAll(NUMBER_PATTERN)) {
     const raw = match[0];
     const numeric = raw
@@ -90,25 +126,69 @@ export function numericTokens(value: string) {
     if (!numeric) continue;
     const number = Number(numeric);
     if (!Number.isFinite(number)) continue;
-    tokens.add(`${number}${canonicalUnit(raw)}`);
+    const unit = canonicalUnit(raw);
+    numbers.push({
+      token: `${number}${unit}`,
+      value: number,
+      unit,
+      ...writtenPrecision(numeric),
+    });
   }
-  return tokens;
+  return { dates, numbers };
 }
 
-/** Numeric tokens in the claim statement absent from every cited supporting excerpt. */
+/** Numeric tokens normalized to `${number}${unit}`, e.g. `6.4%` or `-31796000000`, plus whole dates. */
+export function numericTokens(value: string) {
+  const { dates, numbers } = readNumbers(value);
+  for (const number of numbers) dates.add(number.token);
+  return dates;
+}
+
+/** Whether the stated number is the cited value rounded to the stated precision. */
+function roundsCitedValue(stated: StatedNumber, cited: StatedNumber) {
+  if (stated.significantDigits < MIN_ROUNDED_SIGNIFICANT_DIGITS) return false;
+  if ((stated.unit === "%") !== (cited.unit === "%")) return false;
+  const citedInStatedUnit =
+    stated.unit === "%"
+      ? cited.value
+      : (cited.value * UNIT_SCALE[cited.unit]) / UNIT_SCALE[stated.unit];
+  const halfStep = 0.5 * 10 ** -stated.decimals;
+  return Math.abs(citedInStatedUnit - stated.value) <= halfStep * (1 + 1e-9);
+}
+
+/** Numeric tokens in the claim statement that no cited supporting excerpt states or rounds to. */
 export function unsupportedNumericTokens(
   claim: Pick<ModelClaim, "statement" | "evidenceIds">,
   evidenceById: ReadonlyMap<string, Pick<ResearchEvidence, "excerpt">>,
 ) {
-  const claimNumbers = numericTokens(claim.statement);
-  if (claimNumbers.size === 0) return [];
-  const cited = new Set<string>();
+  const stated = readNumbers(claim.statement);
+  if (stated.dates.size === 0 && stated.numbers.length === 0) return [];
+  const citedTokens = new Set<string>();
+  const citedNumbers: StatedNumber[] = [];
   for (const evidenceId of claim.evidenceIds) {
     const evidence = evidenceById.get(evidenceId);
     if (!evidence) continue;
-    for (const token of numericTokens(evidence.excerpt)) cited.add(token);
+    const cited = readNumbers(evidence.excerpt);
+    for (const token of cited.dates) citedTokens.add(token);
+    for (const number of cited.numbers) {
+      citedTokens.add(number.token);
+      citedNumbers.push(number);
+    }
   }
-  return [...claimNumbers].filter((token) => !cited.has(token));
+  const unsupported = new Set<string>();
+  for (const token of stated.dates) {
+    if (!citedTokens.has(token)) unsupported.add(token);
+  }
+  for (const number of stated.numbers) {
+    if (
+      citedTokens.has(number.token) ||
+      citedNumbers.some((cited) => roundsCitedValue(number, cited))
+    ) {
+      continue;
+    }
+    unsupported.add(number.token);
+  }
+  return [...unsupported];
 }
 
 export function claimMix(claims: readonly Pick<ModelClaim, "category">[]) {
