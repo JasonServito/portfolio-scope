@@ -390,7 +390,11 @@ describe("research UI", () => {
         initialResearch={{
           ...externalResearch,
           agents: [
-            { ...failedAgent, status: "COMPLETED", provider: "partial-fallback" },
+            {
+              ...failedAgent,
+              status: "COMPLETED",
+              provider: "partial-fallback",
+            },
             {
               ...failedAgent,
               agentName: "RISK",
@@ -455,6 +459,32 @@ describe("research UI", () => {
     expect(markup).not.toContain("Partial analysis");
   });
 
+  it("lists each prebuilt risk once and leaves its counterpoints out of Risks", () => {
+    const valuationNote =
+      "The demo does not include live valuation, estimates, or event data.";
+    const markup = renderToStaticMarkup(
+      <ResearchTabs
+        initialResearch={{
+          ...externalResearch,
+          generationMode: "DETERMINISTIC",
+          report: {
+            ...externalResearch.report,
+            risks: ["Leverage is above the review line.", "Margins narrowed."],
+            bearCase: ["Leverage is above the review line.", valuationNote],
+          },
+        }}
+        readOnly
+        ticker="AAPL"
+      />,
+    );
+
+    expect(markup.match(/Leverage is above the review line\./g)).toHaveLength(
+      1,
+    );
+    expect(markup).toContain("Margins narrowed.");
+    expect(markup).not.toContain(valuationNote);
+  });
+
   it("shows readable amounts and at most four points before Show more", () => {
     const raw =
       "Apple generated 98,767,000,000 USD of annual free cash flow, a 23.7 percent margin.";
@@ -464,7 +494,14 @@ describe("research UI", () => {
           ...externalResearch,
           report: {
             ...externalResearch.report,
-            bullCase: [raw, "Point two.", "Point three.", "Point four.", "Point five.", "Point six."],
+            bullCase: [
+              raw,
+              "Point two.",
+              "Point three.",
+              "Point four.",
+              "Point five.",
+              "Point six.",
+            ],
           },
           claims: [
             {

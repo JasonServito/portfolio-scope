@@ -517,8 +517,8 @@ function ReportDetails({
           ) : null}
           <p>{generationDescription(research)}</p>
           <p>
-            Research context only—not investment advice or a buy, sell, or
-            hold recommendation.
+            Research context only—not investment advice or a buy, sell, or hold
+            recommendation.
           </p>
         </section>
       </div>
@@ -534,10 +534,15 @@ function ReportSummary({ research }: { research: StockResearch }) {
   const readable = (item: string) =>
     plainNumbers(labelPartialClaim(item, research));
   const strengths = report.bullCase.map(readable);
-  // Counterpoints read as cautions to a beginner, so they join the risks.
+  // Counterpoints read as cautions to a beginner, so they join the risks. A
+  // prebuilt report's counterpoints repeat its risk warnings or say the demo
+  // has no valuation data, so only model-written counterpoints are added.
+  const counterpoints = isAiGenerated(research) ? report.bearCase : [];
   const risks = [
-    ...report.risks.filter((item) => !notes.includes(item)),
-    ...report.bearCase,
+    ...new Set([
+      ...report.risks.filter((item) => !notes.includes(item)),
+      ...counterpoints,
+    ]),
   ].map(readable);
 
   return (
