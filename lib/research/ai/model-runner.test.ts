@@ -223,6 +223,10 @@ describe("grounded model runner", () => {
     expect(prompt.mock.calls[1][0]).toContain(
       "The prior response failed the safety check: The generated output contained a prohibited stock-price target or prediction.",
     );
+    // The repair request quotes the flagged phrase so the model can reword it.
+    expect(prompt.mock.calls[1][0]).toContain(
+      'Flagged text: "stock price could fall"',
+    );
   });
 
   it("logs why each output was rejected without model text", async () => {

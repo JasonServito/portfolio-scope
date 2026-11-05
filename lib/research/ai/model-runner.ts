@@ -294,7 +294,7 @@ export async function runValidatedModelCall<T>(
  */
 function failedCheck(error: unknown) {
   if (error instanceof ModelOutputSafetyError) {
-    return `the safety check: ${error.message}`;
+    return `the safety check: ${error.message}${error.repairDetail ? ` Flagged text: "${error.repairDetail}"; describe the business fact instead.` : ""}`;
   }
   if (error instanceof ModelOutputConsistencyError) {
     return `the consistency check: ${error.message}${error.repairDetail ? ` Failing claims: ${error.repairDetail}.` : ""}`;
