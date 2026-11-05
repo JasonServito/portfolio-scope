@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 
 import { SessionControls } from "@/components/auth/session-controls";
 import { BrandMark } from "@/components/layout/brand-mark";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { requireAdmin } from "@/lib/auth/session";
 
@@ -48,7 +49,8 @@ export default async function AdminLayout({
               Public demo
             </Link>
           </nav>
-          <div className="ml-auto sm:ml-0">
+          <div className="ml-auto flex items-center gap-1 sm:ml-0">
+            <ThemeToggle />
             <SessionControls />
           </div>
         </div>

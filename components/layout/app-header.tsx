@@ -6,6 +6,7 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { Bell, Home, Search } from "lucide-react";
 
 import { BrandMark } from "@/components/layout/brand-mark";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -139,6 +140,7 @@ export function AppHeader({
               <Bell className="size-4" />
             </Link>
           </nav>
+          <ThemeToggle />
           {sessionControls}
         </div>
       </div>

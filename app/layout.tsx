@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { connection } from "next/server";
 
 import { getSiteUrl, siteConfig } from "@/lib/site";
+import { themeScript } from "@/lib/theme";
 
 import "./globals.css";
 
@@ -69,7 +70,11 @@ export default async function RootLayout({
       lang="en"
       className={`${inter.variable} ${plexMono.variable} h-full antialiased`}
       data-scroll-behavior="smooth"
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
   );
