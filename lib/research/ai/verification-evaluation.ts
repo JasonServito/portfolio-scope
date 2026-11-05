@@ -44,21 +44,21 @@ import {
 // they do not assert human approval to activate an external provider.
 export const M33_EVALUATION_BASELINE = {
   versions: {
-    prompt: "m33-research-v8",
-    retrieval: "m32-structured-lexical-v3",
+    prompt: "m33-research-v10",
+    retrieval: "m32-structured-lexical-v4",
     outputSchema: "m30-claims-v2",
     report: "m33-report-v4",
-    snapshot: "m32-public-evidence-snapshot-v4",
+    snapshot: "m32-public-evidence-snapshot-v5",
     model: "gpt-5.4-mini-2026-03-17",
     pricing: "openai-pricing-2026-08-24",
     calculation: "sec-derived-v2",
-    filingParser: "sec-filing-sections-v1",
+    filingParser: "sec-filing-sections-v2",
   },
   inputsSha256:
-    "b688e5b70b7098fe4bff265ba055b120328735f163fef65aae5ad7b2a1100f71",
+    "06a3796b1955dc0a74ceb931404e300e8b3d0070003c3b36eaaae01f47bb0ff6",
   thresholds: {
-    caseCount: 8,
-    passedCases: 8,
+    caseCount: 9,
+    passedCases: 9,
     retainedUnsupportedClaims: 0,
     verdictAccuracy: 1,
     citationCorrectness: 1,

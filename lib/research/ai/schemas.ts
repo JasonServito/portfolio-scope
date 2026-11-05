@@ -228,6 +228,83 @@ export function getModelOutputSafetyIssue(output: unknown) {
   return null;
 }
 
+/**
+ * Drops a repeated citation inside one claim: an id listed twice, or listed
+ * as both supporting and counter evidence, where it stays supporting so the
+ * number check still reads its excerpt. A repeated id cites nothing new, so
+ * removing it changes no claim and no grounding; every remaining id is still
+ * checked by validateGroundedOutput.
+ */
+export function withDistinctClaimReferences<T extends GroundedModelOutput>(
+  output: T,
+): T {
+  return {
+    ...output,
+    claims: output.claims.map((claim) => {
+      const evidenceIds = [...new Set(claim.evidenceIds)];
+      return {
+        ...claim,
+        evidenceIds,
+        counterEvidenceIds: [...new Set(claim.counterEvidenceIds)].filter(
+          (id) => !evidenceIds.includes(id),
+        ),
+      };
+    }),
+  };
+}
+
+const MAX_CLAIM_EVIDENCE_IDS = 6;
+
+/**
+ * A passage of a Form 8-K (its item text or press release) does not itself
+ * state the filing date or item codes; the dated current-report item of the
+ * same filing does. When a claim cites such a passage but not that filing's
+ * dated item, and the item was supplied to the same call, the item is added
+ * as a supporting citation, so the date and item codes the claim states are
+ * checked against the filing's own record rather than rejected. No other
+ * citation is added, and the number check stays exactly as strict.
+ */
+export function withCitedCurrentReportItems<T extends GroundedModelOutput>(
+  output: T,
+  evidence: readonly ResearchEvidence[],
+): T {
+  const itemByAccession = new Map<string, string>();
+  for (const item of evidence) {
+    if (item.metadata.evidenceType === "SEC_CURRENT_REPORT" && item.accessionNumber) {
+      itemByAccession.set(item.accessionNumber, item.id);
+    }
+  }
+  if (itemByAccession.size === 0) return output;
+  const passageItem = new Map<string, string>();
+  for (const item of evidence) {
+    const reportItem = item.accessionNumber
+      ? itemByAccession.get(item.accessionNumber)
+      : undefined;
+    if (item.metadata.evidenceType === "SEC_FILING_PASSAGE" && reportItem) {
+      passageItem.set(item.id, reportItem);
+    }
+  }
+  return {
+    ...output,
+    claims: output.claims.map((claim) => {
+      const evidenceIds = [...claim.evidenceIds];
+      for (const id of claim.evidenceIds) {
+        const reportItem = passageItem.get(id);
+        if (
+          reportItem &&
+          !evidenceIds.includes(reportItem) &&
+          evidenceIds.length < MAX_CLAIM_EVIDENCE_IDS
+        ) {
+          evidenceIds.push(reportItem);
+        }
+      }
+      return evidenceIds.length === claim.evidenceIds.length
+        ? claim
+        : { ...claim, evidenceIds };
+    }),
+  };
+}
+
 export function validateGroundedOutput<T extends GroundedModelOutput>(
   output: T,
   evidence: ResearchEvidence[],

@@ -14,7 +14,10 @@ import {
   type UpcomingEarningsRecord,
 } from "@/lib/research/ai/retrieval";
 import { buildSecFilingIndexUrl, buildSecFilingUrl } from "@/lib/sec/client";
-import { extractFilingSections } from "@/lib/sec/filing-sections";
+import {
+  extractCurrentReportItems,
+  extractFilingSections,
+} from "@/lib/sec/filing-sections";
 import { normalizeCompanyFacts } from "@/lib/sec/normalization";
 import { secCompanyFactsSchema } from "@/lib/sec/schemas";
 import aaplCompanyFacts from "@/tests/fixtures/sec/aapl-companyfacts-history.json";
@@ -241,7 +244,8 @@ export function aaplFixtureFilingPassages(
  * Three synthetic Form 8-K current reports of the twelve-month window before
  * the fixture's observation date: a results filing whose Exhibit 99.1 press
  * release was extracted, an earlier results filing whose exhibit was not
- * found, and a shareholder-vote filing with no exhibit expected.
+ * found, and a shareholder-vote filing whose Item 5.07 text was extracted
+ * from its primary document.
  */
 export const AAPL_FIXTURE_CURRENT_REPORTS = {
   results: {
@@ -265,24 +269,58 @@ export const AAPL_FIXTURE_CURRENT_REPORTS = {
   },
   shareholderVote: {
     filingId: "filing-aapl-8k-vote-fixture",
+    rawSourceId: "raw-aapl-8k-vote-document-fixture",
     accessionNumber: "0000320193-26-000004",
     filingDate: "2026-02-26",
     reportDate: "2026-02-24",
     primaryDocument: "aapl-20260224.htm",
     itemCodes: ["5.07"],
+    file: "aapl-8k-primary-document-clipped.htm",
   },
 } as const;
+
+function fixtureDocument(
+  file: string,
+  accessionNumber: string,
+  document: string,
+  rawSourceId: string,
+) {
+  const html = readFileSync(join(process.cwd(), "tests", "fixtures", "sec", file), "utf8");
+  const body = Buffer.from(html, "utf8");
+  const documentSha256 = createHash("sha256").update(body).digest("hex");
+  return {
+    html,
+    rawSource: {
+      id: rawSourceId,
+      kind: "FILING_DOCUMENT",
+      sourceUrl: buildSecFilingUrl("0000320193", accessionNumber, document),
+      objectKey: `sec/0000320193/filings/${documentSha256}.htm`,
+      sha256: documentSha256,
+      contentType: "text/html",
+      byteLength: String(body.byteLength),
+      firstRetrievedAt: RETRIEVED_AT,
+      lastRetrievedAt: RETRIEVED_AT,
+    },
+  };
+}
 
 export function aaplFixtureCurrentReports(): CurrentReportRecord[] {
   const { results, resultsWithoutExhibit, shareholderVote } =
     AAPL_FIXTURE_CURRENT_REPORTS;
-  const html = readFileSync(
-    join(process.cwd(), "tests", "fixtures", "sec", results.file),
-    "utf8",
+  const exhibit = fixtureDocument(
+    results.file,
+    results.accessionNumber,
+    results.exhibit,
+    results.rawSourceId,
   );
-  const body = Buffer.from(html, "utf8");
-  const documentSha256 = createHash("sha256").update(body).digest("hex");
-  const extraction = extractFilingSections(html, "8-K");
+  const extraction = extractFilingSections(exhibit.html, "8-K");
+  const vote = fixtureDocument(
+    shareholderVote.file,
+    shareholderVote.accessionNumber,
+    shareholderVote.primaryDocument,
+    shareholderVote.rawSourceId,
+  );
+  const voteItems = extractCurrentReportItems(vote.html, shareholderVote.itemCodes);
   const record = (
     fixture: {
       filingId: string;
@@ -310,21 +348,7 @@ export function aaplFixtureCurrentReports(): CurrentReportRecord[] {
       status: "COMPLETED",
       parserVersion: extraction.parserVersion,
       errorCode: null,
-      rawSource: {
-        id: results.rawSourceId,
-        kind: "FILING_DOCUMENT",
-        sourceUrl: buildSecFilingUrl(
-          "0000320193",
-          results.accessionNumber,
-          results.exhibit,
-        ),
-        objectKey: `sec/0000320193/filings/${documentSha256}.htm`,
-        sha256: documentSha256,
-        contentType: "text/html",
-        byteLength: String(body.byteLength),
-        firstRetrievedAt: RETRIEVED_AT,
-        lastRetrievedAt: RETRIEVED_AT,
-      },
+      rawSource: exhibit.rawSource,
       chunks: extraction.sections.flatMap((section) =>
         section.chunks.map((chunk) => ({
           id: `${results.filingId}-${section.kind.toLowerCase()}-${chunk.ordinal}`,
@@ -347,7 +371,27 @@ export function aaplFixtureCurrentReports(): CurrentReportRecord[] {
       rawSource: null,
       chunks: [],
     }),
-    record(shareholderVote, null),
+    record(shareholderVote, {
+      status: "COMPLETED",
+      parserVersion: voteItems.parserVersion,
+      errorCode: null,
+      rawSource: vote.rawSource,
+      chunks: voteItems.sections.flatMap((section) =>
+        section.chunks.map((chunk) => ({
+          id: `${shareholderVote.filingId}-${section.kind.toLowerCase()}-${chunk.ordinal}`,
+          filingId: shareholderVote.filingId,
+          rawSourceId: shareholderVote.rawSourceId,
+          sectionKind: section.kind,
+          sectionLabel: section.label,
+          ordinal: chunk.ordinal,
+          passageStart: chunk.passageStart,
+          passageEnd: chunk.passageEnd,
+          sha256: chunk.sha256,
+          text: chunk.text,
+          rawSource: vote.rawSource,
+        })),
+      ),
+    }),
   ];
 }
 

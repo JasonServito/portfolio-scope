@@ -3,8 +3,8 @@ import { z } from "zod";
 import type { SpecialistAgentName } from "@/lib/research/types";
 
 export const AI_PRICING_VERSION = "openai-pricing-2026-08-24";
-export const AI_PROMPT_VERSION = "m33-research-v8";
-export const AI_RETRIEVAL_VERSION = "m32-structured-lexical-v3";
+export const AI_PROMPT_VERSION = "m33-research-v10";
+export const AI_RETRIEVAL_VERSION = "m32-structured-lexical-v4";
 export const AI_OUTPUT_SCHEMA_VERSION = "m30-claims-v2";
 export const AI_REPORT_VERSION = "m33-report-v4";
 export const AI_SPECIALIST_AGENT_VERSION = "m30-specialist-v2";

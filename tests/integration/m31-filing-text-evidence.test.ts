@@ -279,12 +279,12 @@ describe("M31 filing text ingestion", () => {
     ).resolves.toBe(1);
   });
 
-  it("extracts the 10-Q management's discussion", async () => {
+  it("extracts the 10-Q management's discussion and the Part II risk-factor update", async () => {
     const result = await fetchFixture(filings.tenQ);
 
     expect(result).toMatchObject({
       extractionStatus: "COMPLETED",
-      extractedSections: ["MDA"],
+      extractedSections: ["MDA", "RISK_FACTORS"],
       missingSections: [],
     });
     const chunks = await db.secFilingChunk.findMany({
@@ -292,10 +292,16 @@ describe("M31 filing text ingestion", () => {
       orderBy: { ordinal: "asc" },
     });
     expect(chunks.length).toBe(result.chunkCount);
-    expect(chunks.every((chunk) => chunk.sectionKind === "MDA")).toBe(true);
-    expect(chunks.map((chunk) => chunk.text).join("\n")).toContain(
-      "Quarterly Highlights",
-    );
+    const text = (kind: string) =>
+      chunks
+        .filter((chunk) => chunk.sectionKind === kind)
+        .map((chunk) => chunk.text)
+        .join("\n");
+    expect(text("MDA")).toContain("Quarterly Highlights");
+    const update = chunks.filter((chunk) => chunk.sectionKind === "RISK_FACTORS");
+    expect(update).toHaveLength(1);
+    expect(update[0].sectionLabel).toBe("Part II, Item 1A. Risk Factors");
+    expect(text("RISK_FACTORS")).toContain("no material changes to those risk factors");
   });
 
   it("records a retryable fetch failure on the filing without storing a document or blocking anything else", async () => {
@@ -317,7 +323,7 @@ describe("M31 filing text ingestion", () => {
       status: "FAILED",
       rawSourceId: null,
       parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
-      expectedSections: ["MDA"],
+      expectedSections: ["MDA", "RISK_FACTORS"],
       extractedSections: [],
       chunkCount: 0,
       errorCode: SecClientErrorCode.PROVIDER_UNAVAILABLE,

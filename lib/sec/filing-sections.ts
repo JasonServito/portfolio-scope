@@ -1,14 +1,21 @@
 import { createHash } from "node:crypto";
 
-import { CURRENT_REPORT_FORM_TYPE } from "@/lib/sec/current-reports";
+import {
+  CURRENT_REPORT_FORM_TYPE,
+  currentReportItemTitle,
+  currentReportTextItemCodes,
+  RESULTS_ITEM_CODE,
+} from "@/lib/sec/current-reports";
 
 /**
- * Heuristic section extraction for SEC 10-K and 10-Q primary documents, and
- * whole-document passages for an 8-K Exhibit 99.1 press release (M32).
+ * Heuristic section extraction for SEC 10-K and 10-Q primary documents, the
+ * listed items of a primary 8-K document, and whole-document passages for an
+ * 8-K Exhibit 99.1 (M32).
  *
  * The parser converts the inline-XBRL HTML to normalized plain text, locates
  * the Item headings it needs (Item 1 Business, Item 1A Risk Factors, and Item
- * 7 MD&A in a 10-K; Item 2 MD&A in a 10-Q), and splits each bounded section
+ * 7 MD&A in a 10-K; Part I Item 2 MD&A and Part II Item 1A Risk Factors in a
+ * 10-Q; each listed "Item 5.02" in an 8-K), and splits each bounded section
  * into passages. Every passage records its character range in the normalized
  * document text and a SHA-256 of exactly that text, so a cited excerpt can be
  * verified against the stored chunk without re-parsing the filing.
@@ -23,13 +30,16 @@ import { CURRENT_REPORT_FORM_TYPE } from "@/lib/sec/current-reports";
  * the result is a shorter section, never text from the wrong section.
  */
 
-export const SEC_FILING_SECTION_PARSER_VERSION = "sec-filing-sections-v1";
+// v2 adds 8-K item text (CURRENT_REPORT_ITEM) and 10-Q Part II Item 1A Risk
+// Factors, which may be a one-sentence "no material changes" update.
+export const SEC_FILING_SECTION_PARSER_VERSION = "sec-filing-sections-v2";
 
 export type FilingSectionKind =
   | "BUSINESS"
   | "RISK_FACTORS"
   | "MDA"
-  | "PRESS_RELEASE";
+  | "PRESS_RELEASE"
+  | "CURRENT_REPORT_ITEM";
 
 /** The forms whose latest primary document supplies narrative evidence. */
 export const FILING_TEXT_FORM_TYPES = ["10-K", "10-Q"] as const;
@@ -72,6 +82,19 @@ export const PRESS_RELEASE_LIMITS: Readonly<FilingSectionLimits> = {
   minChunkChars: 40,
 };
 
+// An 8-K item is a short statement of what happened, so its passages are
+// smaller than a 10-K's: an event's opening passage can fit the News
+// specialist's context beside the other events' dated items.
+export const CURRENT_REPORT_ITEM_LIMITS: Readonly<FilingSectionLimits> = {
+  maxCharsPerSection: 12_000,
+  targetChunkChars: 400,
+  maxChunkChars: 600,
+  maxChunksPerSection: 30,
+  maxChunksPerFiling: 60,
+  minSectionChars: 40,
+  minChunkChars: 40,
+};
+
 export type FilingSectionChunk = {
   ordinal: number;
   passageStart: number;
@@ -108,6 +131,8 @@ type SectionDefinition = {
   kind: FilingSectionKind;
   label: string;
   heading: RegExp;
+  /** Overrides the limits' minimum for a section that may legitimately be one sentence. */
+  minSectionChars?: number;
 };
 
 // A heading starts a line, may carry a "Part I" prefix, and may put its title
@@ -150,11 +175,33 @@ const SECTION_DEFINITIONS: Record<"10-K" | "10-Q", SectionDefinition[]> = {
       label: "Item 2. Management's Discussion and Analysis",
       heading: headingPattern("2", MDA_TITLE),
     },
+    // Part II Item 1A updates the 10-K risk factors. A short "no material
+    // changes" statement is the update, so it is recorded as present; a
+    // contents entry is followed by no sentence and still never wins.
+    {
+      kind: "RISK_FACTORS",
+      label: "Part II, Item 1A. Risk Factors",
+      heading: headingPattern("1a", String.raw`risk[ \t]+factors\b`),
+      minSectionChars: 40,
+    },
   ],
 };
 
-export function expectedFilingSectionKinds(formType: string): FilingSectionKind[] {
-  if (formType === CURRENT_REPORT_FORM_TYPE) return ["PRESS_RELEASE"];
+/**
+ * The sections a filing's fetch is expected to yield. For an 8-K they follow
+ * its item codes: the listed items' text from the primary document, and the
+ * Exhibit 99.1 press release that only a results filing must carry.
+ */
+export function expectedFilingSectionKinds(
+  formType: string,
+  itemCodes: readonly string[] = [],
+): FilingSectionKind[] {
+  if (formType === CURRENT_REPORT_FORM_TYPE) {
+    const kinds: FilingSectionKind[] = [];
+    if (currentReportTextItemCodes(itemCodes).length > 0) kinds.push("CURRENT_REPORT_ITEM");
+    if (itemCodes.includes(RESULTS_ITEM_CODE)) kinds.push("PRESS_RELEASE");
+    return kinds;
+  }
   const definitions = SECTION_DEFINITIONS[formType as "10-K" | "10-Q"];
   return definitions ? definitions.map((definition) => definition.kind) : [];
 }
@@ -441,7 +488,9 @@ function findSection(
   }
   if (!best) return null;
   const body = trimRange(text, { start: best.start, end: best.end });
-  if (body.end - body.start < limits.minSectionChars) return null;
+  if (body.end - body.start < (definition.minSectionChars ?? limits.minSectionChars)) {
+    return null;
+  }
   return {
     kind: definition.kind,
     label: definition.label,
@@ -494,6 +543,110 @@ function extractPressRelease(
       .filter((section) => section.truncated)
       .map((section) => section.kind),
     chunkCount: chunked.chunks.length,
+  };
+}
+
+// An 8-K item heading starts a line with its decimal code ("Item 5.02",
+// "ITEM 5.02.", "Item 5.02:"). An item ends at the next item heading of a
+// different code, or at the signature block or exhibit index.
+const CURRENT_REPORT_ITEM_HEADING = /^[ \t]*item[ \t]*(\d{1,2}\.\d{2})(?!\d)/gim;
+const CURRENT_REPORT_END = /^[ \t]*(?:signatures?|exhibit[ \t]+index)[ \t.:]*$/gim;
+// A heading line whose remainder is about the item title holds no event
+// text; a longer remainder is the start of the item text and is kept.
+const ITEM_TITLE_ALLOWANCE = 40;
+
+export type CurrentReportItemExtraction = FilingSectionExtraction & {
+  /** Listed item codes whose heading or text was not found. */
+  missingItems: string[];
+};
+
+/**
+ * Extracts the text of each listed item (other than Item 2.02, whose body
+ * points at the press release, and Item 9.01, the exhibit list) from a
+ * primary 8-K document. Each item becomes one CURRENT_REPORT_ITEM section
+ * labelled "Item 5.02", and its passages continue one ordinal sequence per
+ * filing so every passage keeps a unique (filing, kind, ordinal) key. A
+ * listed item whose heading is not found is reported, never guessed.
+ */
+export function extractCurrentReportItems(
+  html: string,
+  itemCodes: readonly string[],
+  limits: Readonly<FilingSectionLimits> = CURRENT_REPORT_ITEM_LIMITS,
+): CurrentReportItemExtraction {
+  const documentText = htmlToText(html);
+  const codes = currentReportTextItemCodes(itemCodes);
+  const headings = [...documentText.matchAll(CURRENT_REPORT_ITEM_HEADING)].map(
+    (match) => ({ index: match.index, end: match.index + match[0].length, code: match[1] }),
+  );
+  const ends = [...documentText.matchAll(CURRENT_REPORT_END)].map((match) => match.index);
+  const perItemChunkLimit = Math.max(
+    1,
+    Math.min(
+      limits.maxChunksPerSection,
+      Math.floor(limits.maxChunksPerFiling / Math.max(1, codes.length)),
+    ),
+  );
+  const sections: FilingSection[] = [];
+  const missingItems: string[] = [];
+  let nextOrdinal = 0;
+  for (const code of codes) {
+    let best: Range & { headingStart: number } | null = null;
+    for (const heading of headings) {
+      if (heading.code !== code) continue;
+      const lineEnd = documentText.indexOf("\n", heading.end);
+      const remainder = (lineEnd === -1 ? documentText.length : lineEnd) - heading.end;
+      const titleLength = currentReportItemTitle(code)?.length ?? 0;
+      const start =
+        lineEnd !== -1 && remainder <= titleLength + ITEM_TITLE_ALLOWANCE
+          ? lineEnd + 1
+          : heading.end;
+      const end = Math.min(
+        headings.find((other) => other.index >= start && other.code !== code)?.index ??
+          documentText.length,
+        ends.find((index) => index >= start) ?? documentText.length,
+      );
+      if (!best || end - start > best.end - best.start) {
+        best = { headingStart: heading.index, start, end };
+      }
+    }
+    const body = best ? trimRange(documentText, best) : null;
+    if (!best || !body || body.end - body.start < limits.minSectionChars) {
+      missingItems.push(code);
+      continue;
+    }
+    const chunked = chunkRange(documentText, body, limits, perItemChunkLimit);
+    if (chunked.chunks.length === 0) {
+      missingItems.push(code);
+      continue;
+    }
+    sections.push({
+      kind: "CURRENT_REPORT_ITEM",
+      label: `Item ${code}`,
+      headingStart: best.headingStart,
+      start: body.start,
+      end: body.end,
+      truncated: chunked.truncated || body.end - body.start > limits.maxCharsPerSection,
+      chunks: chunked.chunks.map((chunk) => ({
+        ...chunk,
+        ordinal: nextOrdinal + chunk.ordinal,
+      })),
+    });
+    nextOrdinal += chunked.chunks.length;
+  }
+  const expectedSections: FilingSectionKind[] =
+    codes.length > 0 ? ["CURRENT_REPORT_ITEM"] : [];
+  return {
+    parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+    formType: CURRENT_REPORT_FORM_TYPE,
+    documentText,
+    expectedSections,
+    sections,
+    missingSections: sections.length === 0 ? expectedSections : [],
+    truncatedSections: sections.some((section) => section.truncated)
+      ? ["CURRENT_REPORT_ITEM"]
+      : [],
+    chunkCount: nextOrdinal,
+    missingItems,
   };
 }
 

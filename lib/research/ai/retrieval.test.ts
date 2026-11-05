@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -626,7 +628,7 @@ describe("M31 filing passage evidence", () => {
     );
 
   it("emits bounded, hash-verifiable passages of the latest 10-K and 10-Q with filing provenance", () => {
-    expect(aapl.schemaVersion).toBe("m32-public-evidence-snapshot-v4");
+    expect(aapl.schemaVersion).toBe("m32-public-evidence-snapshot-v5");
     expect(passages.length).toBeGreaterThan(0);
     const perSection = new Map<string, number[]>();
     for (const item of passages) {
@@ -644,12 +646,12 @@ describe("M31 filing passage evidence", () => {
       expect(item.passageEnd!).toBeGreaterThan(item.passageStart!);
       expect(item.secFilingId).toMatch(/^filing-aapl-10[kq]-fixture$/);
       expect(item.secRawSourceId).toMatch(/^raw-aapl-10[kq]-document-fixture$/);
-      expect(item.section).toMatch(/^Item \d+A?\. /);
+      expect(item.section).toMatch(/^(?:Part II, )?Item \d+A?\. /);
       expect(item.sourceDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(item.excerpt.length).toBeLessThanOrEqual(1_600);
       expect(item.metadata).toMatchObject({
         evidenceType: "SEC_FILING_PASSAGE",
-        parserVersion: "sec-filing-sections-v1",
+        parserVersion: "sec-filing-sections-v2",
       });
       const key = `${item.metadata.formType}:${item.metadata.sectionKind}`;
       perSection.set(key, [
@@ -662,6 +664,7 @@ describe("M31 filing passage evidence", () => {
       "10-K:MDA",
       "10-K:RISK_FACTORS",
       "10-Q:MDA",
+      "10-Q:RISK_FACTORS",
     ]);
     for (const ordinals of perSection.values()) {
       expect(ordinals.length).toBeLessThanOrEqual(6);
@@ -774,7 +777,9 @@ describe("M31 filing passage evidence", () => {
   });
 
   it("includes evidence the specialists cited, passages first, right after the synthesis mandatory items", () => {
-    const riskPassage = passagesFor("RISK")[0];
+    const riskPassage = passagesFor("RISK").find(
+      (item) => item.metadata.formType === "10-K",
+    )!;
     const summary = aapl.evidence.find(
       (item) => item.metadata.evidenceType === "FINANCIAL_SUMMARY_TABLE",
     )!;
@@ -900,7 +905,7 @@ describe("M32 current-report event evidence", () => {
   );
 
   it("emits one dated SEC_FILING item per current report, newest first, citing the filing index page", () => {
-    expect(withReports.schemaVersion).toBe("m32-public-evidence-snapshot-v4");
+    expect(withReports.schemaVersion).toBe("m32-public-evidence-snapshot-v5");
     expect(hasCurrentReportEvidence(withReports)).toBe(true);
     expect(events.map((item) => item.metadata.accessionNumber)).toEqual([
       AAPL_FIXTURE_CURRENT_REPORTS.results.accessionNumber,
@@ -1001,7 +1006,7 @@ describe("M32 current-report event evidence", () => {
       },
     });
     expect(coverage.excerpt).toContain("3 Form 8-K current reports");
-    expect(coverage.excerpt).toContain("nothing after the newest filing date is known");
+    expect(coverage.excerpt).toContain("Nothing after the newest filing date is known.");
 
     expect(hasCurrentReportEvidence(without)).toBe(false);
     const none = without.evidence.find(
@@ -1029,7 +1034,7 @@ describe("M32 current-report event evidence", () => {
         (item) =>
           item.metadata.evidenceType !== "SEC_CURRENT_REPORT" &&
           item.metadata.evidenceType !== "SEC_CURRENT_REPORT_COVERAGE" &&
-          item.metadata.sectionKind !== "PRESS_RELEASE",
+          item.metadata.formType !== "8-K",
       );
     expect(periodic(withReports).map((item) => item.id)).toEqual(
       periodic(without).map((item) => item.id),
@@ -1037,7 +1042,7 @@ describe("M32 current-report event evidence", () => {
     expect(withReports.evidence.length).toBeLessThanOrEqual(200);
   });
 
-  it("gives News every listed report first, then press-release passages, and nothing from the periodic filings", () => {
+  it("gives News every listed report first, then each event's opening passage, and nothing from the periodic filings", () => {
     const selection = selectSpecialistEvidence(withReports, "NEWS");
     const types = selection.evidence.map((item) => item.metadata.evidenceType);
     expect(selection.mandatoryEvidenceIds).toEqual(
@@ -1046,18 +1051,18 @@ describe("M32 current-report event evidence", () => {
     expect(types.slice(0, 1 + events.length)).toEqual(
       expect.arrayContaining(["SEC_CURRENT_REPORT_COVERAGE", "SEC_CURRENT_REPORT"]),
     );
+    // What each event said: the results press release and the vote's Item
+    // 5.07 text, each from its opening passage, newest filing first.
+    const passages = selection.evidence.filter(
+      (item) => item.metadata.evidenceType === "SEC_FILING_PASSAGE",
+    );
     expect(
-      selection.evidence.some(
-        (item) => item.metadata.sectionKind === "PRESS_RELEASE",
-      ),
-    ).toBe(true);
-    expect(
-      selection.evidence.every(
-        (item) =>
-          item.metadata.evidenceType !== "SEC_FILING_PASSAGE" ||
-          item.metadata.sectionKind === "PRESS_RELEASE",
-      ),
-    ).toBe(true);
+      passages.map((item) => [item.metadata.sectionKind, item.metadata.chunkOrdinal]),
+    ).toEqual([
+      ["PRESS_RELEASE", 0],
+      ["CURRENT_REPORT_ITEM", 0],
+    ]);
+    expect(passages.every((item) => item.metadata.formType === "8-K")).toBe(true);
     expect(selection.contextCharacters).toBeLessThanOrEqual(
       AI_SPECIALIST_CONTEXT_CHAR_BUDGETS.NEWS,
     );
@@ -1067,10 +1072,134 @@ describe("M32 current-report event evidence", () => {
         other.evidence.some(
           (item) =>
             item.metadata.evidenceType === "SEC_CURRENT_REPORT" ||
-            item.metadata.sectionKind === "PRESS_RELEASE",
+            item.metadata.formType === "8-K",
         ),
       ).toBe(false);
     }
+  });
+
+  it("supplies a listed 8-K's item text as passages carrying the primary document's provenance", () => {
+    const items = withReports.evidence.filter(
+      (item) => item.metadata.sectionKind === "CURRENT_REPORT_ITEM",
+    );
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.length).toBeLessThanOrEqual(2);
+    for (const item of items) {
+      expect(item).toMatchObject({
+        sourceKind: "SEC_FILING",
+        accessionNumber: AAPL_FIXTURE_CURRENT_REPORTS.shareholderVote.accessionNumber,
+        section: "Item 5.07",
+        sourceDate: "2026-02-26",
+        secFilingId: "filing-aapl-8k-vote-fixture",
+        secRawSourceId: "raw-aapl-8k-vote-document-fixture",
+      });
+      expect(item.sourceUrl).toBe(
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019326000004/aapl-20260224.htm",
+      );
+      expect(item.sha256).toBe(
+        createHash("sha256").update(item.excerpt, "utf8").digest("hex"),
+      );
+      expect(item.metadata).toMatchObject({
+        evidenceType: "SEC_FILING_PASSAGE",
+        formType: "8-K",
+        itemCodes: ["5.07"],
+        agentNames: ["NEWS", "SYNTHESIS"],
+        parserVersion: "sec-filing-sections-v2",
+      });
+      expect(item.title).toContain("8-K Item 5.07 (filed 2026-02-26)");
+    }
+    expect(items[0].excerpt).toContain("Shareholders elected all eight director nominees");
+    // The vote filing lists no press release, so its dated item says so.
+    expect(events[2].metadata.exhibitState).toBe("NOT_EXPECTED");
+  });
+
+  it("offers a risk item's text to Risk too, from a listed 8-K or one of the two newest unlisted ones", () => {
+    const text =
+      "On January 12, 2026, the Company detected a cybersecurity incident involving unauthorized access to an internal system. The Company activated its incident response plan, and the investigation is ongoing.";
+    const cyber = {
+      ...reports[2],
+      id: "filing-aapl-8k-cyber-fixture",
+      accessionNumber: "0000320193-26-000002",
+      filingDate: new Date("2026-01-15T00:00:00.000Z"),
+      reportDate: new Date("2026-01-12T00:00:00.000Z"),
+      itemCodes: ["1.05"],
+      extraction: {
+        ...reports[2].extraction!,
+        chunks: [
+          {
+            ...reports[2].extraction!.chunks[0],
+            id: "chunk-cyber-0",
+            filingId: "filing-aapl-8k-cyber-fixture",
+            sectionLabel: "Item 1.05",
+            passageStart: 0,
+            passageEnd: text.length,
+            text,
+            sha256: createHash("sha256").update(text, "utf8").digest("hex"),
+          },
+        ],
+      },
+    };
+    const passageOf = (snapshot: typeof withReports) =>
+      snapshot.evidence.find(
+        (item) =>
+          item.secFilingId === cyber.id &&
+          item.metadata.evidenceType === "SEC_FILING_PASSAGE",
+      );
+
+    const listed = buildAaplFixtureSnapshot({ currentReports: [...reports, cyber] });
+    expect(passageOf(listed)?.metadata.agentNames).toEqual(["NEWS", "RISK", "SYNTHESIS"]);
+    const risk = selectSpecialistEvidence(listed, "RISK");
+    expect(risk.evidenceIds).toContain(passageOf(listed)!.id);
+    expect(risk.contextCharacters).toBeLessThanOrEqual(AI_SPECIALIST_CONTEXT_CHAR_BUDGETS.RISK);
+
+    // Four newer reports push it out of the listed four: only Risk and
+    // synthesis receive it, and an unlisted non-risk report adds nothing.
+    const newer = Array.from({ length: 4 }, (_, index) => ({
+      ...reports[2],
+      id: `filing-newer-${index}`,
+      accessionNumber: `0000320193-26-0002${String(index).padStart(2, "0")}`,
+      filingDate: new Date(Date.UTC(2026, 7, 1 + index)),
+      reportDate: new Date(Date.UTC(2026, 7, 1 + index)),
+    }));
+    const unlisted = buildAaplFixtureSnapshot({
+      currentReports: [...newer, reports[2], cyber],
+    });
+    expect(
+      unlisted.evidence.some(
+        (item) =>
+          item.metadata.evidenceType === "SEC_CURRENT_REPORT" &&
+          item.accessionNumber === cyber.accessionNumber,
+      ),
+    ).toBe(false);
+    expect(passageOf(unlisted)?.metadata.agentNames).toEqual(["RISK", "SYNTHESIS"]);
+    expect(
+      unlisted.evidence.some((item) => item.secFilingId === reports[2].id),
+    ).toBe(false);
+    expect(
+      selectSpecialistEvidence(unlisted, "NEWS").evidenceIds,
+    ).not.toContain(passageOf(unlisted)!.id);
+  });
+
+  it("supplies an extracted Item 8.01 Exhibit 99.1 without counting the filing as a results filing", () => {
+    const otherEvent = {
+      ...reports[0],
+      id: "filing-aapl-8k-other-event-fixture",
+      accessionNumber: "0000320193-26-000017",
+      filingDate: new Date("2026-07-01T00:00:00.000Z"),
+      reportDate: new Date("2026-07-01T00:00:00.000Z"),
+      itemCodes: ["8.01", "9.01"],
+    };
+    const snapshot = buildAaplFixtureSnapshot({ currentReports: [otherEvent] });
+    const event = snapshot.evidence.find(
+      (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT",
+    )!;
+    expect(event.metadata.exhibitState).toBe("EXTRACTED");
+    expect(event.excerpt).toMatch(/Exhibit 99\.1 press release: \d+ passages supplied/);
+    expect(
+      snapshot.evidence.find(
+        (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT_COVERAGE",
+      )!.metadata,
+    ).toMatchObject({ resultsFilings: 0, resultsFilingsExtracted: 0 });
   });
 
   it("is deterministic regardless of report ordering, lists at most four reports, and always keeps the newest results filing", () => {
@@ -1107,7 +1236,7 @@ describe("M32 current-report event evidence", () => {
       crowded.evidence.find(
         (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT_COVERAGE",
       )!.excerpt,
-    ).toContain("The 4 most recent are listed");
+    ).toContain("the 4 most recent are listed");
   });
 
   it("reads current reports through the repository for the twelve-month window and threads them into the prepared snapshot", async () => {

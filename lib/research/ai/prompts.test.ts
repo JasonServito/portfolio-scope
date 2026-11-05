@@ -103,7 +103,7 @@ describe("AI research prompts", () => {
     const [companyRisks, leverage, liquidity] =
       SPECIALIST_RESEARCH_QUESTIONS.RISK;
     expect(companyRisks).toMatch(/^Company risks: .*company-specific risks/);
-    expect(companyRisks).toContain("10-K Item 1A Risk Factors");
+    expect(companyRisks).toContain("Item 1A Risk Factors (10-K or 10-Q update)");
     expect(companyRisks).toContain(
       "including any regulatory, governance, or political exposure",
     );
@@ -293,5 +293,51 @@ describe("AI research prompts", () => {
 
     expect(prompt.input).toContain(boundedContext.replace("\n", "\\n"));
     expect(prompt.input).not.toContain(evidence.excerpt);
+  });
+
+  it("forwards to synthesis only the specialist citations synthesis is supplied", () => {
+    // Production AAPL, 2026-11-05: synthesis cited an id it saw only inside a
+    // forwarded specialist claim, because its own evidence budget had not
+    // supplied that item, and the grounding check rejected the output.
+    const unsupplied = { ...evidence, id: "ev_fedcba9876543210" };
+    const prompt = synthesisPrompt({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      asOfDate: "2026-01-02",
+      evidence: [evidence],
+      specialists: [
+        {
+          agentName: "FINANCIALS",
+          output: {
+            rating: "NEUTRAL",
+            confidence: 0.7,
+            availability: "COMPLETE",
+            summary: "Revenue is reported.",
+            claims: [
+              {
+                category: "SUPPORTIVE",
+                kind: "FACT",
+                statement: "Revenue was reported as USD 100 for FY2025.",
+                confidence: 0.8,
+                evidenceIds: [evidence.id, unsupplied.id],
+                counterEvidenceIds: [unsupplied.id],
+                assumptions: [],
+              },
+            ],
+            warnings: [],
+            missingData: [],
+          },
+        },
+      ],
+    });
+    const body = JSON.parse(prompt.input);
+    expect(body.evidence.registry.map((item: { id: string }) => item.id)).toEqual([
+      evidence.id,
+    ]);
+    expect(body.specialists[0].claims[0]).toMatchObject({
+      evidenceIds: [evidence.id],
+      counterEvidenceIds: [],
+    });
+    expect(prompt.input).not.toContain(unsupplied.id);
   });
 });

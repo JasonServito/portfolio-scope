@@ -9,7 +9,16 @@ import {
   RecordedResearchModelProvider,
   type ResearchModelProvider,
 } from "./providers";
-import { specialistModelOutputSchema, type ResearchEvidence } from "./schemas";
+import { AAPL_FIXTURE_CURRENT_REPORTS } from "./fixtures/aapl-evidence-snapshot";
+import { CURATED_AAPL_SNAPSHOT } from "./fixtures/curated-evaluation";
+import { selectSpecialistEvidence } from "./retrieval";
+import {
+  ModelOutputConsistencyError,
+  specialistModelOutputSchema,
+  validateGroundedOutput,
+  withDistinctClaimReferences,
+  type ResearchEvidence,
+} from "./schemas";
 
 const evidence: ResearchEvidence = {
   id: "ev_0123456789abcdef",
@@ -648,5 +657,102 @@ describe("grounded model runner", () => {
       });
       expect(release).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("claim reference normalization before validation (2026-11-05 Production AAPL report)", () => {
+  const news = selectSpecialistEvidence(CURATED_AAPL_SNAPSHOT, "NEWS");
+  const newsEvidence = [...news.evidence];
+  const datedResultsItem = newsEvidence.find(
+    (item) =>
+      item.metadata.evidenceType === "SEC_CURRENT_REPORT" &&
+      item.accessionNumber === AAPL_FIXTURE_CURRENT_REPORTS.results.accessionNumber,
+  )!;
+  const pressReleaseOpening = newsEvidence.find(
+    (item) =>
+      item.metadata.evidenceType === "SEC_FILING_PASSAGE" &&
+      item.metadata.sectionKind === "PRESS_RELEASE",
+  )!;
+  const newsOutput = (statement: string, evidenceIds: string[]) => ({
+    rating: "NEUTRAL" as const,
+    confidence: 0.7,
+    availability: "COMPLETE" as const,
+    summary: "The newest current report announced quarterly results.",
+    claims: [
+      {
+        category: "SUPPORTIVE" as const,
+        kind: "FACT" as const,
+        statement,
+        confidence: 0.8,
+        evidenceIds,
+        counterEvidenceIds: [] as string[],
+        assumptions: [],
+      },
+    ],
+    warnings: [],
+    missingData: [],
+  });
+  // The filing date and item code come from the dated 8-K item; the figures
+  // come from the press-release passage, which states neither.
+  const eventStatement =
+    "In a Form 8-K filed 2026-07-30 under Item 2.02, the Company reported quarterly revenue of $94.0 billion, up 10 percent year over year.";
+  const run = (outputs: unknown[]) =>
+    runGroundedModelCall({
+      provider: new RecordedResearchModelProvider({
+        fixtures: outputs.map((output) => ({ result: { output } })),
+      }),
+      config,
+      schema: specialistModelOutputSchema,
+      schemaName: "research_news_v1",
+      evidence: newsEvidence,
+      prompt: () => ({ instructions: "Grounded only.", input: "{}" }),
+      userId: "user-a",
+      researchJobId: "job-a",
+      operation: "SPECIALIST_NEWS",
+      idempotencyKey: "job-a:news",
+    });
+
+  it("reproduces the News rejection: a passage-only citation cannot support the 8-K filing date and item code", () => {
+    expect(() =>
+      validateGroundedOutput(newsOutput(eventStatement, [pressReleaseOpening.id]), newsEvidence),
+    ).toThrow(ModelOutputConsistencyError);
+  });
+
+  it("adds the same filing's dated 8-K item to a claim that cites only its passage, then checks every number", async () => {
+    const result = await run([newsOutput(eventStatement, [pressReleaseOpening.id])]);
+    expect(result.attemptNumber).toBe(1);
+    expect(result.output.claims[0].evidenceIds).toEqual([
+      pressReleaseOpening.id,
+      datedResultsItem.id,
+    ]);
+
+    // The gate stays strict: a figure neither excerpt states still fails both attempts.
+    const wrong = newsOutput(
+      eventStatement.replace("$94.0 billion", "$95.0 billion"),
+      [pressReleaseOpening.id],
+    );
+    await expect(run([wrong, wrong])).rejects.toMatchObject({
+      code: "AI_INCONSISTENT_OUTPUT",
+    });
+  });
+
+  it("accepts a claim that repeats an evidence id instead of rejecting it as unsafe", async () => {
+    const repeated = newsOutput(eventStatement, [
+      pressReleaseOpening.id,
+      datedResultsItem.id,
+      pressReleaseOpening.id,
+    ]);
+    repeated.claims[0].counterEvidenceIds = [datedResultsItem.id, datedResultsItem.id];
+    expect(() => validateGroundedOutput(repeated, newsEvidence)).toThrow(
+      "A claim repeated the same evidence reference.",
+    );
+
+    const result = await run([repeated]);
+    expect(result.attemptNumber).toBe(1);
+    expect(result.output.claims[0]).toMatchObject({
+      evidenceIds: [pressReleaseOpening.id, datedResultsItem.id],
+      counterEvidenceIds: [],
+    });
+    expect(withDistinctClaimReferences(result.output)).toEqual(result.output);
   });
 });
