@@ -47,6 +47,7 @@ export type RiskAlertInput = {
   oneDayHoldings: HoldingAnalytics[];
   oneMonthHoldings: HoldingAnalytics[];
   watchlistItems: WatchlistRiskInput[];
+  portfolioLabel?: string;
 };
 
 function createAlert(
@@ -74,6 +75,7 @@ function getSeverity(value: number, mediumThreshold: number, highThreshold: numb
 
 export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
   const alerts: RiskAlert[] = [];
+  const portfolioLabel = input.portfolioLabel ?? "the demo portfolio";
   const oneDayByTicker = new Map(
     input.oneDayHoldings.map((holding) => [holding.ticker, holding]),
   );
@@ -97,7 +99,7 @@ export function generateRiskAlerts(input: RiskAlertInput): RiskAlert[] {
           type: "CONCENTRATION",
           severity: concentrationSeverity,
           title: `${holding.ticker} allocation is above the risk band`,
-          message: `${holding.companyName} represents ${(holding.allocationPercent * 100).toFixed(1)}% of the demo portfolio, above the ${Math.round(CONCENTRATION_REVIEW_THRESHOLD * 100)}% concentration review threshold.`,
+          message: `${holding.companyName} represents ${(holding.allocationPercent * 100).toFixed(1)}% of ${portfolioLabel}, above the ${Math.round(CONCENTRATION_REVIEW_THRESHOLD * 100)}% concentration review threshold.`,
           metricLabel: "Portfolio weight",
           metricValue: holding.allocationPercent,
         }),

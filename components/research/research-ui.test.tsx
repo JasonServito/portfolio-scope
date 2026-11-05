@@ -324,7 +324,7 @@ describe("research UI", () => {
     expect(markup).toContain(">Summary<");
     expect(markup).toContain(">Strengths<");
     expect(markup).toContain(">Risks<");
-    expect(markup).toContain(">What to Watch<");
+    expect(markup).toContain(">What to watch<");
     expect(markup).toContain("Evidence coverage 78%");
     expect(markup).toContain("Newest filing");
     expect(markup).toContain("8/1/2026");
@@ -346,8 +346,16 @@ describe("research UI", () => {
     expect(markup).toContain("Evidence-grounded overview.");
     expect(markup).toContain("Revenue increased.");
     expect(markup).toContain("Evidence remains incomplete.");
-    expect(markup).toContain("Counterpoints");
+    // Counterpoints read as cautions, so they are listed with the risks.
+    expect(markup).not.toContain("Counterpoints");
     expect(markup).toContain("Margins decreased.");
+    expect(markup.indexOf("Margins decreased.")).toBeGreaterThan(
+      markup.indexOf(">Risks<"),
+    );
+    expect(markup.indexOf("Margins decreased.")).toBeLessThan(
+      markup.indexOf(">What to watch<"),
+    );
+    expect(markup).toContain(">More detail<");
     expect(markup).toContain("Missing information");
     expect(markup).toContain("Current cash-flow statement");
     expect(markup).toContain("Areas of disagreement");
@@ -382,7 +390,11 @@ describe("research UI", () => {
         initialResearch={{
           ...externalResearch,
           agents: [
-            { ...failedAgent, status: "COMPLETED", provider: "partial-fallback" },
+            {
+              ...failedAgent,
+              status: "COMPLETED",
+              provider: "partial-fallback",
+            },
             {
               ...failedAgent,
               agentName: "RISK",
@@ -410,7 +422,7 @@ describe("research UI", () => {
     );
   });
 
-  it("shows process notes in the summary instead of Risks", () => {
+  it("shows process notes under More detail instead of Risks", () => {
     const note =
       "Some draft claims were limited after checking their cited sources.";
     const markup = renderToStaticMarkup(
@@ -440,9 +452,77 @@ describe("research UI", () => {
 
     expect(markup).toContain('aria-label="Report notes"');
     expect(markup.match(new RegExp(note, "g"))).toHaveLength(1);
-    expect(markup.indexOf(note)).toBeLessThan(markup.indexOf(">Risks<"));
+    expect(markup.indexOf(note)).toBeGreaterThan(
+      markup.indexOf(">More detail<"),
+    );
     expect(markup).toContain("Evidence remains incomplete.");
     expect(markup).not.toContain("Partial analysis");
+  });
+
+  it("lists each prebuilt risk once and leaves its counterpoints out of Risks", () => {
+    const valuationNote =
+      "The demo does not include live valuation, estimates, or event data.";
+    const markup = renderToStaticMarkup(
+      <ResearchTabs
+        initialResearch={{
+          ...externalResearch,
+          generationMode: "DETERMINISTIC",
+          report: {
+            ...externalResearch.report,
+            risks: ["Leverage is above the review line.", "Margins narrowed."],
+            bearCase: ["Leverage is above the review line.", valuationNote],
+          },
+        }}
+        readOnly
+        ticker="AAPL"
+      />,
+    );
+
+    expect(markup.match(/Leverage is above the review line\./g)).toHaveLength(
+      1,
+    );
+    expect(markup).toContain("Margins narrowed.");
+    expect(markup).not.toContain(valuationNote);
+  });
+
+  it("shows readable amounts and at most four points before Show more", () => {
+    const raw =
+      "Apple generated 98,767,000,000 USD of annual free cash flow, a 23.7 percent margin.";
+    const markup = renderToStaticMarkup(
+      <ResearchTabs
+        initialResearch={{
+          ...externalResearch,
+          report: {
+            ...externalResearch.report,
+            bullCase: [
+              raw,
+              "Point two.",
+              "Point three.",
+              "Point four.",
+              "Point five.",
+              "Point six.",
+            ],
+          },
+          claims: [
+            {
+              ...externalResearch.claims![0],
+              statement: raw,
+            },
+          ],
+        }}
+        readOnly
+        ticker="AAPL"
+      />,
+    );
+
+    expect(markup).toContain(
+      "Apple generated $98.8 billion of annual free cash flow, a 23.7% margin.",
+    );
+    // The cited claim in Evidence / Sources keeps the exact filing value.
+    expect(markup).toContain(raw);
+    expect(markup).toContain("Point four.");
+    expect(markup).not.toContain("Point five.");
+    expect(markup).toContain("Show 2 more");
   });
 
   it("keeps the prebuilt report free of a coverage headline and labels unknown claim kinds only when known", () => {

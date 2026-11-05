@@ -730,31 +730,31 @@ describe("M13 real PostgreSQL user isolation", () => {
     );
     expect(analytics?.portfolio.id).toBe(ids.portfolioA);
 
-    const ownerPortfolio = await createPortfolio(ids.userA, {
-      name: `M13 owner workflow ${runId}`,
-      baseCurrency: "USD",
-    });
-    expect(ownerPortfolio.userId).toBe(ids.userA);
+    await expect(
+      createPortfolio(ids.userA, {
+        name: `M13 second portfolio ${runId}`,
+        baseCurrency: "USD",
+      }),
+    ).rejects.toMatchObject({ status: 409 });
 
     const ownerHolding = await createHolding(ids.userA, {
-      portfolioId: ownerPortfolio.id,
-      ticker: fixtureTicker,
+      portfolioId: ids.portfolioA,
+      ticker: msftStock.ticker,
       shares: 1,
       averageCost: 100,
     });
-    expect(ownerHolding.portfolioId).toBe(ownerPortfolio.id);
+    expect(ownerHolding.portfolioId).toBe(ids.portfolioA);
     const updatedHolding = await updateHolding(ids.userA, ownerHolding.id, {
       shares: 2,
       averageCost: 110,
     });
     expect(Number(updatedHolding.costBasis)).toBe(220);
     expect(
-      (await listHoldings(ids.userA, ownerPortfolio.id))?.holdings.map(
+      (await listHoldings(ids.userA, ids.portfolioA))?.holdings.map(
         (holding) => holding.id,
       ),
     ).toContain(ownerHolding.id);
     await deleteHolding(ids.userA, ownerHolding.id);
-    await deletePortfolio(ids.userA, ownerPortfolio.id);
 
     const watchlistItem = await createWatchlistItem(ids.userA, {
       ticker: msftStock.ticker,

@@ -6,9 +6,15 @@ import type { DashboardAlertPreview } from "@/lib/portfolio/dashboard-data";
 
 type AlertsPreviewProps = {
   alerts: DashboardAlertPreview[];
+  alertsHref?: string;
+  emptyMessage?: string;
 };
 
-export function AlertsPreview({ alerts }: AlertsPreviewProps) {
+export function AlertsPreview({
+  alerts,
+  alertsHref = "/alerts",
+  emptyMessage = "No active alerts for this demo portfolio.",
+}: AlertsPreviewProps) {
   return (
     <Card>
       <CardHeader>
@@ -16,15 +22,13 @@ export function AlertsPreview({ alerts }: AlertsPreviewProps) {
       </CardHeader>
       <CardContent>
         {alerts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No active alerts for this demo portfolio.
-          </p>
+          <p className="text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (
           <ul className="divide-y">
             {alerts.map((alert) => {
               const href = alert.ticker
                 ? `/stocks/${alert.ticker.toLowerCase()}`
-                : "/alerts";
+                : alertsHref;
 
               return (
                 <li key={alert.id}>

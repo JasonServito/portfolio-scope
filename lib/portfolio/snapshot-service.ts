@@ -13,7 +13,7 @@ export type SnapshotHoldingInput = {
   id: string;
   shares: Numeric;
   costBasis: Numeric;
-  latestPrice: Numeric | null;
+  latestPrice: { close: Numeric; timestamp: Date } | null;
 };
 
 export function calculatePortfolioSnapshot(holdings: SnapshotHoldingInput[]) {
@@ -24,8 +24,17 @@ export function calculatePortfolioSnapshot(holdings: SnapshotHoldingInput[]) {
     return { available: false as const, missingPriceHoldingIds };
   }
 
+  // Snapshots are dated by the newest price they use, not by when the job
+  // ran, so stored history never claims a valuation newer than its prices.
+  const observedAt = new Date(
+    Math.max(
+      ...holdings.map((holding) => holding.latestPrice!.timestamp.getTime()),
+    ),
+  );
+  // Percentages are stored as fractions (0.25 = 25%), matching the seed and
+  // the holding-edit rebuild that analytics reads alongside these rows.
   const holdingSnapshots = holdings.map((holding) => {
-    const price = toNumber(holding.latestPrice!);
+    const price = toNumber(holding.latestPrice!.close);
     const marketValue = toNumber(holding.shares) * price;
     const costBasis = toNumber(holding.costBasis);
     const gainLoss = marketValue - costBasis;
@@ -34,7 +43,7 @@ export function calculatePortfolioSnapshot(holdings: SnapshotHoldingInput[]) {
       price,
       marketValue,
       gainLoss,
-      gainLossPercent: costBasis === 0 ? 0 : (gainLoss / costBasis) * 100,
+      gainLossPercent: costBasis === 0 ? 0 : gainLoss / costBasis,
       costBasis,
     };
   });
@@ -50,11 +59,12 @@ export function calculatePortfolioSnapshot(holdings: SnapshotHoldingInput[]) {
 
   return {
     available: true as const,
+    observedAt,
     totalValue,
     totalCostBasis,
     totalGainLoss,
     totalGainLossPercent:
-      totalCostBasis === 0 ? 0 : (totalGainLoss / totalCostBasis) * 100,
+      totalCostBasis === 0 ? 0 : totalGainLoss / totalCostBasis,
     holdingSnapshots,
   };
 }
@@ -79,7 +89,7 @@ export async function refreshPortfolioSnapshot(input: {
                 where: { timestamp: { lte: input.asOf } },
                 orderBy: { timestamp: "desc" },
                 take: 1,
-                select: { close: true },
+                select: { close: true, timestamp: true },
               },
             },
           },
@@ -95,12 +105,22 @@ export async function refreshPortfolioSnapshot(input: {
     );
   }
 
+  if (portfolio.holdings.length === 0) {
+    // An empty portfolio has no valuation; writing a zero snapshot would
+    // present "worth nothing" as a fact on the dashboard.
+    return {
+      portfolioId: portfolio.id,
+      asOf: input.asOf.toISOString(),
+      holdingsProcessed: 0,
+    };
+  }
+
   const calculated = calculatePortfolioSnapshot(
     portfolio.holdings.map((holding) => ({
       id: holding.id,
       shares: holding.shares,
       costBasis: holding.costBasis,
-      latestPrice: holding.stock.prices[0]?.close ?? null,
+      latestPrice: holding.stock.prices[0] ?? null,
     })),
   );
   if (!calculated.available) {
@@ -116,7 +136,7 @@ export async function refreshPortfolioSnapshot(input: {
       where: {
         portfolioId_timestamp: {
           portfolioId: portfolio.id,
-          timestamp: input.asOf,
+          timestamp: calculated.observedAt,
         },
       },
       update: {
@@ -127,7 +147,7 @@ export async function refreshPortfolioSnapshot(input: {
       },
       create: {
         portfolioId: portfolio.id,
-        timestamp: input.asOf,
+        timestamp: calculated.observedAt,
         totalValue: calculated.totalValue,
         totalCostBasis: calculated.totalCostBasis,
         totalGainLoss: calculated.totalGainLoss,
@@ -139,7 +159,7 @@ export async function refreshPortfolioSnapshot(input: {
         where: {
           holdingId_timestamp: {
             holdingId: holding.holdingId,
-            timestamp: input.asOf,
+            timestamp: calculated.observedAt,
           },
         },
         update: {
@@ -150,7 +170,7 @@ export async function refreshPortfolioSnapshot(input: {
         },
         create: {
           holdingId: holding.holdingId,
-          timestamp: input.asOf,
+          timestamp: calculated.observedAt,
           price: holding.price,
           marketValue: holding.marketValue,
           gainLoss: holding.gainLoss,
@@ -163,6 +183,7 @@ export async function refreshPortfolioSnapshot(input: {
   return {
     portfolioId: portfolio.id,
     asOf: input.asOf.toISOString(),
+    observedAt: calculated.observedAt.toISOString(),
     holdingsProcessed: calculated.holdingSnapshots.length,
     totalValue: calculated.totalValue,
   };

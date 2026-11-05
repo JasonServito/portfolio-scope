@@ -61,59 +61,34 @@ function ReportComparison({
 }) {
   const { diff } = comparison;
   const confidenceDelta = Math.round(diff.confidence.delta * 100);
+  const sourcesChanged = diff.source.snapshotChanged || diff.source.dataChanged;
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="text-base">
+    <Card size="sm">
+      <CardContent className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="flex flex-wrap items-center gap-2 font-medium">
             Changes from previous report
-          </CardTitle>
-          <Badge variant={diff.hasMaterialChanges ? "default" : "secondary"}>
-            {diff.hasMaterialChanges
-              ? "Material changes"
-              : "No material changes"}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">Rating</p>
-            <p className="mt-1 text-sm font-medium">
-              {diff.rating.previous.toLowerCase()} {" → "}
-              {diff.rating.current.toLowerCase()}
-            </p>
-          </div>
-          <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">Confidence change</p>
-            <p className="mt-1 text-sm font-medium">
-              {confidenceDelta > 0 ? "+" : ""}
-              {confidenceDelta} percentage points
-            </p>
-          </div>
-          <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">Claims</p>
-            <p className="mt-1 text-sm font-medium">
-              {diff.newClaims.length} new, {diff.removedClaims.length} removed,{" "}
-              {diff.changedClaims.length} changed
-            </p>
-          </div>
-          <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">Sources</p>
-            <p className="mt-1 text-sm font-medium">
-              {diff.source.snapshotChanged || diff.source.dataChanged
-                ? "Sources changed"
-                : "Sources unchanged"}
-            </p>
-          </div>
+            <Badge variant={diff.hasMaterialChanges ? "default" : "secondary"}>
+              {diff.hasMaterialChanges
+                ? "Material changes"
+                : "No material changes"}
+            </Badge>
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {diff.newClaims.length} new, {diff.removedClaims.length} removed,{" "}
+            {diff.changedClaims.length} changed points · confidence{" "}
+            {confidenceDelta > 0 ? "+" : ""}
+            {confidenceDelta} percentage points ·{" "}
+            {sourcesChanged ? "sources changed" : "same sources"}
+          </p>
         </div>
         <Link
-          className="text-sm font-medium underline-offset-4 hover:underline"
+          className="shrink-0 font-medium text-primary underline-offset-4 hover:underline"
           href={`/app/research/${comparison.previousJobId}`}
           prefetch={false}
         >
-          Open previous private report
+          Open previous report
         </Link>
       </CardContent>
     </Card>
@@ -128,8 +103,7 @@ function JobStatus({ job }: { job: ResearchJobDetailData }) {
         role="status"
       >
         <CheckCircle2 aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        The report is complete. Review its summary, strengths, risks, what to
-        watch, and supporting evidence below.
+        The report is ready.
       </div>
     );
   }
