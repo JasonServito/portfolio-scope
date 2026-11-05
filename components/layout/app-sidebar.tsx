@@ -84,7 +84,7 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
         <NavGroup
           activePath={activePath}
           items={researchNavItems}
-          label="Stock research"
+          label="Stock analysis"
         />
       </nav>
 
@@ -96,13 +96,6 @@ export function AppSidebar({ activePath }: AppSidebarProps) {
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           Browse the sample portfolio without an account. Changes are disabled.
         </p>
-        <Link
-          className="mt-3 inline-flex text-xs font-medium text-primary hover:underline"
-          href="/research"
-          prefetch={false}
-        >
-          View sample research →
-        </Link>
       </div>
     </aside>
   );

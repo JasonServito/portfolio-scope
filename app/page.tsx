@@ -42,7 +42,7 @@ const journey = [
     "Change the period and see the whole dashboard reconcile.",
   ],
   ["02", "Holding", "Open a major position and inspect its contribution."],
-  ["03", "Stock", "Review market context, fundamentals, risks, and research."],
+  ["03", "Stock", "Review market context, fundamentals, and risks."],
 ] as const;
 
 export default function Home() {
@@ -158,7 +158,7 @@ export default function Home() {
             <p className="font-medium">Ready to inspect the product?</p>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
               Start with the read-only demo, open a holding, and review a
-              stock&apos;s fundamentals, risks, and research.
+              stock&apos;s fundamentals and risks.
             </p>
           </div>
           <AnalyticsLink

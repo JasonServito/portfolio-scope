@@ -12,7 +12,7 @@ export default function ResearchError({
   return (
     <RouteError
       error={error}
-      message="The sample report could not load. Try again to view the saved research."
+      message="This page could not load. Try again in a moment."
       reset={reset}
     />
   );

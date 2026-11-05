@@ -36,7 +36,7 @@ test.describe("public production smoke @smoke", () => {
     }
   });
 
-  test("sample research remains public and explicitly read-only", async ({
+  test("research reports ask signed-out visitors to sign in", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -44,43 +44,21 @@ test.describe("public production smoke @smoke", () => {
 
     await expect(
       page.getByRole("heading", {
-        name: /research that keeps the evidence visible/i,
+        name: "Research reports are available when you're signed in",
         level: 1,
       }),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/auth/signin?callbackUrl=%2Fapp%2Fresearch",
+    );
     await expect(
-      page.getByText(/will not start or change research/i),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /open full stock detail/i }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Stock research report", level: 2 }),
-    ).toBeVisible();
-    for (const section of ["Summary", "Strengths", "Risks", "What to watch"]) {
-      await expect(
-        page.getByRole("heading", { name: section, level: 3 }),
-      ).toBeVisible();
-    }
-    await expect(
-      page.getByRole("button", { name: /run research|regenerate report/i }),
+      page.getByRole("heading", { name: "Stock research report" }),
     ).toHaveCount(0);
-
-    const evidenceDisclosure = page.locator("details", {
-      has: page.getByText("Evidence / Sources", { exact: false }),
-    });
-    const evidenceSummary = evidenceDisclosure.locator("summary");
-    await expect(evidenceDisclosure).not.toHaveAttribute("open", "");
-    await expect(
-      page.getByRole("heading", { name: "Additional sources" }),
-    ).toBeHidden();
-    await evidenceSummary.focus();
-    await expect(evidenceSummary).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(evidenceDisclosure).toHaveAttribute("open", "");
-    await expect(
-      page.getByRole("heading", { name: "Additional sources" }),
-    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /sample research/i })).toHaveCount(
+      0,
+    );
+    expect((await page.request.get("/api/research/aapl")).status()).toBe(401);
     expect(
       await page.evaluate(
         () =>
@@ -131,6 +109,17 @@ test.describe("public production smoke @smoke", () => {
     await expect(
       page.getByText(/total market value of a company's outstanding shares/i),
     ).toBeVisible();
+    const research = page.locator("#research");
+    await expect(
+      research.getByRole("heading", {
+        name: "Research reports are available when you're signed in",
+        level: 2,
+      }),
+    ).toBeVisible();
+    await expect(research.getByRole("link", { name: "Sign in" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Stock research report" }),
+    ).toHaveCount(0);
     expect(
       await page.evaluate(
         () =>
@@ -189,6 +178,7 @@ test.describe("public production smoke @smoke", () => {
     expect(sitemapBody).not.toContain("/architecture");
     expect(sitemapBody).not.toContain("/methodology");
     expect(sitemapBody).not.toContain("/data-sources");
+    expect(sitemapBody).not.toContain("/research");
     expect(sitemapBody).toContain("/stocks/aapl");
 
     expect(robots.status()).toBe(200);

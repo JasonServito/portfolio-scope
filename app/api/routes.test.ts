@@ -58,7 +58,7 @@ import { GET as getPortfolioAnalytics } from "./portfolio/route";
 import { GET as getPortfolio } from "./portfolios/[id]/route";
 import { GET as getPortfolios } from "./portfolios/route";
 import {
-  GET as getPublicResearch,
+  GET as getSampleResearch,
   POST as postResearch,
 } from "./research/[ticker]/route";
 import { GET as getResearchJob } from "./research/jobs/[id]/route";
@@ -377,17 +377,17 @@ describe("private API read contracts", () => {
   );
 });
 
-describe("public sample and private research route contracts", () => {
+describe("sample and private research route contracts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireApiUser.mockResolvedValue(actor);
     mocks.requireMutableUser.mockResolvedValue({ id: actor.id, isDemo: false });
   });
 
-  it("preserves anonymous sample research GET access for a normalized ticker", async () => {
+  it("returns the sample report to a signed-in caller for a normalized ticker", async () => {
     mocks.getLatestResearch.mockResolvedValue(researchResponse);
 
-    const response = await getPublicResearch(
+    const response = await getSampleResearch(
       new Request("http://localhost/api/research/aapl"),
       tickerContext("aapl"),
     );
@@ -395,24 +395,40 @@ describe("public sample and private research route contracts", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(researchResponse);
     expect(mocks.getLatestResearch).toHaveBeenCalledWith("AAPL");
-    expect(mocks.requireApiUser).not.toHaveBeenCalled();
+    expect(mocks.requireApiUser).toHaveBeenCalledOnce();
   });
 
-  it("rejects an invalid public sample ticker before querying data", async () => {
-    const response = await getPublicResearch(
+  it("returns 401 before reading the sample report for an anonymous request", async () => {
+    mocks.requireApiUser.mockRejectedValue(
+      new AuthorizationError(AuthorizationErrorCode.AUTHENTICATION_REQUIRED),
+    );
+
+    const response = await getSampleResearch(
+      new Request("http://localhost/api/research/aapl"),
+      tickerContext("aapl"),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Authentication is required.",
+    });
+    expect(mocks.getLatestResearch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid sample ticker before querying data", async () => {
+    const response = await getSampleResearch(
       new Request("http://localhost/api/research/invalid"),
       tickerContext("AAPL<script>"),
     );
 
     expect(response.status).toBe(400);
     expect(mocks.getLatestResearch).not.toHaveBeenCalled();
-    expect(mocks.requireApiUser).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when no public sample report exists", async () => {
+  it("returns 404 when no sample report exists", async () => {
     mocks.getLatestResearch.mockResolvedValue(null);
 
-    const response = await getPublicResearch(
+    const response = await getSampleResearch(
       new Request("http://localhost/api/research/MSFT"),
       tickerContext("MSFT"),
     );
@@ -421,7 +437,6 @@ describe("public sample and private research route contracts", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Research is unavailable for this ticker.",
     });
-    expect(mocks.requireApiUser).not.toHaveBeenCalled();
   });
 
   it("forwards the authenticated actor when starting private research", async () => {

@@ -7,7 +7,6 @@ export const siteConfig = {
 
 export const publicNavigation = [
   { href: "/stocks/aapl", label: "Stock detail" },
-  { href: "/research", label: "Sample research" },
 ] as const;
 
 export function getSiteUrl() {
