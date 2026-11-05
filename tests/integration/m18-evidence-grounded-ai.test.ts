@@ -1609,6 +1609,57 @@ describe("M18 atomic AI budget enforcement", () => {
     expect(stored.aiReservedCostUsd.toNumber()).toBe(0.000006);
   });
 
+  it("settles concurrent specialist attempts on one job without stranding a reservation", async () => {
+    // Specialists of one job lock the same budget and job rows through raw
+    // FOR UPDATE queries; each conflict must be retried, not surfaced.
+    const now = budgetMonths[8];
+    const config = budgetConfig({ global: 0.01, user: 0.01, job: 0.01 });
+    const job = await createBudgetJob(ids.budgetUserA, "concurrent", {
+      cost: 0.01,
+    });
+    const usage = {
+      inputTokens: 1,
+      cachedInputTokens: 0,
+      outputTokens: 1,
+      reasoningTokens: 0,
+      providerTotalTokens: 2,
+      providerRequestId: null,
+    };
+    for (let round = 0; round < 3; round += 1) {
+      const [first, second, third] = await Promise.all(
+        ["a", "b", "c"].map((agent) =>
+          reserve(
+            ids.budgetUserA,
+            job.id,
+            `concurrent-${round}-${agent}`,
+            now,
+            config,
+          ),
+        ),
+      );
+      await Promise.all([
+        settleAiUsage(first.usageId, usage),
+        settleAiUsage(second.usageId, usage),
+        releaseAiUsage(third.usageId, "AI_MODEL_PROVIDER_UNAVAILABLE"),
+      ]);
+    }
+
+    await expect(
+      db.aiUsage.groupBy({
+        by: ["status"],
+        where: { researchJobId: job.id },
+        _count: true,
+        orderBy: { status: "asc" },
+      }),
+    ).resolves.toEqual([
+      { status: "SETTLED", _count: 6 },
+      { status: "RELEASED", _count: 3 },
+    ]);
+    await expect(
+      db.researchJob.findUniqueOrThrow({ where: { id: job.id } }),
+    ).resolves.toMatchObject({ aiReservedTokens: 0, aiUsedTokens: 12 });
+  });
+
   it("allows only one concurrent reservation across a user's jobs", async () => {
     const now = budgetMonths[1];
     const config = budgetConfig({

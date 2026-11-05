@@ -16,10 +16,12 @@ import type { AgentAvailability, ResearchRating } from "@/lib/research/types";
  * matches a period ending in 2025), form types and quarter labels are not
  * values, and "negative" or the Unicode minus is read as a sign.
  *
- * A claim may round a cited number for readability ("$416.2 billion" for
- * 416,161,000,000 USD, "23%" for 22.7 percent) when the rounding is correct,
- * the unit family matches, and at least two significant digits remain, so
- * "0.7" for 0.66 or "400 billion" for 391 billion is still rejected.
+ * A claim number that is not an exact cited value is still supported when it
+ * is a correct rounding of one at the precision the claim states, after
+ * converting thousand/million/billion/trillion to the claim's scale, so
+ * "$71.3 billion" matches "71,340,000,000 USD". The rounding keeps the sign
+ * and the percent unit, never adds precision, and needs at least two
+ * significant digits, so "0.7" does not stand in for 0.66.
  */
 const NUMBER_PATTERN =
   /[-+]?(?:[$€£])?\d[\d,]*(?:\.\d+)?(?:\s*(?:%|(?:percent|thousand|million|billion|trillion|bn|tn|k|m|b)(?![a-z])))?/gi;
@@ -81,14 +83,6 @@ function canonicalUnit(raw: string) {
   return "";
 }
 
-type ParsedNumber = {
-  token: string;
-  value: number;
-  unit: string;
-  decimals: number;
-  significantDigits: number;
-};
-
 const UNIT_SCALE: Record<string, number> = {
   "": 1,
   thousand: 1e3,
@@ -96,22 +90,34 @@ const UNIT_SCALE: Record<string, number> = {
   billion: 1e9,
   trillion: 1e12,
 };
+const MIN_ROUNDED_SIGNIFICANT_DIGITS = 2;
 
-/** Digits that carry precision; trailing zeros of a whole number do not. */
-function significantDigits(numeric: string) {
-  const unsigned = numeric.replace(/^[-+]/, "");
-  const digits = unsigned.replace(".", "").replace(/^0+/, "");
-  return unsigned.includes(".")
-    ? digits.length
-    : digits.replace(/0+$/, "").length;
+type StatedNumber = {
+  token: string;
+  value: number;
+  unit: string;
+  decimals: number;
+  significantDigits: number;
+};
+
+/** Decimal places and significant digits as written; integer trailing zeros are not significant. */
+function writtenPrecision(numeric: string) {
+  const [whole, fraction = ""] = numeric.replace(/^[-+]/, "").split(".");
+  const digits = `${whole}${fraction}`.replace(/^0+/, "");
+  return {
+    decimals: fraction.length,
+    significantDigits: fraction
+      ? digits.length
+      : digits.replace(/0+$/, "").length,
+  };
 }
 
-function parseValues(value: string) {
+function readNumbers(value: string) {
   const { stripped, tokens: dates } = extractDates(
     value.replaceAll("−", "-").replaceAll(NEGATIVE_WORD_PATTERN, "-"),
   );
   const residual = stripped.replaceAll(NON_VALUE_LABEL_PATTERN, " ");
-  const numbers: ParsedNumber[] = [];
+  const numbers: StatedNumber[] = [];
   for (const match of residual.matchAll(NUMBER_PATTERN)) {
     const raw = match[0];
     const numeric = raw
@@ -125,8 +131,7 @@ function parseValues(value: string) {
       token: `${number}${unit}`,
       value: number,
       unit,
-      decimals: numeric.split(".")[1]?.length ?? 0,
-      significantDigits: significantDigits(numeric),
+      ...writtenPrecision(numeric),
     });
   }
   return { dates, numbers };
@@ -134,42 +139,36 @@ function parseValues(value: string) {
 
 /** Numeric tokens normalized to `${number}${unit}`, e.g. `6.4%` or `-31796000000`, plus whole dates. */
 export function numericTokens(value: string) {
-  const { dates, numbers } = parseValues(value);
+  const { dates, numbers } = readNumbers(value);
   for (const number of numbers) dates.add(number.token);
   return dates;
 }
 
-/**
- * Whether the claim number is the cited number rounded to the precision the
- * claim shows. Percentages only round percentages; amounts may change scale.
- */
-function roundsFrom(claim: ParsedNumber, cited: ParsedNumber) {
-  if (claim.significantDigits < 2) return false;
-  if ((claim.unit === "%") !== (cited.unit === "%")) return false;
-  const claimScale = UNIT_SCALE[claim.unit] ?? 1;
-  const citedScale = UNIT_SCALE[cited.unit] ?? 1;
-  const halfStep = 0.5 * 10 ** -claim.decimals * claimScale;
-  const difference = Math.abs(
-    cited.value * citedScale - claim.value * claimScale,
-  );
-  return difference <= halfStep * (1 + 1e-9);
+/** Whether the stated number is the cited value rounded to the stated precision. */
+function roundsCitedValue(stated: StatedNumber, cited: StatedNumber) {
+  if (stated.significantDigits < MIN_ROUNDED_SIGNIFICANT_DIGITS) return false;
+  if ((stated.unit === "%") !== (cited.unit === "%")) return false;
+  const citedInStatedUnit =
+    stated.unit === "%"
+      ? cited.value
+      : (cited.value * UNIT_SCALE[cited.unit]) / UNIT_SCALE[stated.unit];
+  const halfStep = 0.5 * 10 ** -stated.decimals;
+  return Math.abs(citedInStatedUnit - stated.value) <= halfStep * (1 + 1e-9);
 }
 
-/** Numeric tokens in the claim statement absent from every cited supporting excerpt. */
+/** Numeric tokens in the claim statement that no cited supporting excerpt states or rounds to. */
 export function unsupportedNumericTokens(
   claim: Pick<ModelClaim, "statement" | "evidenceIds">,
   evidenceById: ReadonlyMap<string, Pick<ResearchEvidence, "excerpt">>,
 ) {
-  const claimValues = parseValues(claim.statement);
-  if (claimValues.dates.size === 0 && claimValues.numbers.length === 0) {
-    return [];
-  }
+  const stated = readNumbers(claim.statement);
+  if (stated.dates.size === 0 && stated.numbers.length === 0) return [];
   const citedTokens = new Set<string>();
-  const citedNumbers: ParsedNumber[] = [];
+  const citedNumbers: StatedNumber[] = [];
   for (const evidenceId of claim.evidenceIds) {
     const evidence = evidenceById.get(evidenceId);
     if (!evidence) continue;
-    const cited = parseValues(evidence.excerpt);
+    const cited = readNumbers(evidence.excerpt);
     for (const token of cited.dates) citedTokens.add(token);
     for (const number of cited.numbers) {
       citedTokens.add(number.token);
@@ -177,12 +176,16 @@ export function unsupportedNumericTokens(
     }
   }
   const unsupported = new Set<string>();
-  for (const token of claimValues.dates) {
+  for (const token of stated.dates) {
     if (!citedTokens.has(token)) unsupported.add(token);
   }
-  for (const number of claimValues.numbers) {
-    if (citedTokens.has(number.token)) continue;
-    if (citedNumbers.some((cited) => roundsFrom(number, cited))) continue;
+  for (const number of stated.numbers) {
+    if (
+      citedTokens.has(number.token) ||
+      citedNumbers.some((cited) => roundsCitedValue(number, cited))
+    ) {
+      continue;
+    }
     unsupported.add(number.token);
   }
   return [...unsupported];
@@ -252,7 +255,7 @@ export function getOutputConsistencyIssue(
   const evidenceById = new Map(evidence.map((item) => [item.id, item]));
   for (const claim of output.claims) {
     if (unsupportedNumericTokens(claim, evidenceById).length > 0) {
-      return "A claim stated a number that does not appear with the same unit in its cited supporting evidence, even after rounding.";
+      return "A claim stated a number that does not appear with the same unit in its cited supporting evidence.";
     }
     if (
       claim.kind === "DERIVED" &&

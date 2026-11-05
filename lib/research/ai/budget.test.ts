@@ -83,6 +83,46 @@ describe("AI usage calculations", () => {
     expect(exhausted).toHaveBeenCalledTimes(5);
   });
 
+  it("retries a conflict on a raw FOR UPDATE lock, which Prisma reports as P2010", async () => {
+    // The shape PostgreSQL produced locally for concurrent settles of one job.
+    const rawConflict = (databaseCode: string) =>
+      new Prisma.PrismaClientKnownRequestError("Raw query failed.", {
+        code: "P2010",
+        clientVersion: "test",
+        meta: { code: databaseCode, message: "conflict" },
+      });
+    const input = {
+      idempotencyKey: "job-a:competitors:model-attempt:2",
+      userId: "user-a",
+      researchJobId: "job-a",
+      operation: "SPECIALIST_COMPETITORS",
+      promptVersion: "test",
+      attemptNumber: 2,
+      reservedInputTokens: 100,
+      reservedOutputTokens: 100,
+      config: getAiResearchConfig({
+        OPENAI_API_KEY: "test-only",
+      } as unknown as NodeJS.ProcessEnv),
+    };
+
+    const recovering = vi
+      .fn()
+      .mockRejectedValueOnce(rawConflict("40001"))
+      .mockRejectedValueOnce(rawConflict("40P01"))
+      .mockResolvedValueOnce({ usageId: "usage-a" });
+    await expect(
+      reserveAiUsage(input, { $transaction: recovering } as never),
+    ).resolves.toEqual({ usageId: "usage-a" });
+    expect(recovering).toHaveBeenCalledTimes(3);
+
+    // Any other raw-query failure is not a conflict and is not retried.
+    const failing = vi.fn().mockRejectedValue(rawConflict("23505"));
+    await expect(
+      reserveAiUsage(input, { $transaction: failing } as never),
+    ).rejects.toMatchObject({ code: "P2010" });
+    expect(failing).toHaveBeenCalledTimes(1);
+  });
+
   it("uses a UTC calendar-month boundary", () => {
     expect(utcMonthStart(new Date("2026-08-31T23:59:59-06:00"))).toEqual(
       new Date("2026-09-01T00:00:00.000Z"),
