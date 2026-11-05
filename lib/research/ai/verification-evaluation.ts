@@ -44,7 +44,7 @@ import {
 // they do not assert human approval to activate an external provider.
 export const M33_EVALUATION_BASELINE = {
   versions: {
-    prompt: "m33-research-v7",
+    prompt: "m33-research-v8",
     retrieval: "m32-structured-lexical-v3",
     outputSchema: "m30-claims-v2",
     report: "m33-report-v4",
@@ -55,7 +55,7 @@ export const M33_EVALUATION_BASELINE = {
     filingParser: "sec-filing-sections-v1",
   },
   inputsSha256:
-    "d207825d16ebfc8d93df00d1a5450ec1361055076f6a72ab3689d6099952f0d6",
+    "b688e5b70b7098fe4bff265ba055b120328735f163fef65aae5ad7b2a1100f71",
   thresholds: {
     caseCount: 8,
     passedCases: 8,

@@ -1539,7 +1539,7 @@ function makeCurrentReportCoverageEvidence(
   const newestFilingDate = reports.length > 0 ? dateOnly(reports[0].filingDate) : null;
   const details =
     reports.length === 0
-      ? `No Form 8-K current report filed in the twelve months (365 days) before the report date is stored for ${stock.ticker}, so recent events cannot be described from filings.`
+      ? `This application has not collected any Form 8-K current reports for ${stock.ticker} filed in the twelve months (365 days) before the report date, so recent events cannot be described from filings.`
       : [
           `${reports.length} Form 8-K current report${reports.length === 1 ? "" : "s"} filed in the twelve months (365 days) before the report date ${reports.length === 1 ? "is" : "are"} stored for ${stock.ticker}, the newest filed ${newestFilingDate}.`,
           listed.length === reports.length

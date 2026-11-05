@@ -13,8 +13,11 @@ import type { AgentAvailability, ResearchRating } from "@/lib/research/types";
  * A unit suffix must end at a word boundary so a date such as "2026-06-27
  * balance" is not read as "27 billion". Dates are compared as whole dates plus
  * their year (so "September 27, 2025" matches "2025-09-27" and "FY2025"
- * matches a period ending in 2025), form types and quarter labels are not
- * values, and "negative" or the Unicode minus is read as a sign.
+ * matches a period ending in 2025), form types, quarter labels, and periodic
+ * report section labels ("Part II", "Item 1A", "Item 7") are not values, and
+ * "negative" or the Unicode minus is read as a sign. A Form 8-K item code such
+ * as "Item 2.02" stays a checked value, because the cited current-report
+ * excerpt states it.
  *
  * A claim number that is not an exact cited value is still supported when it
  * is a correct rounding of one at the precision the claim states, after
@@ -44,7 +47,8 @@ const LONG_DATE_PATTERN = new RegExp(
   `\\b(${MONTH_NAMES.join("|")})\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`,
   "gi",
 );
-const NON_VALUE_LABEL_PATTERN = /\b(?:10-K|10-Q|8-K|20-F|6-K|40-F|Q[1-4])\b/gi;
+const NON_VALUE_LABEL_PATTERN =
+  /\b(?:10-K|10-Q|8-K|20-F|6-K|40-F|Q[1-4]|Part\s+(?:IV|I{1,3})|Items?\s+\d{1,2}[A-D]?(?!\.?\d))\b/gi;
 const NEGATIVE_WORD_PATTERN = /\bnegative\s+(?=[$€£]?\d)/gi;
 
 /** Replaces each date with a space and returns its whole-date and year tokens. */
@@ -243,6 +247,20 @@ export function availabilityAgreesWithClaims(
     : claims.length > 0;
 }
 
+export type OutputConsistencyIssue = {
+  /** A fixed application string, safe to log. */
+  message: string;
+  /**
+   * For claim-level failures, every failing claim (numbered from 1) and its
+   * exact unsupported number tokens, so the single repair can fix them all.
+   * It repeats model numbers, so it goes only into the repair request and is
+   * never logged.
+   */
+  repairDetail: string | null;
+};
+
+const MAX_REPAIR_TOKENS_PER_CLAIM = 8;
+
 /**
  * Returns the first consistency failure for a grounded output, or null. The
  * caller has already verified that every cited id is inside the supplied
@@ -251,11 +269,18 @@ export function availabilityAgreesWithClaims(
 export function getOutputConsistencyIssue(
   output: GroundedModelOutput & { availability?: AgentAvailability },
   evidence: readonly ResearchEvidence[],
-) {
+): OutputConsistencyIssue | null {
   const evidenceById = new Map(evidence.map((item) => [item.id, item]));
-  for (const claim of output.claims) {
-    if (unsupportedNumericTokens(claim, evidenceById).length > 0) {
-      return "A claim stated a number that does not appear with the same unit in its cited supporting evidence.";
+  let message: string | null = null;
+  const failingClaims: string[] = [];
+  for (const [index, claim] of output.claims.entries()) {
+    const tokens = unsupportedNumericTokens(claim, evidenceById);
+    if (tokens.length > 0) {
+      message ??=
+        "A claim stated a number that does not appear with the same unit in its cited supporting evidence.";
+      failingClaims.push(
+        `claim ${index + 1} states ${tokens.slice(0, MAX_REPAIR_TOKENS_PER_CLAIM).join(", ")}, which its cited supporting excerpts do not contain`,
+      );
     }
     if (
       claim.kind === "DERIVED" &&
@@ -263,19 +288,31 @@ export function getOutputConsistencyIssue(
         (id) => evidenceById.get(id)?.sourceKind === "DERIVED",
       )
     ) {
-      return "A claim labeled DERIVED does not cite a derived evidence item.";
+      message ??=
+        "A claim labeled DERIVED does not cite a derived evidence item.";
+      failingClaims.push(
+        `claim ${index + 1} is labeled DERIVED but cites no DERIVED evidence`,
+      );
     }
   }
+  if (message) return { message, repairDetail: failingClaims.join("; ") };
   if (!ratingAgreesWithClaims(output.rating, output.claims)) {
-    return `The ${output.rating} rating does not agree with the claim categories.`;
+    return {
+      message: `The ${output.rating} rating does not agree with the claim categories.`,
+      repairDetail: null,
+    };
   }
   if (
     output.availability !== undefined &&
     !availabilityAgreesWithClaims(output.availability, output.claims)
   ) {
-    return output.availability === "NOT_AVAILABLE"
-      ? "A NOT_AVAILABLE specialist must not return claims."
-      : "A specialist with no claims must report NOT_AVAILABLE.";
+    return {
+      message:
+        output.availability === "NOT_AVAILABLE"
+          ? "A NOT_AVAILABLE specialist must not return claims."
+          : "A specialist with no claims must report NOT_AVAILABLE.",
+      repairDetail: null,
+    };
   }
   return null;
 }

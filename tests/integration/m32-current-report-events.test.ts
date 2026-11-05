@@ -944,7 +944,9 @@ describe("M32 recent events in research", () => {
       provider: "bounded-missing-data",
       rating: "NEUTRAL",
       claimsJson: [],
-      summary: expect.stringContaining("No Form 8-K current report"),
+      summary: expect.stringContaining(
+        "This application has not collected any Form 8-K current reports for this company",
+      ),
     });
     await expect(
       db.aiUsage.count({ where: { researchJobId: queued.jobId } }),

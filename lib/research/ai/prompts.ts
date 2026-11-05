@@ -95,8 +95,9 @@ export function synthesisSpecialistView(specialist: SpecialistPromptInput) {
 
 /**
  * Each scheduled specialist is a bounded research job with explicit
- * questions. Risk absorbs regulatory, governance, and political exposure as
- * an adaptive question answered only when evidence exists.
+ * questions. Risk names the company's own disclosed risks (including any
+ * regulatory, governance, or political exposure the filings describe) and
+ * routes evidence gaps to missingData, never to risk claims.
  */
 export const SPECIALIST_RESEARCH_QUESTIONS: Record<
   SpecialistAgentName,
@@ -118,12 +119,10 @@ export const SPECIALIST_RESEARCH_QUESTIONS: Record<
     "Which comparisons cannot be made because a value is unavailable? Compare the rest across each company's latest fiscal year, stating periods.",
   ],
   RISK: [
+    "Company risks: what are the most important company-specific risks, including any regulatory, governance, or political exposure, that the filings describe in 10-K Item 1A Risk Factors, plus MD&A where relevant? State each plainly in its own claim citing its passage.",
     "Leverage: does long-term debt exceed cash and equivalents (negative cash minus long-term debt), and what is debt-to-equity at the latest reporting date?",
     "Liquidity: what is the current ratio, and does it indicate strain?",
-    "Trend: do same-quarter changes show revenue, diluted EPS, or free cash flow deteriorating, and are quarters missing from the eight-quarter excerpt?",
-    "Evidence quality: which expected metrics are missing or ambiguous, on what date was the newest cited filing filed, and how does that limit this analysis?",
-    "Event timing: is an earnings event scheduled, and which selected facts could change when the next filing arrives?",
-    "Regulatory, governance, and political exposure: answer only if supplied evidence describes such exposure; otherwise state that no such evidence is supplied.",
+    "Trend: do the supplied same-quarter changes show revenue, diluted EPS, or free cash flow deteriorating?",
   ],
   NEWS: [
     "For each Form 8-K current report supplied, what was reported: the filing date, the item codes, and, where an Exhibit 99.1 press-release passage is supplied, the results or announcement the company made?",
@@ -145,7 +144,7 @@ const agentPurpose: Record<SpecialistAgentName, string> = {
     "Compare the company with the supplied peer comparison table and peer set using only supplied values and periods, and use Business passages for how the filing describes competition. Do not claim market share, rankings, or peer facts that are not supplied.",
   POLITICAL_ACTIVITY:
     "Report that verified political-activity evidence is unavailable unless it is explicitly supplied.",
-  RISK: "Identify company-level reporting, balance-sheet, leverage, liquidity, trend, concentration, event-timing, evidence-quality, and disclosed regulatory or governance risks from the supplied evidence, including Risk Factors and MD&A passages. Do not use personal portfolio context.",
+  RISK: "Name the company's own risks from the supplied evidence, including Risk Factors and MD&A passages, plus leverage and liquidity. Describe each business risk itself, never its effect on the stock or share price. Put missing or ambiguous evidence only in missingData; a data gap is never a risk claim. Do not use personal portfolio context.",
 };
 
 function evidenceRegistry(evidence: ResearchEvidence[]) {

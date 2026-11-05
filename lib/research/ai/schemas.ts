@@ -147,11 +147,19 @@ export class ModelOutputSafetyError extends Error {
   }
 }
 
-/** A schema-valid, safely cited output whose numbers, rating, or availability disagree with its own claims or cited excerpts. */
+/**
+ * A schema-valid, safely cited output whose numbers, rating, or availability
+ * disagree with its own claims or cited excerpts. The message is a fixed
+ * application string for logs; repairDetail names the failing claims and
+ * number tokens for the repair request only.
+ */
 export class ModelOutputConsistencyError extends Error {
   readonly code = "AI_INCONSISTENT_OUTPUT";
 
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly repairDetail: string | null = null,
+  ) {
     super(message);
     this.name = "ModelOutputConsistencyError";
   }
@@ -250,7 +258,12 @@ export function validateGroundedOutput<T extends GroundedModelOutput>(
     }
   }
   const consistencyIssue = getOutputConsistencyIssue(output, evidence);
-  if (consistencyIssue) throw new ModelOutputConsistencyError(consistencyIssue);
+  if (consistencyIssue) {
+    throw new ModelOutputConsistencyError(
+      consistencyIssue.message,
+      consistencyIssue.repairDetail,
+    );
+  }
   return output;
 }
 

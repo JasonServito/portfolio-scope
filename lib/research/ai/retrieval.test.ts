@@ -28,6 +28,10 @@ import {
   type SecFactEvidenceRecord,
 } from "@/lib/research/ai/retrieval";
 import type { SpecialistAgentName } from "@/lib/research/types";
+import {
+  formatDerivedValue,
+  type DerivedMetricUnit,
+} from "@/lib/sec/derived-metrics";
 
 const submissionsHash = "1".repeat(64);
 const companyFactsHash = "2".repeat(64);
@@ -734,6 +738,41 @@ describe("M31 filing passage evidence", () => {
     expect(tight.context).not.toContain("[excerpt truncated");
   });
 
+  it("gives Risk at least two Risk Factors passages beside the summary table that restates its leverage and liquidity values", () => {
+    const selection = selectSpecialistEvidence(aapl, "RISK");
+    const riskFactors = selection.evidence.filter(
+      (item) => item.metadata.sectionKind === "RISK_FACTORS",
+    );
+    // While debt-to-equity, the current ratio, and cash minus long-term debt
+    // were also mandatory for Risk, only one passage fit its budget.
+    expect(riskFactors.length).toBeGreaterThanOrEqual(2);
+    for (const passage of riskFactors) {
+      expect(selection.context).toContain(passage.excerpt);
+    }
+    expect(selection.contextCharacters).toBeLessThanOrEqual(
+      AI_SPECIALIST_CONTEXT_CHAR_BUDGETS.RISK,
+    );
+    const summary = aapl.evidence.find(
+      (item) => item.metadata.evidenceType === "FINANCIAL_SUMMARY_TABLE",
+    )!;
+    expect(selection.mandatoryEvidenceIds).toContain(summary.id);
+    for (const metricId of ["DEBT_TO_EQUITY", "CURRENT_RATIO", "NET_CASH"]) {
+      const derived = aapl.evidence.find(
+        (item) =>
+          item.metadata.evidenceType === "DERIVED_METRIC" &&
+          item.metadata.metricId === metricId,
+      )!;
+      expect(derived.metadata.agentNames).toContain("RISK");
+      expect(derived.metadata.mandatoryAgentNames).not.toContain("RISK");
+      expect(summary.excerpt).toContain(
+        `${derived.metadata.label}: ${formatDerivedValue(
+          derived.metadata.value as number,
+          derived.metadata.unit as DerivedMetricUnit,
+        )} (at ${derived.metadata.periodEnd})`,
+      );
+    }
+  });
+
   it("includes evidence the specialists cited, passages first, right after the synthesis mandatory items", () => {
     const riskPassage = passagesFor("RISK")[0];
     const summary = aapl.evidence.find(
@@ -968,7 +1007,11 @@ describe("M32 current-report event evidence", () => {
     const none = without.evidence.find(
       (item) => item.metadata.evidenceType === "SEC_CURRENT_REPORT_COVERAGE",
     )!;
-    expect(none.excerpt).toContain("No Form 8-K current report");
+    // The gap is about what was collected, not a claim that the company
+    // filed nothing.
+    expect(none.excerpt).toContain(
+      "This application has not collected any Form 8-K current reports for AAPL",
+    );
     expect(none.metadata.reportCount).toBe(0);
     expect(
       without.evidence.filter((item) => item.metadata.formType === "8-K"),
