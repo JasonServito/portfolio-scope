@@ -13,6 +13,7 @@ import {
 import { ResearchTabs } from "@/components/research/research-tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatAsOf } from "@/lib/formatters";
 import type { ResearchReportDiff } from "@/lib/research/ai/report-diff";
 import type { StockResearch } from "@/lib/research/types";
 
@@ -211,7 +212,7 @@ export function ResearchJobDetail({
               </CardTitle>
               <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                 <Clock3 aria-hidden="true" className="size-4" />
-                Started {new Date(job.createdAt).toLocaleString("en-US")}
+                Started {formatAsOf(job.createdAt)}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

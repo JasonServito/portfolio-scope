@@ -35,16 +35,14 @@ function safeSourceUrl(sourceUrl: string | null) {
   }
 }
 
+// Dates render on the server and again in the browser, so they use UTC to
+// read the same in both and avoid a hydration mismatch.
 function formatDate(value: string | null) {
   if (!value) return null;
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleDateString(
-        "en-US",
-        dateOnly ? { timeZone: "UTC" } : undefined,
-      );
+    : date.toLocaleDateString("en-US", { timeZone: "UTC" });
 }
 
 function generationLabel(research: StockResearch) {
@@ -80,7 +78,7 @@ function earningsSessionLabel(marketSession: string | null) {
 }
 
 function generationDescription(research: StockResearch) {
-  const date = new Date(research.generatedAt).toLocaleDateString("en-US");
+  const date = formatDate(research.generatedAt);
   if (research.generationMode === "EXTERNAL") {
     return `AI-assisted report prepared ${date} from the cited sources. It may contain mistakes, omissions, or outdated information. Verify important information independently and do not rely on it as the sole basis for investment decisions.`;
   }
@@ -265,7 +263,7 @@ function ClaimCard({
 const VISIBLE_POINTS = 4;
 
 function shortNotice(research: StockResearch) {
-  const date = new Date(research.generatedAt).toLocaleDateString("en-US");
+  const date = formatDate(research.generatedAt);
   return research.generationMode === "EXTERNAL"
     ? `AI-assisted summary of the cited filings, prepared ${date}. It can contain mistakes, so check the sources. Not investment advice.`
     : `Sample report prepared ${date}. Not investment advice.`;

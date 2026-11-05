@@ -213,7 +213,9 @@ export function PrivateResearch({
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {job.companyName} {" · "}
-                    {new Date(job.createdAt).toLocaleDateString("en-US")}
+                    {new Date(job.createdAt).toLocaleDateString("en-US", {
+                      timeZone: "UTC",
+                    })}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
