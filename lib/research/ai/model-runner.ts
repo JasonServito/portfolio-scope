@@ -23,6 +23,8 @@ import {
   ModelOutputConsistencyError,
   ModelOutputSafetyError,
   validateGroundedOutput,
+  withCitedCurrentReportItems,
+  withDistinctClaimReferences,
   type GroundedModelOutput,
   type ResearchEvidence,
 } from "@/lib/research/ai/schemas";
@@ -88,6 +90,8 @@ export async function runValidatedModelCall<T>(
     schema: z.ZodType<T>;
     schemaName: string;
     validate: (output: T) => void;
+    /** Removes harmless redundancy from a schema-valid output before it is validated. */
+    normalize?: (output: T) => T;
     maxAttempts: 1 | 2;
     prompt: (repairFeedback?: string) => Prompt;
     userId: string;
@@ -234,9 +238,10 @@ export async function runValidatedModelCall<T>(
     const parsed = input.schema.safeParse(generated.output);
     try {
       if (!parsed.success) throw parsed.error;
-      input.validate(parsed.data);
+      const output = input.normalize ? input.normalize(parsed.data) : parsed.data;
+      input.validate(output);
       return {
-        output: parsed.data,
+        output,
         providerResult: generated,
         reservation,
         attemptNumber,
@@ -335,6 +340,10 @@ export function runGroundedModelCall<T extends GroundedModelOutput>(
     {
       ...input,
       maxAttempts: 2,
+      normalize: (output) =>
+        withDistinctClaimReferences(
+          withCitedCurrentReportItems(output, input.evidence),
+        ),
       validate: (output) => {
         validateGroundedOutput(output, input.evidence);
       },

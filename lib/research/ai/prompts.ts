@@ -77,6 +77,32 @@ export function boundSpecialistOutputs(
 }
 
 /**
+ * Synthesis may cite only the evidence its own context supplies, which the
+ * character budget keeps smaller than everything the specialists cited. A
+ * forwarded claim therefore shows only the cited ids synthesis was given;
+ * showing the others invites a citation the grounding check must reject.
+ */
+export function citingOnlySuppliedEvidence(
+  specialists: readonly SpecialistPromptInput[],
+  evidence: readonly Pick<ResearchEvidence, "id">[],
+): SpecialistPromptInput[] {
+  const supplied = new Set(evidence.map((item) => item.id));
+  return specialists.map((specialist) => ({
+    agentName: specialist.agentName,
+    output: {
+      ...specialist.output,
+      claims: specialist.output.claims.map((claim) => ({
+        ...claim,
+        evidenceIds: claim.evidenceIds.filter((id) => supplied.has(id)),
+        counterEvidenceIds: claim.counterEvidenceIds.filter((id) =>
+          supplied.has(id),
+        ),
+      })),
+    },
+  }));
+}
+
+/**
  * Synthesis weighs claims, not specialist opinions, so the specialist rating
  * and self-reported confidence are not forwarded. A NOT_AVAILABLE specialist
  * therefore arrives as an availability state with its gaps, never as a
@@ -248,7 +274,9 @@ export function synthesisPrompt(input: {
   specialists: readonly SpecialistPromptInput[];
   repairFeedback?: string;
 }) {
-  const bounded = boundSpecialistOutputs(input.specialists);
+  const bounded = boundSpecialistOutputs(
+    citingOnlySuppliedEvidence(input.specialists, input.evidence),
+  );
   const instructions = [
     "You synthesize validated, evidence-grounded company research for a non-advisory educational application.",
     "Use only the supplied evidence and specialist outputs. Specialist prose is interpretation, not a new source.",
