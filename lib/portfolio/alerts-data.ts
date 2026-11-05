@@ -1,6 +1,11 @@
+import type { Prisma } from "@prisma/client";
+
 import { db } from "@/lib/db";
 import { calculatePercentChange } from "@/lib/portfolio/calculations";
-import { getDemoPortfolioAnalyticsByPeriods } from "@/lib/portfolio/analytics";
+import {
+  getDemoPortfolioAnalyticsByPeriods,
+  getOwnedPortfolioAnalyticsByPeriods,
+} from "@/lib/portfolio/analytics";
 import {
   generateRiskAlerts,
   type RiskAlert,
@@ -31,11 +36,11 @@ function calculateMaxDailyMove(prices: { close: { toNumber: () => number } }[]) 
   }, 0);
 }
 
-async function getWatchlistRiskInputs(): Promise<WatchlistRiskInput[]> {
+async function getWatchlistRiskInputs(
+  where: Prisma.WatchlistItemWhereInput,
+): Promise<WatchlistRiskInput[]> {
   const items = await db.watchlistItem.findMany({
-    where: {
-      user: { isDemo: true },
-    },
+    where,
     include: {
       stock: {
         include: {
@@ -85,13 +90,50 @@ export async function getDemoRiskAlerts(): Promise<RiskAlert[]> {
 }
 
 export async function getDemoRiskAlertsWithAnalytics(
-  analyticsByPeriodPromise: ReturnType<
-    typeof getDemoPortfolioAnalyticsByPeriods
-  >,
+  analyticsByPeriodPromise: AnalyticsByPeriodPromise,
+): Promise<RiskAlert[]> {
+  return getRiskAlertsWithAnalytics(
+    analyticsByPeriodPromise,
+    { user: { isDemo: true } },
+    "the demo portfolio",
+  );
+}
+
+export async function getOwnedRiskAlerts(
+  userId: string,
+  portfolioId: string,
+): Promise<RiskAlert[]> {
+  return getOwnedRiskAlertsWithAnalytics(
+    userId,
+    getOwnedPortfolioAnalyticsByPeriods(userId, portfolioId, ["1M", "1D"]),
+  );
+}
+
+// The same review signals the demo shows, computed for one owner's portfolio
+// and watchlist. Nothing is stored; the signals follow the cached prices.
+export async function getOwnedRiskAlertsWithAnalytics(
+  userId: string,
+  analyticsByPeriodPromise: AnalyticsByPeriodPromise,
+): Promise<RiskAlert[]> {
+  return getRiskAlertsWithAnalytics(
+    analyticsByPeriodPromise,
+    { userId },
+    "your portfolio",
+  );
+}
+
+type AnalyticsByPeriodPromise = ReturnType<
+  typeof getDemoPortfolioAnalyticsByPeriods
+>;
+
+async function getRiskAlertsWithAnalytics(
+  analyticsByPeriodPromise: AnalyticsByPeriodPromise,
+  watchlistWhere: Prisma.WatchlistItemWhereInput,
+  portfolioLabel: string,
 ): Promise<RiskAlert[]> {
   const [analyticsByPeriod, watchlistItems] = await Promise.all([
     analyticsByPeriodPromise,
-    getWatchlistRiskInputs(),
+    getWatchlistRiskInputs(watchlistWhere),
   ]);
   const oneMonthAnalytics = analyticsByPeriod.find(
     (analytics) => analytics?.period === "1M",
@@ -110,5 +152,6 @@ export async function getDemoRiskAlertsWithAnalytics(
     oneDayHoldings: oneDayAnalytics.holdings,
     oneMonthHoldings: oneMonthAnalytics.holdings,
     watchlistItems,
+    portfolioLabel,
   });
 }
