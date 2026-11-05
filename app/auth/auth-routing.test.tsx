@@ -2,6 +2,7 @@ import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  connection: vi.fn(async () => undefined),
   getCurrentUser: vi.fn(),
   isAuthProviderConfigured: vi.fn(() => false),
   redirect: vi.fn((url: string) => {
@@ -24,6 +25,7 @@ vi.mock("@/lib/auth/session", () => ({
   requireUser: mocks.requireUser,
 }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("next/server", () => ({ connection: mocks.connection }));
 vi.mock("next/font/google", () => ({
   IBM_Plex_Mono: () => ({ variable: "font-plex-mono" }),
   Inter: () => ({ variable: "font-inter" }),
@@ -45,10 +47,12 @@ describe("authentication route boundaries", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps the root layout public", () => {
-    const layout = RootLayout({ children: React.createElement("main") });
+  it("keeps the root layout public and rendered per request", async () => {
+    const layout = await RootLayout({ children: React.createElement("main") });
 
     expect(layout.type).toBe("html");
+    // Per-request rendering is what lets Next nonce scripts for the CSP.
+    expect(mocks.connection).toHaveBeenCalledOnce();
     expect(mocks.requireUser).not.toHaveBeenCalled();
   });
 

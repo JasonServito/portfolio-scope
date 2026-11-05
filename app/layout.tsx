@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
+import { connection } from "next/server";
 
 import { getSiteUrl, siteConfig } from "@/lib/site";
 
@@ -54,11 +55,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The CSP in proxy.ts only trusts nonce'd scripts, and Next adds the nonce
+  // only when it renders a page per request, so no page may be prerendered.
+  await connection();
+
   return (
     <html
       lang="en"
