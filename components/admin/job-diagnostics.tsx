@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatAsOf } from "@/lib/formatters";
 
 type JobRow = {
   id: string;
@@ -164,7 +165,7 @@ export function JobDiagnostics({ jobs }: { jobs: JobRow[] }) {
                     <span className="text-muted-foreground">None</span>
                   )}
                 </td>
-                <td className="px-4 py-3">{new Date(job.queuedAt).toLocaleString("en-US")}</td>
+                <td className="px-4 py-3">{formatAsOf(job.queuedAt)}</td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
                     <Button

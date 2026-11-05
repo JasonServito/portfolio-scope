@@ -295,6 +295,8 @@ describe("research UI", () => {
       />,
     );
 
+    // A fixed time zone keeps the server and browser renders identical.
+    expect(markup).toContain("Started Aug 11, 2026, 12:00 AM UTC");
     expect(markup).toContain("Changes from previous report");
     expect(markup).toContain("Material changes");
     expect(markup).toContain("11 percentage points");
