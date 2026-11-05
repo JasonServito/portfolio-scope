@@ -4,7 +4,7 @@ import type { AgentResult } from "@/lib/research/types";
 export function runCompetitorsAgent(data: ResearchProviderData): AgentResult {
   const findings = data.competitors.map((peer) => ({
     label: peer.ticker,
-    detail: `${peer.companyName} — ${peer.industry}`,
+    detail: `${peer.companyName} (${peer.industry})`,
   }));
   return {
     agentName: "COMPETITORS",

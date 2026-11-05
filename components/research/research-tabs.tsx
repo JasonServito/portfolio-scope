@@ -460,7 +460,7 @@ function ReportDetails({
             {report.contradictedClaims.map((claim) => (
               <article className="rounded-lg border p-4" key={claim.id}>
                 <p className="font-medium">
-                  Draft claim — not retained as a finding
+                  Draft claim (not retained as a finding)
                 </p>
                 <p className="mt-2">{claim.statement}</p>
                 <p className="mt-3 font-medium">Conflicting cited evidence</p>
@@ -517,7 +517,7 @@ function ReportDetails({
           ) : null}
           <p>{generationDescription(research)}</p>
           <p>
-            Research context only—not investment advice or a buy, sell, or hold
+            Research context only. Not investment advice or a buy, sell, or hold
             recommendation.
           </p>
         </section>
