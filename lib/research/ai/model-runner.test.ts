@@ -164,7 +164,56 @@ describe("grounded model runner", () => {
     expect(prompt).toHaveBeenCalledTimes(2);
     expect(prompt.mock.calls[0][0]).toBeUndefined();
     expect(prompt.mock.calls[1][0]).toMatch(/does not appear with the same unit/);
+    // The single repair names the failed check, the claim, and the exact
+    // unsupported number token.
+    expect(prompt.mock.calls[1][0]).toContain(
+      "The prior response failed the consistency check:",
+    );
+    expect(prompt.mock.calls[1][0]).toContain(
+      "Failing claims: claim 1 states 250, which its cited supporting excerpts do not contain.",
+    );
     expect(provider.remainingFixtures).toBe(0);
+  });
+
+  it("names the safety rule that tripped in the repair request", async () => {
+    const pricePrediction = {
+      ...validOutput,
+      claims: [
+        {
+          ...validOutput.claims[0],
+          category: "RISK" as const,
+          statement: "Weaker demand means the stock price could fall.",
+        },
+      ],
+    };
+    const provider = new RecordedResearchModelProvider({
+      fixtures: [
+        { result: { output: pricePrediction } },
+        { result: { output: validOutput } },
+      ],
+    });
+    const prompt = vi.fn((feedback?: string) => ({
+      instructions: "Grounded only.",
+      input: JSON.stringify({ feedback: feedback ?? null }),
+    }));
+
+    const result = await runGroundedModelCall({
+      provider,
+      config,
+      schema: specialistModelOutputSchema,
+      schemaName: "specialist_result",
+      evidence: [evidence],
+      prompt,
+      userId: "user-a",
+      researchJobId: "job-a",
+      operation: "SPECIALIST_RISK",
+      idempotencyKey: "job-a:risk-safety",
+    });
+
+    expect(result.attemptNumber).toBe(2);
+    expect(prompt.mock.calls[1][0]).toContain(
+      "The prior response failed the safety check: The generated output contained a prohibited stock-price target or prediction.",
+    );
   });
 
   it("logs why each output was rejected without model text", async () => {
@@ -217,7 +266,14 @@ describe("grounded model runner", () => {
       errorCode: "AI_MODEL_OUTPUT_INVALID",
       details: { attempt: 2, reason: expect.stringContaining("invalid_type") },
     });
-    for (const line of lines) expect(line).not.toContain("USD 250");
+    // The repair request names the unsupported number; the log never does.
+    for (const line of lines) {
+      expect(line).not.toContain("USD 250");
+      const { timestamp, ...logged } = JSON.parse(line);
+      expect(typeof timestamp).toBe("string");
+      expect(JSON.stringify(logged)).not.toContain("250");
+      expect(JSON.stringify(logged)).not.toContain("Failing claims");
+    }
   });
 
   it("stops before the first metered attempt when the kill switch is off", async () => {

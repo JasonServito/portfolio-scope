@@ -64,9 +64,7 @@ const earningsEvent = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
 });
 const annualRevenueGrowth = derived("REVENUE_GROWTH_YOY", "ANNUAL");
 const annualFreeCashFlowMargin = derived("FREE_CASH_FLOW_MARGIN", "ANNUAL");
-const netCash = derived("NET_CASH", "INSTANT");
 const debtToEquity = derived("DEBT_TO_EQUITY", "INSTANT");
-const currentRatio = derived("CURRENT_RATIO", "INSTANT");
 // Filing passages each specialist actually receives from the fixture 10-K:
 // the Risk Factors summary and the MD&A net-sales-by-category passage.
 const riskFactorsSummaryPassage = findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
@@ -147,18 +145,15 @@ const leverageClaim: ModelClaim = {
   assumptions: [],
 };
 
-const riskLeverageClaim: ModelClaim = {
-  ...leverageClaim,
-  evidenceIds: [netCash.id, debtToEquity.id],
-};
-
+// Risk owns the summary table, which restates its leverage and liquidity
+// values, so the recorded Risk claims cite it rather than the derived items.
 const liquidityClaim: ModelClaim = {
   category: "RISK",
   kind: "DERIVED",
   statement:
     "Derived current ratio was 1.00 at 2026-06-27, with current assets of 149,818,000,000 USD against current liabilities of 149,326,000,000 USD.",
   confidence: 0.8,
-  evidenceIds: [currentRatio.id],
+  evidenceIds: [summaryTable.id],
   counterEvidenceIds: [],
   assumptions: [],
 };
@@ -352,7 +347,7 @@ export const AAPL_RECORDED_SPECIALIST_OUTPUTS: Record<
     summary:
       "Balance-sheet evidence shows negative derived net cash and a current ratio near one, quarterly cash-flow coverage is incomplete, an upcoming earnings event is scheduled, and the 10-K risk factors disclose antitrust and digital-market regulatory exposure.",
     claims: [
-      riskLeverageClaim,
+      leverageClaim,
       liquidityClaim,
       eventClaim,
       regulatoryDisclosureClaim,

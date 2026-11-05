@@ -274,13 +274,30 @@ export async function runValidatedModelCall<T>(
           { cause: error },
         );
       }
-      // The check messages are fixed application strings, never model or
-      // user text, so they are safe to echo back as repair guidance.
-      repairFeedback = `The prior response failed the required runtime schema, evidence safety, or consistency checks${checkFailure ? `: ${error.message}` : "."} Return a corrected object only; cite only supplied evidence ids, state numbers exactly as they appear in cited evidence with the same unit, keep the rating and availability consistent with the claims, and do not add recommendations.`;
+      repairFeedback = `The prior response failed ${failedCheck(error)} Return a corrected object only; cite only supplied evidence ids, state numbers exactly as they appear in cited evidence with the same unit, keep the rating and availability consistent with the claims, and do not add recommendations.`;
     }
   }
 
   throw new GroundedModelCallError("AI_MODEL_OUTPUT_INVALID", false, true);
+}
+
+/**
+ * Names the check the rejected output failed for its single repair request:
+ * the safety rule that tripped, the consistency rule with every failing claim
+ * and its exact unsupported number tokens, or the schema issue paths. Only
+ * the repair request carries the claim detail; logs keep rejectionReason.
+ */
+function failedCheck(error: unknown) {
+  if (error instanceof ModelOutputSafetyError) {
+    return `the safety check: ${error.message}`;
+  }
+  if (error instanceof ModelOutputConsistencyError) {
+    return `the consistency check: ${error.message}${error.repairDetail ? ` Failing claims: ${error.repairDetail}.` : ""}`;
+  }
+  if (error instanceof z.ZodError) {
+    return `the output schema check (${rejectionReason(error)}).`;
+  }
+  return "the required runtime checks.";
 }
 
 /**

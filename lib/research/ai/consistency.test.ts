@@ -102,6 +102,21 @@ describe("numeric tokens", () => {
       new Set(["-31796000000"]),
     );
   });
+
+  it("treats periodic-report section labels as labels but keeps Form 8-K item codes as values", () => {
+    expect(
+      numericTokens(
+        "Part I, Item 1A Risk Factors and Part II, Item 7 (MD&A) of the 10-K; see item 7A and Items 1C.",
+      ),
+    ).toEqual(new Set());
+    expect(numericTokens("the 10-Q Part II Item 1A risk factors")).toEqual(
+      new Set(),
+    );
+    expect(numericTokens("Item 10 lists 3 directors")).toEqual(new Set(["3"]));
+    expect(numericTokens("a Form 8-K filed under Item 2.02")).toEqual(
+      new Set(["2.02"]),
+    );
+  });
 });
 
 describe("numeric agreement with cited excerpts", () => {
@@ -135,6 +150,34 @@ describe("numeric agreement with cited excerpts", () => {
         byId,
       ),
     ).toEqual([]);
+  });
+
+  it("accepts a section label that the cited excerpt does not state", () => {
+    const passage = evidence(
+      "ev_p",
+      "The Company's operations and performance depend significantly on global and regional economic conditions.",
+      "SEC_FILING",
+    );
+    const byId = new Map([[passage.id, passage]]);
+    expect(
+      unsupportedNumericTokens(
+        claim({
+          statement:
+            "The 10-K Item 1A risk factors say performance depends on global and regional economic conditions.",
+          evidenceIds: [passage.id],
+        }),
+        byId,
+      ),
+    ).toEqual([]);
+    expect(
+      unsupportedNumericTokens(
+        claim({
+          statement: "Item 1A lists 12 risks to performance.",
+          evidenceIds: [passage.id],
+        }),
+        byId,
+      ),
+    ).toEqual(["12"]);
   });
 
   it("reports numbers or units absent from the cited supporting excerpts", () => {
@@ -284,7 +327,12 @@ describe("rating, availability, and kind agreement", () => {
         { ...base, claims: [claim({ statement: "Revenue was 400 billion USD." })] },
         [supporting],
       ),
-    ).toMatch(/does not appear with the same unit/);
+    ).toEqual({
+      message:
+        "A claim stated a number that does not appear with the same unit in its cited supporting evidence.",
+      repairDetail:
+        "claim 1 states 400billion, which its cited supporting excerpts do not contain",
+    });
     expect(
       getOutputConsistencyIssue(
         {
@@ -314,24 +362,65 @@ describe("rating, availability, and kind agreement", () => {
         },
         [supporting, derived],
       ),
-    ).toMatch(/labeled DERIVED does not cite a derived evidence item/);
+    ).toEqual({
+      message: "A claim labeled DERIVED does not cite a derived evidence item.",
+      repairDetail: "claim 1 is labeled DERIVED but cites no DERIVED evidence",
+    });
     expect(
       getOutputConsistencyIssue(
         { ...base, rating: "BULLISH", claims: [risk] },
         [supporting],
       ),
-    ).toBe("The BULLISH rating does not agree with the claim categories.");
+    ).toEqual({
+      message: "The BULLISH rating does not agree with the claim categories.",
+      repairDetail: null,
+    });
     expect(
       getOutputConsistencyIssue(
         { ...base, availability: "NOT_AVAILABLE", claims: [supportive] },
         [supporting],
-      ),
+      )?.message,
     ).toMatch(/must not return claims/);
     expect(
       getOutputConsistencyIssue(
         { ...base, availability: "PARTIAL", claims: [] },
         [supporting],
-      ),
+      )?.message,
     ).toMatch(/must report NOT_AVAILABLE/);
+  });
+
+  it("names every failing claim and its unsupported number tokens for the repair", () => {
+    const supporting = evidence(
+      "ev_a",
+      "Revenue was 391,035,000,000 USD for the period ending 2025-09-27.",
+    );
+    const issue = getOutputConsistencyIssue(
+      {
+        rating: "NEUTRAL",
+        confidence: 0.5,
+        summary: "Summary.",
+        warnings: [],
+        missingData: [],
+        claims: [
+          claim(),
+          claim({
+            statement:
+              "Revenue was 391,035,000,000 USD, up 9 percent, in the 10-K filed 2025-10-31.",
+          }),
+          claim({
+            kind: "DERIVED",
+            statement: "Revenue was 391,035,000,000 USD.",
+          }),
+        ],
+      },
+      [supporting],
+    );
+    // The first failure decides the fixed message; the detail lists them all.
+    expect(issue).toEqual({
+      message:
+        "A claim stated a number that does not appear with the same unit in its cited supporting evidence.",
+      repairDetail:
+        "claim 2 states 2025-10-31, 9%, which its cited supporting excerpts do not contain; claim 3 is labeled DERIVED but cites no DERIVED evidence",
+    });
   });
 });

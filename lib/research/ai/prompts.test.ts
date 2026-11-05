@@ -66,7 +66,7 @@ describe("AI research prompts", () => {
   it.each([
     ["FINANCIALS", 6],
     ["COMPETITORS", 5],
-    ["RISK", 6],
+    ["RISK", 4],
     ["NEWS", 5],
   ] as const)(
     "poses the %s specialist's bounded research questions and contract",
@@ -99,9 +99,33 @@ describe("AI research prompts", () => {
     },
   );
 
-  it("routes regulatory, governance, and political exposure to Risk as an evidence-gated question", () => {
-    expect(SPECIALIST_RESEARCH_QUESTIONS.RISK.at(-1)).toMatch(
-      /Regulatory, governance, and political exposure: answer only if supplied evidence/,
+  it("asks Risk for the company's own disclosed risks, never data gaps or share-price effects", () => {
+    const [companyRisks, leverage, liquidity] =
+      SPECIALIST_RESEARCH_QUESTIONS.RISK;
+    expect(companyRisks).toMatch(/^Company risks: .*company-specific risks/);
+    expect(companyRisks).toContain("10-K Item 1A Risk Factors");
+    expect(companyRisks).toContain(
+      "including any regulatory, governance, or political exposure",
+    );
+    expect(companyRisks).toContain("citing its passage");
+    expect(leverage).toMatch(/^Leverage: /);
+    expect(liquidity).toMatch(/^Liquidity: /);
+    const questions = SPECIALIST_RESEARCH_QUESTIONS.RISK.join(" ");
+    expect(questions).not.toMatch(
+      /Evidence quality|Event timing|newest cited filing|missing from/,
+    );
+    const prompt = specialistPrompt({
+      agentName: "RISK",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      asOfDate: "2026-01-02",
+      evidence: [evidence],
+    });
+    expect(prompt.instructions).toContain(
+      "Describe each business risk itself, never its effect on the stock or share price.",
+    );
+    expect(prompt.instructions).toContain(
+      "Put missing or ambiguous evidence only in missingData; a data gap is never a risk claim.",
     );
     expect(SPECIALIST_RESEARCH_QUESTIONS.NEWS.at(-1)).toContain("NOT_AVAILABLE");
   });

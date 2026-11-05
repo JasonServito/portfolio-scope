@@ -89,6 +89,43 @@ describe("one bounded claim verification pass", () => {
     expect(provider.remainingFixtures).toBe(0);
   });
 
+  it("keeps the summary, what would change, and disagreements when claims are only partially supported", () => {
+    const verdicts = structuredClone(supported);
+    verdicts.results[1].status = "PARTIALLY_SUPPORTED";
+    verdicts.results[4].status = "PARTIALLY_SUPPORTED";
+    const final = applyClaimVerification(output, verdicts);
+    expect(final.claims).toEqual(output.claims);
+    expect(final.summary).toBe(output.summary);
+    expect(final.whatWouldChange).toEqual(output.whatWouldChange);
+    expect(final.disagreements).toEqual(output.disagreements);
+    expect(final.warnings).toEqual([
+      "Some draft claims were limited after checking their cited sources.",
+    ]);
+    expect(final.confidence).toBeLessThanOrEqual(
+      Math.min(...output.claims.map((claim) => claim.confidence)),
+    );
+    expect(() => validateGroundedOutput(final, evidence)).not.toThrow();
+  });
+
+  it("leaves out the summary, what would change, and disagreements once a claim is removed as contradicted", () => {
+    const verdicts = structuredClone(supported);
+    verdicts.results[1].status = "PARTIALLY_SUPPORTED";
+    verdicts.results[3] = {
+      ...verdicts.results[3],
+      status: "CONTRADICTED",
+      contradictingEvidenceIds: output.claims[3].evidenceIds,
+    };
+    const final = applyClaimVerification(output, verdicts);
+    expect(final.claims).toEqual(
+      output.claims.filter((_, index) => index !== 3),
+    );
+    expect(final.summary).toBe(
+      "Some draft points did not fully match their sources, so the overall summary was left out. The points below passed the source check; check the cited sources for any marked as partially supported.",
+    );
+    expect(final.whatWouldChange).toEqual([]);
+    expect(final.disagreements).toEqual([]);
+  });
+
   it("preserves a draft on failure without claim edits or a duplicate warning", () => {
     // The report stores verificationCompleted=false and the page states that
     // claim support is unverified, so the draft is returned unchanged.
