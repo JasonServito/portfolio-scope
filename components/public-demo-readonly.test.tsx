@@ -130,7 +130,7 @@ describe("public demo read-only components", () => {
     expect(markup).toContain(">Summary<");
     expect(markup).toContain(">Strengths<");
     expect(markup).toContain(">Risks<");
-    expect(markup).toContain(">What to Watch<");
+    expect(markup).toContain(">What to watch<");
     expect(markup).toContain("Evidence / Sources");
     expect(markup).not.toContain('role="tablist"');
     expect(markup).toContain("Prepared");

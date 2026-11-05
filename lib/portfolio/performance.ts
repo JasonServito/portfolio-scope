@@ -26,6 +26,14 @@ export function isPerformancePeriod(value: string): value is PerformancePeriod {
   return value in PERIOD_DAYS;
 }
 
+// Reads a `?period=` search parameter, falling back to one month.
+export function getSelectedPeriod(
+  requested: string | string[] | undefined,
+): PerformancePeriod {
+  const period = Array.isArray(requested) ? requested[0] : requested;
+  return period && isPerformancePeriod(period) ? period : "1M";
+}
+
 export function getPeriodStartDate(endDate: Date, period: PerformancePeriod) {
   const startDate = new Date(endDate);
   startDate.setUTCDate(startDate.getUTCDate() - getPeriodDays(period));

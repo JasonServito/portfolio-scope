@@ -288,7 +288,7 @@ test.describe("authenticated production boundaries", () => {
     await db.$disconnect();
   });
 
-  test("an authenticated user creates a private portfolio", async ({
+  test("an authenticated user creates their portfolio and adds a holding", async ({
     context,
     page,
   }) => {
@@ -298,51 +298,55 @@ test.describe("authenticated production boundaries", () => {
       name: "Private workspace navigation",
     });
     await expect(privateNavigation).toBeVisible();
-    await expect(
-      privateNavigation.getByRole("link", { name: "Dashboard" }),
-    ).toBeVisible();
-    await expect(
-      privateNavigation.getByRole("link", { name: "Watchlist" }),
-    ).toBeVisible();
-    await expect(
-      privateNavigation.getByRole("link", { name: "Earnings" }),
-    ).toBeVisible();
-    await expect(
-      privateNavigation.getByRole("link", { name: "Alerts" }),
-    ).toBeVisible();
-    await expect(
-      privateNavigation.getByRole("link", { name: "Research" }),
-    ).toBeVisible();
+    for (const name of [
+      "Dashboard",
+      "Holdings",
+      "Watchlist",
+      "Earnings",
+      "Alerts",
+      "Research",
+    ]) {
+      await expect(privateNavigation.getByRole("link", { name })).toBeVisible();
+    }
     await expect(page.getByRole("link", { name: "Architecture" })).toHaveCount(
       0,
     );
     await page.getByLabel("Portfolio name").fill("E2E long-term portfolio");
-    await page.getByLabel("Base currency").fill("CAD");
-    await page.getByRole("button", { name: "Create" }).click();
+    await page.getByRole("button", { name: "Create portfolio" }).click();
 
     await expect(
-      page.getByText("E2E long-term portfolio", { exact: true }),
+      page.getByText("E2E long-term portfolio · Your portfolio"),
     ).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/CAD.*0 holdings/i)).toBeVisible();
-
-    await page.getByRole("link", { name: "Open", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "E2E long-term portfolio" }),
+      page.getByText("Your portfolio has no holdings yet"),
     ).toBeVisible();
-    await page.getByLabel("Name").fill("E2E managed portfolio");
-    await page.getByRole("button", { name: "Save" }).click();
+    await expect(
+      page.getByRole("button", { name: "Create portfolio" }),
+    ).toHaveCount(0);
+
+    await page.getByRole("link", { name: "Add holdings" }).click();
+    await expect(page.getByRole("heading", { name: "Holdings" })).toBeVisible();
+    await page.getByLabel("Portfolio name").fill("E2E managed portfolio");
+    await page.getByRole("button", { name: "Save name" }).click();
     await expect(page.getByRole("status")).toContainText(
-      "Portfolio settings were saved.",
+      "Portfolio name was saved.",
     );
 
+    await page.getByRole("button", { name: "Add holding" }).click();
     await page.getByLabel("Ticker").fill("AAPL");
     await page.getByLabel("Shares").fill("2");
     await page.getByLabel("Average cost").fill("150");
-    await page.getByRole("button", { name: "Add holding" }).click();
-    await expect(page.getByText("Apple Inc.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("status")).toContainText(
-      "AAPL was added to this portfolio.",
-    );
+    await page.getByRole("button", { name: "Add position" }).click();
+    await expect(page.getByRole("link", { name: "AAPL" })).toBeVisible({
+      timeout: 20_000,
+    });
+
+    await page.goto("/app");
+    await expect(
+      page.getByText("E2E managed portfolio · Your portfolio"),
+    ).toBeVisible();
+    await expect(page.getByText("Portfolio performance")).toBeVisible();
+    await expect(page.getByText("Top contributors")).toBeVisible();
   });
 
   test("an authenticated user adds, edits, and removes a watchlist item", async ({
@@ -432,7 +436,20 @@ test.describe("authenticated production boundaries", () => {
     await expect(
       page.getByRole("heading", { name: "Dashboard" }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Create" })).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+
+    await page.goto("/app/holdings");
+    await expect(
+      page.getByRole("button", { name: "Add holding" }),
+    ).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(
@@ -514,7 +531,7 @@ test.describe("authenticated production boundaries", () => {
     await expect(
       page.getByRole("heading", { name: "Stock research report", level: 2 }),
     ).toBeVisible();
-    for (const section of ["Summary", "Strengths", "Risks", "What to Watch"]) {
+    for (const section of ["Summary", "Strengths", "Risks", "What to watch"]) {
       await expect(
         page.getByRole("heading", { name: section, level: 3 }),
       ).toBeVisible();

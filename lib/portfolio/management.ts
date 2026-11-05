@@ -127,36 +127,37 @@ async function rebuildPortfolioSnapshots(
 ) {
   const portfolio = await tx.portfolio.findFirst({
     where: { id: portfolioId, userId },
-    include: {
-      holdings: { include: { snapshots: true } },
-      snapshots: { select: { timestamp: true } },
-    },
+    include: { holdings: { include: { snapshots: true } } },
   });
   if (!portfolio) throw new ManagementError("Portfolio was not found.", 404);
 
-  const timestamps = [
-    ...new Set([
-      ...portfolio.snapshots.map((snapshot) => snapshot.timestamp.getTime()),
-      ...portfolio.holdings.flatMap((holding) =>
-        holding.snapshots.map((snapshot) => snapshot.timestamp.getTime()),
+  const valuesByHolding = portfolio.holdings.map(
+    (holding) =>
+      new Map(
+        holding.snapshots.map((snapshot) => [
+          snapshot.timestamp.getTime(),
+          Number(snapshot.marketValue),
+        ]),
       ),
-    ]),
-  ].sort();
+  );
+  // Only dates on which every holding is valued become portfolio history, so
+  // a holding without a price on that date never counts as worth zero.
+  const timestamps = [...(valuesByHolding[0]?.keys() ?? [])]
+    .filter((time) => valuesByHolding.every((values) => values.has(time)))
+    .sort((left, right) => left - right);
   await tx.portfolioSnapshot.deleteMany({ where: { portfolioId } });
   if (timestamps.length === 0) return;
 
+  const totalCostBasis = portfolio.holdings.reduce(
+    (sum, holding) => sum + Number(holding.costBasis),
+    0,
+  );
   await tx.portfolioSnapshot.createMany({
     data: timestamps.map((time) => {
-      const totalCostBasis = portfolio.holdings.reduce(
-        (sum, holding) => sum + Number(holding.costBasis),
+      const totalValue = valuesByHolding.reduce(
+        (sum, values) => sum + values.get(time)!,
         0,
       );
-      const totalValue = portfolio.holdings.reduce((sum, holding) => {
-        const snapshot = holding.snapshots.find(
-          (item) => item.timestamp.getTime() === time,
-        );
-        return sum + (snapshot ? Number(snapshot.marketValue) : 0);
-      }, 0);
       const totalGainLoss = totalValue - totalCostBasis;
       return {
         portfolioId,
@@ -185,7 +186,7 @@ async function createHoldingSnapshots(
   });
   if (prices.length === 0) {
     throw new ManagementError(
-      "No seeded price history is available for that ticker.",
+      "PortfolioScope has no price history for that ticker yet.",
       422,
     );
   }
@@ -209,7 +210,7 @@ async function findStock(tx: Prisma.TransactionClient, ticker: string) {
   const stock = await tx.stock.findUnique({ where: { ticker } });
   if (!stock) {
     throw new ManagementError(
-      "Ticker is not available in the seeded stock catalog.",
+      "PortfolioScope has no price history for that ticker yet.",
       422,
     );
   }
@@ -256,10 +257,38 @@ export async function getPortfolio(userId: string, portfolioId: string) {
   });
 }
 
+// Tickers a holding can be added for: the ones with stored price history.
+export async function listPricedTickers() {
+  const stocks = await db.stock.findMany({
+    where: { prices: { some: {} } },
+    select: { ticker: true },
+    orderBy: { ticker: "asc" },
+  });
+  return stocks.map((stock) => stock.ticker);
+}
+
+// Each account works with one portfolio. Accounts created before that rule
+// keep their extra portfolios in storage; the oldest one is the one shown.
+export async function getPrimaryPortfolio(userId: string) {
+  return db.portfolio.findFirst({
+    where: { userId },
+    select: { id: true, name: true, baseCurrency: true },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
 export async function createPortfolio(userId: string, input: unknown) {
   const data = parseInput(portfolioInputSchema, input, "Invalid portfolio.");
   return db.$transaction(async (tx) => {
     await requireMutableUser(userId, tx);
+    if (
+      await tx.portfolio.findFirst({ where: { userId }, select: { id: true } })
+    ) {
+      throw new ManagementError(
+        "Your account already has a portfolio. Add holdings to it instead.",
+        409,
+      );
+    }
     return tx.portfolio.create({ data: { ...data, userId } });
   });
 }

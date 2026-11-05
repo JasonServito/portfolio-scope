@@ -1,15 +1,12 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
-import { PageShell } from "@/components/layout/page-shell";
-import { PrivatePortfolioManager } from "@/components/portfolios/private-portfolio-manager";
-import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/session";
 import { getPortfolio } from "@/lib/portfolio/management";
 
 export const dynamic = "force-dynamic";
 
+// Older links open the owner's portfolio on the Holdings page. Another
+// account's portfolio ID still resolves to the same not-found response.
 export default async function PrivatePortfolioPage({
   params,
 }: {
@@ -21,34 +18,5 @@ export default async function PrivatePortfolioPage({
 
   if (!portfolio) notFound();
 
-  return (
-    <PageShell
-      actions={
-        <Link
-          className={buttonVariants({ variant: "ghost" })}
-          href="/app"
-          prefetch={false}
-        >
-          <ArrowLeft /> Back to portfolios
-        </Link>
-      }
-      description="Update the portfolio details and keep its holdings current"
-      eyebrow="Portfolio"
-      title={portfolio.name}
-    >
-      <PrivatePortfolioManager
-        holdings={portfolio.holdings.map((holding) => ({
-          id: holding.id,
-          ticker: holding.stock.ticker,
-          companyName: holding.stock.companyName,
-          shares: Number(holding.shares),
-          averageCost: Number(holding.averageCost),
-          costBasis: Number(holding.costBasis),
-        }))}
-        id={portfolio.id}
-        initialBaseCurrency={portfolio.baseCurrency}
-        initialName={portfolio.name}
-      />
-    </PageShell>
-  );
+  redirect("/app/holdings");
 }

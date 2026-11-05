@@ -151,6 +151,83 @@ describe("owner-scoped portfolio services", () => {
     );
   });
 
+  it("keeps each account to a single portfolio", async () => {
+    mocks.portfolioFindFirst.mockResolvedValue({ id: "portfolio-a" });
+
+    await expect(
+      createPortfolio(actorId, { name: "Second portfolio" }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    expect(mocks.portfolioFindFirst).toHaveBeenCalledWith({
+      where: { userId: actorId },
+      select: { id: true },
+    });
+    expect(mocks.portfolioCreate).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds portfolio history only on dates where every holding is valued", async () => {
+    const day1 = new Date("2026-06-25T21:00:00.000Z");
+    const day2 = new Date("2026-06-26T21:00:00.000Z");
+    const orphan = new Date("2026-11-04T14:26:00.000Z");
+    mocks.holdingFindFirst.mockResolvedValue({
+      id: "holding-c",
+      portfolioId: "portfolio-a",
+      stockId: "stock-c",
+      portfolio: { user: { isDemo: false } },
+    });
+    mocks.portfolioFindFirst.mockResolvedValue({
+      id: "portfolio-a",
+      holdings: [
+        {
+          costBasis: 100,
+          snapshots: [
+            { timestamp: day2, marketValue: 130 },
+            { timestamp: day1, marketValue: 120 },
+            { timestamp: orphan, marketValue: 130 },
+          ],
+        },
+        {
+          costBasis: 50,
+          snapshots: [
+            { timestamp: day1, marketValue: 40 },
+            { timestamp: day2, marketValue: 45 },
+          ],
+        },
+      ],
+    });
+
+    await deleteHolding(actorId, "holding-c");
+
+    expect(mocks.portfolioSnapshotDeleteMany).toHaveBeenCalledWith({
+      where: { portfolioId: "portfolio-a" },
+    });
+    const [{ data }] = mocks.portfolioSnapshotCreateMany.mock.calls[0];
+    expect(
+      data.map(
+        (row: {
+          timestamp: Date;
+          totalValue: unknown;
+          totalGainLossPercent: unknown;
+        }) => ({
+          timestamp: row.timestamp.toISOString(),
+          totalValue: Number(row.totalValue),
+          totalGainLossPercent: Number(row.totalGainLossPercent),
+        }),
+      ),
+    ).toEqual([
+      {
+        timestamp: day1.toISOString(),
+        totalValue: 160,
+        totalGainLossPercent: 10 / 150,
+      },
+      {
+        timestamp: day2.toISOString(),
+        totalValue: 175,
+        totalGainLossPercent: 25 / 150,
+      },
+    ]);
+  });
+
   it.each([
     {
       expectedWhere: (id: string) => ({ id, userId: actorId }),

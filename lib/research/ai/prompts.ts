@@ -166,10 +166,15 @@ function defaultEvidenceContext(evidence: ResearchEvidence[]) {
     .slice(0, 12_000);
 }
 
-const numericRules = [
-  "State a number only when that exact value, period, unit, and sign appear in cited supporting evidence; a runtime check rejects any number absent from the cited excerpts.",
-  "Evidence of kind DERIVED holds values this application calculated deterministically from cited SEC facts; you may quote such a value exactly as supplied with its period and unit and must describe it as derived, but you must never calculate, re-derive, extrapolate, or annualize any ratio, growth rate, difference, or average yourself.",
-];
+const exactNumberRule =
+  "State a number only when that exact value, period, unit, and sign appear in cited supporting evidence; a runtime check rejects any number absent from the cited excerpts.";
+// The runtime check also accepts a correctly rounded cited value, which the
+// reader-facing synthesis uses for readable amounts.
+const roundedNumberRule =
+  "State a number only when its value, period, unit, and sign appear in cited evidence; you may round it to two or more significant digits.";
+const derivedValueRule =
+  "Evidence of kind DERIVED holds values this application calculated deterministically from cited SEC facts; you may quote such a value exactly as supplied with its period and unit and must describe it as derived, but you must never calculate, re-derive, extrapolate, or annualize any ratio, growth rate, difference, or average yourself.";
+const numericRules = [exactNumberRule, derivedValueRule];
 
 const sourceKindRules = [
   "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q, a passage of a press release the company attached to a Form 8-K, or the cover items of a Form 8-K current report (form, section, and filing date given); attribute it to that filing as the company's disclosure, not independent verification, and read forward-looking language as expectation, not fact.",
@@ -187,6 +192,12 @@ const specialistContractRules = [
   "Set availability to COMPLETE when the evidence answers most questions, PARTIAL when material questions are unanswered because expected metrics are missing or ambiguous, and NOT_AVAILABLE when no usable evidence is supplied; NOT_AVAILABLE requires zero claims and a NEUTRAL rating.",
   ratingRule,
 ];
+
+// The final report is read by beginner investors, so synthesis claims become
+// short plain-language bullets. Specialists keep their detail; synthesis is the
+// step that writes what the reader sees.
+const plainLanguageRule =
+  "Write for beginners: each claim is one plain sentence under 25 words; the summary is two short sentences.";
 
 const safetyRules = [
   "Never recommend or instruct an investment action, including buying, purchasing, acquiring, selling, disposing of, exiting, adding to, trimming, or holding a stock or position.",
@@ -244,12 +255,14 @@ export function synthesisPrompt(input: {
     "Use only the supplied evidence and specialist outputs. Specialist prose is interpretation, not a new source.",
     "Weigh the specialists' claims and their cited evidence, not the specialists' opinions. A specialist whose availability is NOT_AVAILABLE contributed no evidence: report its gap in missingData and never treat it as a neutral view.",
     "Every final claim must cite supplied evidence ids directly, surface counter-evidence and disagreements, and preserve missing information.",
-    ...numericRules,
+    roundedNumberRule,
+    derivedValueRule,
     ...sourceKindRules,
     ...claimKindRules,
     `Keep the kind of any claim you carry forward and label your own conclusions INTERPRETATION. ${ratingRule}`,
-    "In whatWouldChange, list up to six concrete developments grounded in the supplied evidence that would change this analysis, such as a specific derived metric moving in the next filing or a missing metric becoming available. Do not mention share prices.",
+    "In whatWouldChange, list up to six short, evidence-grounded developments that would change this analysis, such as a derived metric moving in the next filing or a missing metric arriving. Do not mention share prices.",
     "Recent events come only from the News specialist's claims and the Form 8-K current reports they cite; never describe an event without such a citation, and treat the newest filing date as the limit of what is known.",
+    plainLanguageRule,
     ...safetyRules,
   ].join(" ");
   const body = JSON.stringify({

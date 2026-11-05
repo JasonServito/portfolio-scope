@@ -31,15 +31,29 @@ function Field({
   );
 }
 
-export function AddHoldingForm({ readOnly = false }: { readOnly?: boolean }) {
-  if (readOnly) {
+export function AddHoldingForm({
+  portfolioId,
+  readOnly = false,
+  tickers = [],
+}: {
+  portfolioId?: string;
+  readOnly?: boolean;
+  tickers?: string[];
+}) {
+  if (readOnly || !portfolioId) {
     return null;
   }
 
-  return <EditableHoldingForm />;
+  return <EditableHoldingForm portfolioId={portfolioId} tickers={tickers} />;
 }
 
-function EditableHoldingForm() {
+function EditableHoldingForm({
+  portfolioId,
+  tickers,
+}: {
+  portfolioId: string;
+  tickers: string[];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<HoldingForm>({
@@ -58,7 +72,7 @@ function EditableHoldingForm() {
       const response = await fetch("/api/holdings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ portfolioId, ...form }),
       });
       if (!response.ok) {
         setError(await responseError(response, "Unable to add holding."));
@@ -83,11 +97,12 @@ function EditableHoldingForm() {
     );
   return (
     <form
-      className="grid gap-3 rounded-xl border bg-muted/30 p-4 sm:grid-cols-3"
+      className="grid w-full gap-3 rounded-xl border bg-muted/30 p-4 sm:grid-cols-3"
       onSubmit={submit}
     >
       <Field
         label="Ticker"
+        list="holding-tickers"
         maxLength={10}
         onChange={(e) =>
           setForm({ ...form, ticker: e.target.value.toUpperCase() })
@@ -114,10 +129,23 @@ function EditableHoldingForm() {
         type="number"
         value={form.averageCost}
       />
+      <datalist id="holding-tickers">
+        {tickers.map((ticker) => (
+          <option key={ticker} value={ticker} />
+        ))}
+      </datalist>
       <div className="flex items-center justify-between gap-3 sm:col-span-3">
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
+        {error ? (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : tickers.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Prices are available for {tickers.join(", ")}
+          </p>
+        ) : (
+          <span />
+        )}
         <div className="flex gap-2">
           <Button onClick={() => setOpen(false)} type="button" variant="ghost">
             <X />
