@@ -7,7 +7,7 @@ describe("M33 recorded regression baseline", () => {
     const result = await runVerificationEvaluation();
     expect(result.failures).toEqual([]);
     expect(result.passed).toBe(true);
-    expect(result.cases).toHaveLength(8);
+    expect(result.cases).toHaveLength(9);
     expect(result.cases.every((item) => item.passed)).toBe(true);
   });
 

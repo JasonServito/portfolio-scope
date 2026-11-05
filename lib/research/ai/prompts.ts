@@ -145,17 +145,17 @@ export const SPECIALIST_RESEARCH_QUESTIONS: Record<
     "Which comparisons cannot be made because a value is unavailable? Compare the rest across each company's latest fiscal year, stating periods.",
   ],
   RISK: [
-    "Company risks: what are the most important company-specific risks, including any regulatory, governance, or political exposure, that the filings describe in 10-K Item 1A Risk Factors, plus MD&A where relevant? State each plainly in its own claim citing its passage.",
+    "Company risks: what are the most important company-specific risks, including any regulatory, governance, or political exposure, that the filings describe in Item 1A Risk Factors (10-K or 10-Q update), plus MD&A or an 8-K where relevant? State each plainly in its own claim citing its passage.",
     "Leverage: does long-term debt exceed cash and equivalents (negative cash minus long-term debt), and what is debt-to-equity at the latest reporting date?",
     "Liquidity: what is the current ratio, and does it indicate strain?",
     "Trend: do the supplied same-quarter changes show revenue, diluted EPS, or free cash flow deteriorating?",
   ],
   NEWS: [
-    "For each Form 8-K current report supplied, what was reported: the filing date, the item codes, and, where an Exhibit 99.1 press-release passage is supplied, the results or announcement the company made?",
+    "For each Form 8-K current report supplied, what was reported: the filing date, the item codes, and, where an item or Exhibit 99.1 passage is supplied, what the company said happened?",
     "What changed compared with the earlier current reports or the periodic filings in the evidence, such as a new result, a dividend or repurchase decision, a leadership change, a shareholder vote, or an agreement?",
     "Why may each event matter for the business, stated as the filing itself frames it, without predicting share prices?",
-    "How strong is the evidence for each event: a press-release passage that describes it, or only the item codes of the 8-K cover?",
-    "What remains unknown, including items with no exhibit text, and how recent is the newest current report? If no current report is supplied, report availability NOT_AVAILABLE with no claims.",
+    "How strong is the evidence for each event: a passage that describes it, or only the item codes of the 8-K cover?",
+    "What remains unknown, including items with no passage, and when was the newest current report filed? If no current report is supplied, report availability NOT_AVAILABLE with no claims.",
   ],
   POLITICAL_ACTIVITY: [
     "Is verified political-activity evidence supplied? If not, report availability NOT_AVAILABLE with no claims and state the gap.",
@@ -163,7 +163,7 @@ export const SPECIALIST_RESEARCH_QUESTIONS: Record<
 };
 
 const agentPurpose: Record<SpecialistAgentName, string> = {
-  NEWS: "Describe recent company events only from the supplied Form 8-K current reports and their Exhibit 99.1 press-release passages. Make one claim per event: state the filing date and items, cite the 8-K current-report item for the date and the press-release passage for what was said, and label a claim FACT when it restates the filing. Never describe an event that no supplied 8-K reports, never treat the absence of a report as evidence that nothing happened, and never use third-party news, memory, or the periodic filings as a source of events.",
+  NEWS: "Describe recent company events only from the supplied Form 8-K current reports and their item and Exhibit 99.1 passages. Make one claim per event: state the filing date and items, cite the 8-K current-report item for the date and a passage for what was said, and label a claim FACT when it restates the filing. Never describe an event that no supplied 8-K reports, never treat the absence of a report as evidence that nothing happened, and never use third-party news, memory, or the periodic filings as a source of events.",
   FINANCIALS:
     "Answer from the reported financial facts, the financial summary table, the quarterly trend excerpt, and the derived growth, margin, cash-generation, and leverage values, always with their periods and units; use MD&A passages only for the drivers the filing gives. Keep explicit gaps explicit and never invent valuation inputs.",
   COMPETITORS:
@@ -202,7 +202,7 @@ const derivedValueRule =
 const numericRules = [exactNumberRule, derivedValueRule];
 
 const sourceKindRules = [
-  "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q, a passage of a press release the company attached to a Form 8-K, or the cover items of a Form 8-K current report (form, section, and filing date given); attribute it to that filing as the company's disclosure, not independent verification, and read forward-looking language as expectation, not fact.",
+  "Evidence of kind SEC_FILING is a passage from the company's own 10-K or 10-Q, a passage of a Form 8-K item or its attached press release, or the cover items of a Form 8-K current report (form, section, and filing date given); attribute it to that filing as the company's disclosure, not independent verification, and read forward-looking language as expectation, not fact.",
 ];
 
 const claimKindRules = [

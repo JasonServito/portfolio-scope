@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  CURRENT_REPORT_ITEM_LIMITS,
   decodeFilingDocument,
   expectedFilingSectionKinds,
+  extractCurrentReportItems,
   extractFilingSections,
   FILING_SECTION_LIMITS,
   htmlToText,
@@ -26,6 +28,10 @@ const tenQ = readFileSync(
 );
 const pressRelease = readFileSync(
   join(fixtureDirectory, "aapl-8k-ex991-press-release-clipped.htm"),
+  "utf8",
+);
+const currentReport = readFileSync(
+  join(fixtureDirectory, "aapl-8k-primary-document-clipped.htm"),
   "utf8",
 );
 
@@ -270,8 +276,11 @@ describe("10-Q section extraction", () => {
   it("extracts only the Part I Item 2 MD&A and never the Part II Item 2 heading", () => {
     const extraction = extractFilingSections(tenQ, "10-Q");
 
-    expect(extraction.expectedSections).toEqual(["MDA"]);
-    expect(extraction.sections.map((item) => item.kind)).toEqual(["MDA"]);
+    expect(extraction.expectedSections).toEqual(["MDA", "RISK_FACTORS"]);
+    expect(extraction.sections.map((item) => item.kind)).toEqual([
+      "MDA",
+      "RISK_FACTORS",
+    ]);
     expect(extraction.missingSections).toEqual([]);
     const mda = sectionText(extraction, "MDA");
     expect(mda).toContain("Quarterly Highlights");
@@ -296,7 +305,7 @@ describe("8-K press-release exhibit extraction", () => {
   const extraction = extractFilingSections(pressRelease, "8-K");
 
   it("expects one PRESS_RELEASE section and chunks the whole exhibit into hash-verifiable passages", () => {
-    expect(expectedFilingSectionKinds("8-K")).toEqual(["PRESS_RELEASE"]);
+    expect(expectedFilingSectionKinds("8-K", ["2.02", "9.01"])).toEqual(["PRESS_RELEASE"]);
     expect(extraction).toMatchObject({
       parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
       formType: "8-K",
@@ -357,6 +366,147 @@ describe("8-K press-release exhibit extraction", () => {
       "RISK_FACTORS",
       "MDA",
     ]);
-    expect(extractFilingSections(tenQ, "10-Q").expectedSections).toEqual(["MDA"]);
+    expect(extractFilingSections(tenQ, "10-Q").expectedSections).toEqual([
+      "MDA",
+      "RISK_FACTORS",
+    ]);
+  });
+});
+
+describe("10-Q Part II Item 1A risk-factor update", () => {
+  it("extracts the Part II Item 1A update as a 10-Q RISK_FACTORS section, never the contents entry", () => {
+    const extraction = extractFilingSections(tenQ, "10-Q");
+    const update = section(extraction, "RISK_FACTORS");
+    expect(update.label).toBe("Part II, Item 1A. Risk Factors");
+    const text = sectionText(extraction, "RISK_FACTORS");
+    expect(text).toContain("There have been no material changes to those risk factors");
+    expect(text).not.toContain("Unregistered Sales");
+    expect(text).not.toContain("Legal Proceedings");
+    expect(update.chunks).toHaveLength(1);
+  });
+
+  it("records a one-sentence \"no material changes\" update as present, not missing", () => {
+    const html = `<html><body>
+      <div>Part II</div>
+      <div>Item 1. Legal Proceedings</div>
+      <div>None.</div>
+      <div>Item 1A. Risk Factors</div>
+      <div>There have been no material changes to the Company&#8217;s risk factors since the 2025 Form 10-K.</div>
+      <div>Item 2. Unregistered Sales of Equity Securities and Use of Proceeds</div>
+      <div>None.</div>
+    </body></html>`;
+    const extraction = extractFilingSections(html, "10-Q");
+    expect(extraction.missingSections).toEqual(["MDA"]);
+    expect(sectionText(extraction, "RISK_FACTORS")).toBe(
+      "There have been no material changes to the Company\u2019s risk factors since the 2025 Form 10-K.",
+    );
+    // A 10-K still needs a real section, not a sentence.
+    expect(
+      extractFilingSections(html.replace("Part II", ""), "10-K").missingSections,
+    ).toContain("RISK_FACTORS");
+  });
+});
+
+describe("8-K item text extraction", () => {
+  it("expects item text for listed items other than 2.02 and 9.01, and a press release only for a results filing", () => {
+    expect(expectedFilingSectionKinds("8-K", ["5.07"])).toEqual(["CURRENT_REPORT_ITEM"]);
+    expect(expectedFilingSectionKinds("8-K", ["2.02", "8.01", "9.01"])).toEqual([
+      "CURRENT_REPORT_ITEM",
+      "PRESS_RELEASE",
+    ]);
+    expect(expectedFilingSectionKinds("8-K", ["7.01", "9.01"])).toEqual([
+      "CURRENT_REPORT_ITEM",
+    ]);
+    expect(expectedFilingSectionKinds("8-K", ["9.01"])).toEqual([]);
+  });
+
+  it("extracts the listed item's text from a primary 8-K document into hash-verifiable passages", () => {
+    const extraction = extractCurrentReportItems(currentReport, ["5.07"]);
+    expect(extraction).toMatchObject({
+      parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+      formType: "8-K",
+      expectedSections: ["CURRENT_REPORT_ITEM"],
+      missingSections: [],
+      missingItems: [],
+      truncatedSections: [],
+    });
+    const item = section(extraction, "CURRENT_REPORT_ITEM");
+    expect(item.label).toBe("Item 5.07");
+    // The heading line holds only the title; the text starts with the event.
+    expect(item.chunks[0].text).toMatch(
+      /^The Company held its annual meeting of shareholders on February 24, 2026\./,
+    );
+    expect(item.chunks[0].text.length).toBeLessThanOrEqual(
+      CURRENT_REPORT_ITEM_LIMITS.targetChunkChars,
+    );
+    const text = sectionText(extraction, "CURRENT_REPORT_ITEM");
+    expect(text).toContain("Proposal 4: Shareholder Proposal");
+    // The cover page and signature block are not item text.
+    expect(text).not.toContain("Check the appropriate box");
+    expect(text).not.toContain("SIGNATURE");
+    expect(text).not.toContain("duly authorized");
+    item.chunks.forEach((chunk, index) => {
+      expect(chunk.ordinal).toBe(index);
+      expect(chunk.text).toBe(
+        extraction.documentText.slice(chunk.passageStart, chunk.passageEnd),
+      );
+      expect(sha256(chunk.text)).toBe(chunk.sha256);
+    });
+  });
+
+  it("splits several items at their \"Item 5.02\" headings, keeps text that shares the heading line, and continues ordinals across items", () => {
+    const html = `<html><body>
+      <div>FORM 8-K</div>
+      <div>CURRENT REPORT</div>
+      <div><b>Item 1.05</b>&#160;&#160;Material Cybersecurity Incidents.</div>
+      <div>On March 3, 2026, the Company detected unauthorized access to an internal system that stores customer contact information. The Company activated its incident response plan and engaged outside experts.</div>
+      <div>The Company has not yet determined whether the incident is reasonably likely to materially affect its financial condition or results of operations.</div>
+      <div>ITEM 5.02. DEPARTURE OF DIRECTORS OR CERTAIN OFFICERS</div>
+      <div>(b) On March 4, 2026, the Chief Financial Officer informed the Company of her decision to retire effective June 30, 2026.</div>
+      <div>Item 8.01 Other Events. On March 5, 2026, the Board of Directors declared a quarterly cash dividend of $0.27 per share.</div>
+      <div>Item 9.01 Financial Statements and Exhibits.</div>
+      <div>(d) Exhibits. 99.1 Press release dated March 5, 2026.</div>
+      <div>SIGNATURES</div>
+      <div>Pursuant to the requirements of the Securities Exchange Act of 1934 the registrant has duly caused this report to be signed.</div>
+    </body></html>`;
+    const extraction = extractCurrentReportItems(html, ["1.05", "5.02", "7.01", "8.01", "9.01"]);
+    expect(extraction.sections.map((item) => item.label)).toEqual([
+      "Item 1.05",
+      "Item 5.02",
+      "Item 8.01",
+    ]);
+    // Item 7.01 is listed but has no heading: reported, never guessed.
+    expect(extraction.missingItems).toEqual(["7.01"]);
+    expect(extraction.missingSections).toEqual([]);
+    const [cyber, officer, other] = extraction.sections.map((item) =>
+      extraction.documentText.slice(item.start, item.end),
+    );
+    expect(cyber).toMatch(/^On March 3, 2026, the Company detected/);
+    expect(cyber).toContain("has not yet determined");
+    expect(cyber).not.toContain("Chief Financial Officer");
+    expect(officer).toMatch(/^\(b\) On March 4, 2026/);
+    // Text on the heading line itself is item text, not a title.
+    expect(other).toContain("declared a quarterly cash dividend of $0.27 per share");
+    expect(other).not.toContain("Exhibits");
+    const ordinals = extraction.sections.flatMap((item) =>
+      item.chunks.map((chunk) => chunk.ordinal),
+    );
+    expect(ordinals).toEqual(ordinals.map((_, index) => index));
+    expect(extraction.chunkCount).toBe(ordinals.length);
+  });
+
+  it("extracts nothing for a results or exhibit-only filing and reports a document with no listed heading as missing", () => {
+    expect(extractCurrentReportItems(currentReport, ["2.02", "9.01"])).toMatchObject({
+      expectedSections: [],
+      sections: [],
+      missingSections: [],
+    });
+    expect(extractCurrentReportItems(currentReport, ["5.02"])).toMatchObject({
+      expectedSections: ["CURRENT_REPORT_ITEM"],
+      sections: [],
+      missingSections: ["CURRENT_REPORT_ITEM"],
+      missingItems: ["5.02"],
+      chunkCount: 0,
+    });
   });
 });

@@ -366,7 +366,7 @@ describe("M31 filing document fetch queueing", () => {
   });
 });
 
-describe("M32 current-report exhibit fetch queueing", () => {
+describe("M32 current-report fetch queueing", () => {
   const enabled = {
     NODE_ENV: "test",
     BACKGROUND_JOBS_ENABLED: "true",
@@ -381,6 +381,23 @@ describe("M32 current-report exhibit fetch queueing", () => {
       accessionNumber: "0000320193-26-000061",
       formType: "8-K",
       primaryDocument: "aapl-20260730.htm",
+      itemCodes: ["2.02", "9.01"],
+      extraction: null,
+    },
+    {
+      id: "filing-8k-officer",
+      accessionNumber: "0000320193-26-000050",
+      formType: "8-K",
+      primaryDocument: "aapl-20260601.htm",
+      itemCodes: ["5.02"],
+      extraction: null,
+    },
+    {
+      id: "filing-8k-exhibits-only",
+      accessionNumber: "0000320193-26-000048",
+      formType: "8-K",
+      primaryDocument: "aapl-20260515.htm",
+      itemCodes: ["9.01"],
       extraction: null,
     },
     {
@@ -388,6 +405,7 @@ describe("M32 current-report exhibit fetch queueing", () => {
       accessionNumber: "0000320193-26-000044",
       formType: "8-K",
       primaryDocument: "aapl-20260430.htm",
+      itemCodes: ["2.02", "9.01"],
       extraction: {
         status: "COMPLETED",
         parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
@@ -399,6 +417,7 @@ describe("M32 current-report exhibit fetch queueing", () => {
       accessionNumber: "0000320193-26-000010",
       formType: "8-K",
       primaryDocument: "aapl-20260129.htm",
+      itemCodes: ["2.02", "9.01"],
       extraction: {
         status: "FAILED",
         parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
@@ -407,8 +426,15 @@ describe("M32 current-report exhibit fetch queueing", () => {
     },
   ];
 
-  it("queues one parser-versioned exhibit fetch per results 8-K in the window that is not current, and no 10-K or 10-Q work while filing text is off", async () => {
-    mocks.findFilings.mockResolvedValue(reports);
+  it("queues one parser-versioned fetch per 8-K in the window that is not current and has item text or an exhibit, and no 10-K or 10-Q work while filing text is off", async () => {
+    // The newest-reports query and the results-filing query overlap; each
+    // filing is queued once.
+    mocks.findFilings.mockImplementation(
+      async (args: { where: { itemCodes?: unknown } }) =>
+        args.where.itemCodes
+          ? reports.filter((report) => report.itemCodes.includes("2.02"))
+          : reports,
+    );
     const publisher = { publishJSON: vi.fn() };
 
     const result = await queueSecFilingDocumentFetches({
@@ -427,6 +453,12 @@ describe("M32 current-report exhibit fetch queueing", () => {
           accessionNumber: "0000320193-26-000061",
           reused: false,
         },
+        {
+          jobId: "job-a",
+          formType: "8-K",
+          accessionNumber: "0000320193-26-000050",
+          reused: false,
+        },
       ],
       current: [
         {
@@ -441,21 +473,24 @@ describe("M32 current-report exhibit fetch queueing", () => {
         },
       ],
     });
-    expect(mocks.findFilings).toHaveBeenCalledTimes(1);
+    const window = {
+      secEntity: { cik: "0000320193" },
+      formType: "8-K",
+      isAmendment: false,
+      filingDate: { gte: new Date("2025-09-12T00:00:00.000Z") },
+      primaryDocument: { not: null },
+    };
+    expect(mocks.findFilings).toHaveBeenCalledTimes(2);
+    expect(mocks.findFilings).toHaveBeenCalledWith(
+      expect.objectContaining({ where: window, take: 12 }),
+    );
     expect(mocks.findFilings).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          secEntity: { cik: "0000320193" },
-          formType: "8-K",
-          isAmendment: false,
-          itemCodes: { has: "2.02" },
-          filingDate: { gte: new Date("2025-09-12T00:00:00.000Z") },
-          primaryDocument: { not: null },
-        },
+        where: { ...window, itemCodes: { has: "2.02" } },
         take: 12,
       }),
     );
-    expect(mocks.enqueueBackgroundJob).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueBackgroundJob).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueBackgroundJob).toHaveBeenCalledWith(
       {
         type: BackgroundJobType.SEC_FILING_FETCH,
@@ -497,8 +532,9 @@ describe("M32 current-report exhibit fetch queueing", () => {
     expect(result.queued.map((job) => [job.formType, job.accessionNumber])).toEqual([
       ["10-Q", "0000320193-26-000060"],
       ["8-K", "0000320193-26-000061"],
+      ["8-K", "0000320193-26-000050"],
     ]);
-    expect(mocks.findFilings).toHaveBeenCalledTimes(2);
+    expect(mocks.findFilings).toHaveBeenCalledTimes(3);
   });
 
   it("hands the job environment to fact ingestion so 8-K metadata retention follows the same flag", async () => {

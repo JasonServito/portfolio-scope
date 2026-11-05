@@ -75,6 +75,10 @@ const pressRelease = readFileSync(
   join(fixtureDirectory, "aapl-8k-ex991-press-release-clipped.htm"),
   "utf8",
 );
+const primaryDocument = readFileSync(
+  join(fixtureDirectory, "aapl-8k-primary-document-clipped.htm"),
+  "utf8",
+);
 const exhibitName = "a8-kex991q3202506282025.htm";
 const indexWithoutExhibit = indexPage.replace(
   /<tr>\s*<td scope="row">2<\/td>[\s\S]*?<\/tr>/,
@@ -170,7 +174,9 @@ const client = {
           ? report.index
           : document === exhibitName
             ? pressRelease
-            : null;
+            : document === report.primaryDocument
+              ? primaryDocument
+              : null;
       if (body === null) {
         throw new SecClientError(
           SecClientErrorCode.REQUEST_REJECTED,
@@ -387,7 +393,11 @@ async function cleanup() {
       where: {
         secEntityId,
         kind: "FILING_DOCUMENT",
-        sha256: sha256(new TextEncoder().encode(pressRelease)),
+        sha256: {
+          in: [pressRelease, primaryDocument].map((body) =>
+            sha256(new TextEncoder().encode(body)),
+          ),
+        },
       },
     });
   }
@@ -612,7 +622,7 @@ describe("M32 current-report ingestion", () => {
     ).resolves.toBe(1);
   });
 
-  it("records an explicit missing state when the index lists no press release or the 8-K is not a results filing", async () => {
+  it("records an explicit missing state when the index lists no press release, and reads a non-results 8-K's item text from its primary document", async () => {
     await expect(fetchReport(reports.withoutExhibit)).rejects.toMatchObject({
       code: "SEC_FILING_EXHIBIT_NOT_FOUND",
       retryable: false,
@@ -631,27 +641,139 @@ describe("M32 current-report ingestion", () => {
       errorCode: "SEC_FILING_EXHIBIT_NOT_FOUND",
     });
 
-    await expect(fetchReport(reports.vote)).rejects.toMatchObject({
-      code: "SEC_FILING_EXHIBIT_NOT_EXPECTED",
-      retryable: false,
-    });
-    await expect(
-      db.secFilingExtraction.findUniqueOrThrow({
-        where: { filingId: reports.vote.id },
-      }),
-    ).resolves.toMatchObject({
-      status: "FAILED",
-      errorCode: "SEC_FILING_EXHIBIT_NOT_EXPECTED",
-      rawSourceId: null,
+    // Item 5.07 has text and no exhibit to read: only the primary document
+    // is fetched, and its passages carry that document's raw source.
+    const vote = await fetchReport(reports.vote);
+    expect(vote).toMatchObject({
+      formType: "8-K",
+      document: reports.vote.primaryDocument,
+      documents: [reports.vote.primaryDocument],
+      extractionStatus: "COMPLETED",
+      parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+      extractedSections: ["CURRENT_REPORT_ITEM"],
+      missingSections: [],
     });
     expect(
-      client.getFilingDocument.mock.calls.filter(
-        (call) => call[1] === reports.vote.accessionNumber,
+      client.getFilingDocument.mock.calls
+        .filter((call) => call[1] === reports.vote.accessionNumber)
+        .map((call) => call[2]),
+    ).toEqual([reports.vote.primaryDocument]);
+    const voteChunks = await db.secFilingChunk.findMany({
+      where: { filingId: reports.vote.id },
+      orderBy: { ordinal: "asc" },
+    });
+    expect(voteChunks.length).toBe(vote.chunkCount);
+    for (const chunk of voteChunks) {
+      expect(chunk).toMatchObject({
+        sectionKind: "CURRENT_REPORT_ITEM",
+        sectionLabel: "Item 5.07",
+        rawSourceId: vote.rawSourceId,
+      });
+      expect(sha256(chunk.text)).toBe(chunk.sha256);
+    }
+    expect(voteChunks[0].text).toMatch(/^The Company held its annual meeting/);
+    await expect(
+      db.secRawSource.findUniqueOrThrow({ where: { id: vote.rawSourceId } }),
+    ).resolves.toMatchObject({
+      sourceUrl: buildSecFilingUrl(
+        apple.cik,
+        reports.vote.accessionNumber,
+        reports.vote.primaryDocument,
       ),
-    ).toHaveLength(0);
+      sha256: sha256(new TextEncoder().encode(primaryDocument)),
+    });
   });
 
-  it("queues one exhibit fetch per results 8-K in the window that is not current, and none for amendments, other items, or older filings", async () => {
+  it("reads both documents of an 8-K with a results item and item text, keeping each passage's own raw source, and keeps the item text when the exhibit is missing", async () => {
+    const mixed = {
+      ...reports.vote,
+      id: `${prefix}-8k-mixed`,
+      accessionNumber: `0000320193-77-${suffix}`,
+      filingDate: "2099-05-25",
+      itemCodes: ["2.02", "5.07", "9.01"],
+      index: indexPage,
+    };
+    const create = (report: typeof mixed) =>
+      db.secFiling.create({
+        data: {
+          id: report.id,
+          secEntityId,
+          accessionNumber: report.accessionNumber,
+          formType: "8-K",
+          filingDate: new Date(`${report.filingDate}T00:00:00.000Z`),
+          reportDate: new Date(`${report.filingDate}T00:00:00.000Z`),
+          primaryDocument: report.primaryDocument,
+          sourceUrl: buildSecFilingIndexUrl(apple.cik, report.accessionNumber),
+          itemCodes: report.itemCodes,
+        },
+      });
+    const served = reports as unknown as Record<string, typeof mixed>;
+    served.mixed = mixed;
+    try {
+      await create(mixed);
+      const both = await fetchReport(mixed);
+      expect(both).toMatchObject({
+        extractionStatus: "COMPLETED",
+        document: mixed.primaryDocument,
+        documents: [mixed.primaryDocument, exhibitName],
+        extractedSections: ["CURRENT_REPORT_ITEM", "PRESS_RELEASE"],
+        missingSections: [],
+      });
+      const chunks = await db.secFilingChunk.findMany({
+        where: { filingId: mixed.id },
+        include: { rawSource: { select: { sourceUrl: true } } },
+      });
+      const sources = (kind: string) => [
+        ...new Set(
+          chunks
+            .filter((chunk) => chunk.sectionKind === kind)
+            .map((chunk) => chunk.rawSource.sourceUrl),
+        ),
+      ];
+      expect(sources("CURRENT_REPORT_ITEM")).toEqual([
+        buildSecFilingUrl(apple.cik, mixed.accessionNumber, mixed.primaryDocument),
+      ]);
+      expect(sources("PRESS_RELEASE")).toEqual([
+        buildSecFilingUrl(apple.cik, mixed.accessionNumber, exhibitName),
+      ]);
+
+      const missing = {
+        ...mixed,
+        id: `${prefix}-8k-mixed-no-exhibit`,
+        accessionNumber: `0000320193-76-${suffix}`,
+        index: indexWithoutExhibit,
+      };
+      served.missing = missing;
+      await create(missing);
+      const partial = await fetchReport(missing);
+      expect(partial).toMatchObject({
+        extractionStatus: "PARTIALLY_COMPLETED",
+        documents: [missing.primaryDocument],
+        extractedSections: ["CURRENT_REPORT_ITEM"],
+        missingSections: ["PRESS_RELEASE"],
+      });
+      await expect(
+        db.secFilingExtraction.findUniqueOrThrow({ where: { filingId: missing.id } }),
+      ).resolves.toMatchObject({
+        status: "PARTIALLY_COMPLETED",
+        expectedSections: ["CURRENT_REPORT_ITEM", "PRESS_RELEASE"],
+        errorCode: "SEC_FILING_EXHIBIT_NOT_FOUND",
+      });
+    } finally {
+      delete served.mixed;
+      delete served.missing;
+      await db.secFiling.deleteMany({
+        where: { id: { in: [mixed.id, `${prefix}-8k-mixed-no-exhibit`] } },
+      });
+      // The fixture documents' bytes are shared with the results and vote
+      // filings, and a content-addressed raw source keeps its latest
+      // retrieval URL, so both are fetched again to restore it.
+      await fetchReport(reports.results);
+      await fetchReport(reports.vote);
+    }
+  });
+
+  it("queues one fetch per 8-K in the window that is not current, and none for amendments or older filings", async () => {
     const result = await queueSecFilingDocumentFetches({
       ticker: apple.ticker,
       correlationId: `${prefix}-correlation`,
@@ -676,9 +798,14 @@ describe("M32 current-report ingestion", () => {
           accessionNumber: reports.withoutExhibit.accessionNumber,
           status: "FAILED",
         },
+        {
+          formType: "8-K",
+          accessionNumber: reports.vote.accessionNumber,
+          status: "COMPLETED",
+        },
       ]),
     );
-    expect(result.current).toHaveLength(2);
+    expect(result.current).toHaveLength(3);
     const job = await db.backgroundJob.findUniqueOrThrow({
       where: { id: result.queued[0].jobId },
     });
@@ -778,6 +905,23 @@ describe("M32 current-report ingestion", () => {
       expect(passage.sourceUrl).toBe(
         buildSecFilingUrl(apple.cik, reports.results.accessionNumber, exhibitName),
       );
+    }
+    // Item text reaches research through the repository with the primary
+    // document's own provenance, not the extraction's.
+    const itemPassages = snapshot.evidence.filter(
+      (item) => item.metadata.sectionKind === "CURRENT_REPORT_ITEM",
+    );
+    expect(itemPassages.length).toBeGreaterThan(0);
+    for (const passage of itemPassages) {
+      expect(passage).toMatchObject({
+        secFilingId: reports.vote.id,
+        section: "Item 5.07",
+        sourceUrl: buildSecFilingUrl(
+          apple.cik,
+          reports.vote.accessionNumber,
+          reports.vote.primaryDocument,
+        ),
+      });
     }
     expect(
       snapshot.evidence.some((item) => item.secFilingId === reports.old.id),

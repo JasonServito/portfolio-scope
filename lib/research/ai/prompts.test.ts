@@ -103,7 +103,7 @@ describe("AI research prompts", () => {
     const [companyRisks, leverage, liquidity] =
       SPECIALIST_RESEARCH_QUESTIONS.RISK;
     expect(companyRisks).toMatch(/^Company risks: .*company-specific risks/);
-    expect(companyRisks).toContain("10-K Item 1A Risk Factors");
+    expect(companyRisks).toContain("Item 1A Risk Factors (10-K or 10-Q update)");
     expect(companyRisks).toContain(
       "including any regulatory, governance, or political exposure",
     );
