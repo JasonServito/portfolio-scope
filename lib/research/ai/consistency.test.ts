@@ -141,10 +141,10 @@ describe("numeric agreement with cited excerpts", () => {
     const byId = new Map([[supporting.id, supporting]]);
     expect(
       unsupportedNumericTokens(
-        claim({ statement: "Revenue was 391 billion USD." }),
+        claim({ statement: "Revenue was 391 million USD." }),
         byId,
       ),
-    ).toEqual(["391billion"]);
+    ).toEqual(["391million"]);
     expect(
       unsupportedNumericTokens(
         claim({ statement: "Revenue grew 30 percent." }),
@@ -154,6 +154,59 @@ describe("numeric agreement with cited excerpts", () => {
     expect(
       unsupportedNumericTokens(claim({ evidenceIds: ["ev_missing"] }), byId),
     ).toHaveLength(3);
+  });
+});
+
+describe("rounded restatements of cited values", () => {
+  const facts = evidence(
+    "ev_r",
+    "Long-term debt: 71,340,000,000 USD. Derived net cash at 2026-06-27: -31,796,000,000 USD. Long-term debt-to-equity: 0.66. Current ratio: 1.872. Revenue growth: 16.4 percent. Diluted EPS: 1.57 USD per share. Services revenue of $27.4 billion.",
+  );
+  const byId = new Map([[facts.id, facts]]);
+  const unsupported = (statement: string) =>
+    unsupportedNumericTokens(
+      claim({ statement, evidenceIds: [facts.id] }),
+      byId,
+    );
+
+  it("accepts a correct rounding at the stated precision and scale", () => {
+    expect(unsupported("Long-term debt was $71.3 billion.")).toEqual([]);
+    expect(unsupported("Long-term debt was about $71 billion.")).toEqual([]);
+    expect(unsupported("Long-term debt was 71,340 million USD.")).toEqual([]);
+    expect(unsupported("Net cash was -$31.8 billion at 2026-06-27.")).toEqual(
+      [],
+    );
+    expect(unsupported("The current ratio was 1.87, or about 1.9.")).toEqual(
+      [],
+    );
+    expect(unsupported("Revenue grew 16 percent.")).toEqual([]);
+    expect(unsupported("Diluted EPS was $1.6 per share.")).toEqual([]);
+  });
+
+  it("rejects a wrong rounding, scale, sign, or unit", () => {
+    expect(unsupported("Long-term debt was $71.4 billion.")).toEqual([
+      "71.4billion",
+    ]);
+    expect(unsupported("Long-term debt was $71.3 million.")).toEqual([
+      "71.3million",
+    ]);
+    expect(unsupported("Net debt was $31.8 billion.")).toEqual(["31.8billion"]);
+    expect(unsupported("Revenue grew 16.4 times.")).toEqual(["16.4"]);
+    expect(unsupported("Revenue grew 16.")).toEqual(["16"]);
+    expect(unsupported("Debt-to-equity was 66 percent.")).toEqual(["66%"]);
+  });
+
+  it("rejects coarse roundings and never adds precision", () => {
+    expect(unsupported("Debt-to-equity was about 0.7.")).toEqual(["0.7"]);
+    expect(unsupported("Long-term debt was about $70 billion.")).toEqual([
+      "70billion",
+    ]);
+    expect(unsupported("Services revenue was $27.43 billion.")).toEqual([
+      "27.43billion",
+    ]);
+    expect(unsupported("Services revenue was 27,430,000,000 USD.")).toEqual([
+      "27430000000",
+    ]);
   });
 });
 
