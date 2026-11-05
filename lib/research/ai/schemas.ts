@@ -128,7 +128,8 @@ const forbiddenPersonalAllocation =
 const forbiddenStockPriceTarget =
   /\b(?:price\s+target|target\s+price)\b|\bfair\s+value\s+(?:is|would\s+be|could\s+be|of)\s+[$€£]?\s*\d[\d,.]*\s+per\s+share\b/i;
 const forbiddenStockPricePredictions = [
-  /\b(?:stocks?|(?<!per\s)shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
+  // A share count ("diluted shares would fall") is not a share price.
+  /\b(?:stocks?|(?<!per\s|(?:diluted|basic|weighted[- ]average)\s)shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
   /\b(?:stock|share)\s+price\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|increase|decrease|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
   /\b(?:stocks?|shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:increase|decrease)\s+(?:in\s+(?:price|value)|to\s+[$€£]?\d)\b/i,
   /(?:^|[.!?]\s+|")\s*(?:the\s+)?price\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|increase|decrease|reach|hit|trade(?:\s+at)?|be\s+worth)\b/i,
@@ -141,7 +142,14 @@ const forbiddenStockPricePredictions = [
 export class ModelOutputSafetyError extends Error {
   readonly code = "AI_UNSAFE_OUTPUT";
 
-  constructor(message: string) {
+  /**
+   * repairDetail quotes the flagged model text for the repair request only;
+   * it is never logged.
+   */
+  constructor(
+    message: string,
+    readonly repairDetail: string | null = null,
+  ) {
     super(message);
     this.name = "ModelOutputSafetyError";
   }
@@ -224,6 +232,25 @@ export function getModelOutputSafetyIssue(output: unknown) {
     )
   ) {
     return "The generated output contained a prohibited stock-price target or prediction.";
+  }
+  return null;
+}
+
+const SAFETY_PATTERNS = [
+  ...forbiddenRecommendations,
+  forbiddenPersonalContext,
+  forbiddenPersonalAllocation,
+  forbiddenStockPriceTarget,
+  ...forbiddenStockPricePredictions,
+];
+
+/** The first model phrase a safety pattern matched, so a repair can reword it. */
+function flaggedSafetyPhrase(output: unknown) {
+  for (const value of collectStringLeaves(output)) {
+    for (const pattern of SAFETY_PATTERNS) {
+      const match = value.match(pattern);
+      if (match) return match[0].trim().slice(0, 120);
+    }
   }
   return null;
 }
@@ -311,7 +338,9 @@ export function validateGroundedOutput<T extends GroundedModelOutput>(
 ) {
   const allowed = new Set(evidence.map((item) => item.id));
   const safetyIssue = getModelOutputSafetyIssue(output);
-  if (safetyIssue) throw new ModelOutputSafetyError(safetyIssue);
+  if (safetyIssue) {
+    throw new ModelOutputSafetyError(safetyIssue, flaggedSafetyPhrase(output));
+  }
 
   const claimKeys = new Set<string>();
   for (const claim of output.claims) {
