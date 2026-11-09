@@ -152,6 +152,14 @@ export async function getOwnedPortfolioAnalytics(
   return getPortfolioAnalytics({ id: portfolioId, userId }, period);
 }
 
+export async function getOwnedPortfolioAnalyticsByPeriods(
+  userId: string,
+  portfolioId: string,
+  periods: ReadonlyArray<PerformancePeriod>,
+): Promise<Array<PortfolioAnalytics | null>> {
+  return getPortfolioAnalyticsByPeriods({ id: portfolioId, userId }, periods);
+}
+
 async function getPortfolioAnalytics(
   where: Prisma.PortfolioWhereInput,
   period: PerformancePeriod,

@@ -1,4 +1,11 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+
+import { themeScript } from "@/lib/theme";
+
+// Prerendered pages carry no nonce, so the inline theme script is allowed by
+// its hash instead.
+const themeScriptHash = `'sha256-${createHash("sha256").update(themeScript).digest("base64")}'`;
 
 const safeIdentifier = /^[A-Za-z0-9._:-]{8,128}$/;
 const maintenanceExclusions = [
@@ -25,12 +32,12 @@ function contentSecurityPolicy(value: string) {
   const development = process.env.NODE_ENV !== "production";
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${value}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""} https://s3.tradingview.com https://*.tradingview.com https://*.posthog.com`,
+    `script-src 'self' 'nonce-${value}' ${themeScriptHash} 'strict-dynamic'${development ? " 'unsafe-eval'" : ""} https://s3.tradingview.com https://*.tradingview.com https://*.posthog.com`,
     "style-src 'self' 'unsafe-inline' https://*.tradingview.com",
     "img-src 'self' blob: data: https:",
     "font-src 'self' data:",
     "connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io https://*.posthog.com https://*.tradingview.com wss://*.tradingview.com",
-    "frame-src https://s.tradingview.com https://*.tradingview.com",
+    "frame-src https://s.tradingview.com https://*.tradingview.com https://www.tradingview-widget.com",
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

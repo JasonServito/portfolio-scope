@@ -8,7 +8,11 @@ vi.mock("next/navigation", () => ({
 vi.stubGlobal("React", React);
 
 import { PrivateAlerts } from "@/components/alerts/private-alerts";
-import { PrivatePortfolioManager } from "@/components/portfolios/private-portfolio-manager";
+import { AddHoldingForm } from "@/components/holdings/holding-actions";
+import {
+  CreatePortfolioForm,
+  PortfolioNameForm,
+} from "@/components/portfolios/portfolio-forms";
 import { AuthenticatedPageLoading } from "@/components/ui/authenticated-page-loading";
 import { WatchlistManager } from "@/components/watchlist/watchlist-manager";
 
@@ -45,19 +49,20 @@ describe("authenticated management states", () => {
     expect(markup).toContain("Remove AAPL");
   });
 
-  it("renders portfolio creation controls and a clear holdings empty state", () => {
+  it("renders single-portfolio create, rename, and add-holding controls", () => {
     const markup = renderToStaticMarkup(
-      <PrivatePortfolioManager
-        holdings={[]}
-        id="portfolio-a"
-        initialBaseCurrency="USD"
-        initialName="Long term"
-      />,
+      <>
+        <CreatePortfolioForm />
+        <PortfolioNameForm initialName="Long term" portfolioId="portfolio-a" />
+        <AddHoldingForm portfolioId="portfolio-a" tickers={["AAPL", "MSFT"]} />
+      </>,
     );
 
-    expect(markup).toContain("Portfolio settings");
-    expect(markup).toContain("Add a holding");
-    expect(markup).toContain("This portfolio has no holdings yet.");
+    expect(markup).toContain("Create portfolio");
+    expect(markup).not.toContain("Base currency");
+    expect(markup).toContain('value="Long term"');
+    expect(markup).toContain("Save name");
+    expect(markup).toContain("Add holding");
   });
 
   it("renders a clear alert empty state", () => {

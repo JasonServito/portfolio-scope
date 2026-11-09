@@ -1,110 +1,116 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
+import { ArrowRight } from "lucide-react";
 
 import { AnalyticsEvent } from "@/components/analytics/analytics-event";
+import { DashboardOverview } from "@/components/dashboard/dashboard-overview";
 import { PageShell } from "@/components/layout/page-shell";
-import { PortfolioManager } from "@/components/portfolios/portfolio-manager";
-import { Card, CardContent } from "@/components/ui/card";
+import { CreatePortfolioForm } from "@/components/portfolios/portfolio-forms";
 import { AuthenticatedPageLoading } from "@/components/ui/authenticated-page-loading";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { DataState } from "@/components/ui/data-state";
 import { requireUser } from "@/lib/auth/session";
-import { listUserAlerts } from "@/lib/portfolio/alerts-service";
-import { getUserWatchlist, listPortfolios } from "@/lib/portfolio/management";
+import { getOwnedDashboardData } from "@/lib/portfolio/dashboard-data";
+import { getPrimaryPortfolio } from "@/lib/portfolio/management";
+import { getSelectedPeriod } from "@/lib/portfolio/performance";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
-export default function PrivateWorkspacePage() {
+type PrivateWorkspacePageProps = {
+  searchParams?: Promise<{ period?: string | string[] }>;
+};
+
+export default function PrivateWorkspacePage({
+  searchParams,
+}: PrivateWorkspacePageProps) {
   return (
     <Suspense fallback={<AuthenticatedPageLoading />}>
-      <PrivateDashboardContent />
+      <PrivateDashboardContent searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function PrivateDashboardContent() {
+async function PrivateDashboardContent({
+  searchParams,
+}: PrivateWorkspacePageProps) {
   const user = await requireUser("/app");
-  const [portfolios, watchlist, alerts] = await Promise.all([
-    listPortfolios(user.id),
-    getUserWatchlist(user.id),
-    listUserAlerts(user.id, { reconcileTargetCrossings: false }),
+  const [portfolio, params] = await Promise.all([
+    getPrimaryPortfolio(user.id),
+    searchParams,
   ]);
-  const activeAlertCount = alerts.filter(
-    (alert) => alert.status === "ACTIVE",
-  ).length;
+  const data = portfolio
+    ? await getOwnedDashboardData(
+        user.id,
+        portfolio.id,
+        getSelectedPeriod(params?.period),
+      )
+    : null;
 
   return (
     <PageShell
-      description="Manage your portfolios, follow stocks, and review alerts in one place"
-      eyebrow={user.name ? `${user.name} · Your account` : "Your account"}
+      actions={
+        data?.analytics ? (
+          <Link
+            className={buttonVariants()}
+            href="/app/holdings"
+            prefetch={false}
+          >
+            Inspect holdings
+            <ArrowRight className="size-4" />
+          </Link>
+        ) : undefined
+      }
+      description="What your portfolio is worth, how it moved, and which positions need a closer look"
+      eyebrow={
+        portfolio ? `${portfolio.name} · Your portfolio` : "Your account"
+      }
       title="Dashboard"
     >
       <AnalyticsEvent name="sign_in_completed" oncePerSession properties={{}} />
-      <section className="grid gap-4 md:grid-cols-3">
-        <StatusCard
-          count={portfolios.length}
-          description="Create portfolios and keep their holdings organized"
-          title="Portfolios"
+      {!portfolio ? (
+        <Card>
+          <CardContent>
+            <DataState
+              action={<CreatePortfolioForm />}
+              description="Name your portfolio, then add the stocks you own to see its value, returns, and allocation here."
+              kind="empty"
+              title="Create your portfolio"
+            />
+          </CardContent>
+        </Card>
+      ) : !data?.analytics ? (
+        <Card>
+          <CardContent>
+            <DataState
+              action={
+                <Link
+                  className={buttonVariants()}
+                  href="/app/holdings"
+                  prefetch={false}
+                >
+                  Add holdings
+                  <ArrowRight className="size-4" />
+                </Link>
+              }
+              description="Add the stocks you own, with shares and average cost, to see what the portfolio is worth and how it moved."
+              kind="empty"
+              title="Your portfolio has no holdings yet"
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <DashboardOverview
+          activeAlertCount={data.activeAlertCount}
+          alerts={data.alerts}
+          alertsEmptyMessage="No active alerts for your portfolio."
+          alertsHref="/app/alerts"
+          analytics={data.analytics}
+          asOfNote="Your holdings at cached sample prices"
+          periodBasePath="/app"
         />
-        <StatusCard
-          count={watchlist.length}
-          description="A short list of companies you want to follow"
-          href="/app/watchlist"
-          linkLabel="Open watchlist"
-          title="Watchlist"
-        />
-        <StatusCard
-          count={activeAlertCount}
-          description="Portfolio and stock signals that may need attention"
-          href="/app/alerts"
-          linkLabel="Review alerts"
-          title="Active alerts"
-        />
-      </section>
-
-      <PortfolioManager
-        portfolios={portfolios.map((portfolio) => ({
-          id: portfolio.id,
-          name: portfolio.name,
-          baseCurrency: portfolio.baseCurrency,
-          holdingCount: portfolio._count.holdings,
-          updatedAt: portfolio.updatedAt.toISOString(),
-        }))}
-      />
+      )}
     </PageShell>
-  );
-}
-
-function StatusCard({
-  count,
-  description,
-  href,
-  linkLabel,
-  title,
-}: {
-  count: number;
-  description: string;
-  href?: string;
-  linkLabel?: string;
-  title: string;
-}) {
-  return (
-    <Card>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">{title}</p>
-        <p className="mt-2 text-[28px] leading-none font-medium tabular-nums">
-          {count}
-        </p>
-        <p className="mt-3 text-sm text-muted-foreground">{description}</p>
-        {href && linkLabel ? (
-          <Link
-            className="mt-3 inline-flex text-sm font-medium text-primary hover:underline"
-            href={href}
-            prefetch={false}
-          >
-            {linkLabel}
-          </Link>
-        ) : null}
-      </CardContent>
-    </Card>
   );
 }

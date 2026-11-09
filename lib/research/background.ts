@@ -234,11 +234,27 @@ function missingExternalSpecialist(
   };
 }
 
+// Specialist gap text also reaches the synthesis prompt, so it names "this
+// application" rather than the product: model input stays free of the word
+// the private-data checks search for.
 function publicDataGap(agentName: SpecialistAgentName) {
   if (agentName === "NEWS") {
-    return "No Form 8-K current report from the last twelve months is stored for this company, so recent events are not assessed; third-party news is not used.";
+    return "This application has not collected any Form 8-K current reports for this company from the last twelve months, so recent events are not assessed; third-party news is not used.";
   }
   return "Verified political-activity evidence is not configured for this company.";
+}
+
+// Every AI report states that valuation is out of scope. It is added after
+// synthesis, so it never enters a model prompt.
+export const VALUATION_DATA_GAP =
+  "Valuation is not assessed because PortfolioScope has no licensed share-price data.";
+
+/** The report's missing information with the valuation line last, inside the schema's ten-item limit. */
+function withValuationGap(missingData: readonly string[]) {
+  return [
+    ...missingData.filter((item) => item !== VALUATION_DATA_GAP).slice(0, 9),
+    VALUATION_DATA_GAP,
+  ];
 }
 
 // Plain-language topic names for report text when a specialist is missing.
@@ -1114,10 +1130,14 @@ async function persistExternalReport(input: {
         }
       }
       const originalOutput = input.output;
-      const output =
+      const verifiedOutput =
         input.complete === false
           ? originalOutput
           : applyClaimVerification(originalOutput, verification);
+      const output = {
+        ...verifiedOutput,
+        missingData: withValuationGap(verifiedOutput.missingData),
+      };
       const synthesis = await transaction.agentRun.upsert({
         where: {
           researchJobId_agentName: {

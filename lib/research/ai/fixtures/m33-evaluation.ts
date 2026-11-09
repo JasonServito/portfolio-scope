@@ -1,6 +1,11 @@
 import {
+  AAPL_FIXTURE_CURRENT_REPORTS,
+  findFixtureEvidence,
+} from "./aapl-evidence-snapshot";
+import {
   AAPL_GROUNDED_SYNTHESIS,
   AAPL_RECORDED_SPECIALIST_OUTPUTS,
+  CURATED_AAPL_SNAPSHOT,
   CURATED_RESEARCH_EVIDENCE,
 } from "./curated-evaluation";
 import {
@@ -59,6 +64,32 @@ const narrative = report([
   { ...AAPL_GROUNDED_SYNTHESIS.claims[6], category: "COUNTERPOINT" },
 ]);
 const event = report([AAPL_RECORDED_SPECIALIST_OUTPUTS.NEWS.claims[0]]);
+// A non-results event: the dated 8-K item gives the filing date and item
+// code, and the Item 5.07 text passage says what happened.
+const voteAccession = AAPL_FIXTURE_CURRENT_REPORTS.shareholderVote.accessionNumber;
+const itemEvent = report([
+  {
+    category: "SUPPORTIVE",
+    kind: "FACT",
+    statement:
+      "In a Form 8-K filed 2026-02-26 under Item 5.07, the Company reported that shareholders elected all eight director nominees at its annual meeting on February 24, 2026.",
+    confidence: 0.8,
+    evidenceIds: [
+      findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
+        evidenceType: "SEC_CURRENT_REPORT",
+        accessionNumber: voteAccession,
+      }).id,
+      findFixtureEvidence(CURATED_AAPL_SNAPSHOT, {
+        evidenceType: "SEC_FILING_PASSAGE",
+        accessionNumber: voteAccession,
+        sectionKind: "CURRENT_REPORT_ITEM",
+        chunkOrdinal: 0,
+      }).id,
+    ],
+    counterEvidenceIds: [],
+    assumptions: [],
+  },
+]);
 const partial = report([
   {
     ...narrative.claims[0],
@@ -151,6 +182,15 @@ export const M33_EVALUATION_CASES: VerificationEvaluationCase[] = [
     output: event,
     evidence: CURATED_RESEARCH_EVIDENCE,
     recording: recording(event, "SUPPORTED"),
+    expectedStatuses: ["SUPPORTED"],
+  },
+  {
+    id: "current-report-item-event",
+    reviewNotes:
+      "A non-results 8-K: the dated item supplies the filing date and Item 5.07, and the item-text passage supplies what shareholders decided; both citations are required.",
+    output: itemEvent,
+    evidence: CURATED_RESEARCH_EVIDENCE,
+    recording: recording(itemEvent, "SUPPORTED"),
     expectedStatuses: ["SUPPORTED"],
   },
   {

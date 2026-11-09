@@ -66,7 +66,7 @@ describe("AI research prompts", () => {
   it.each([
     ["FINANCIALS", 6],
     ["COMPETITORS", 5],
-    ["RISK", 6],
+    ["RISK", 4],
     ["NEWS", 5],
   ] as const)(
     "poses the %s specialist's bounded research questions and contract",
@@ -99,9 +99,33 @@ describe("AI research prompts", () => {
     },
   );
 
-  it("routes regulatory, governance, and political exposure to Risk as an evidence-gated question", () => {
-    expect(SPECIALIST_RESEARCH_QUESTIONS.RISK.at(-1)).toMatch(
-      /Regulatory, governance, and political exposure: answer only if supplied evidence/,
+  it("asks Risk for the company's own disclosed risks, never data gaps or share-price effects", () => {
+    const [companyRisks, leverage, liquidity] =
+      SPECIALIST_RESEARCH_QUESTIONS.RISK;
+    expect(companyRisks).toMatch(/^Company risks: .*company-specific risks/);
+    expect(companyRisks).toContain("Item 1A Risk Factors (10-K or 10-Q update)");
+    expect(companyRisks).toContain(
+      "including any regulatory, governance, or political exposure",
+    );
+    expect(companyRisks).toContain("citing its passage");
+    expect(leverage).toMatch(/^Leverage: /);
+    expect(liquidity).toMatch(/^Liquidity: /);
+    const questions = SPECIALIST_RESEARCH_QUESTIONS.RISK.join(" ");
+    expect(questions).not.toMatch(
+      /Evidence quality|Event timing|newest cited filing|missing from/,
+    );
+    const prompt = specialistPrompt({
+      agentName: "RISK",
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      asOfDate: "2026-01-02",
+      evidence: [evidence],
+    });
+    expect(prompt.instructions).toContain(
+      "Describe each business risk itself, never its effect on the stock or share price.",
+    );
+    expect(prompt.instructions).toContain(
+      "Put missing or ambiguous evidence only in missingData; a data gap is never a risk claim.",
     );
     expect(SPECIALIST_RESEARCH_QUESTIONS.NEWS.at(-1)).toContain("NOT_AVAILABLE");
   });
@@ -269,5 +293,51 @@ describe("AI research prompts", () => {
 
     expect(prompt.input).toContain(boundedContext.replace("\n", "\\n"));
     expect(prompt.input).not.toContain(evidence.excerpt);
+  });
+
+  it("forwards to synthesis only the specialist citations synthesis is supplied", () => {
+    // Production AAPL, 2026-11-05: synthesis cited an id it saw only inside a
+    // forwarded specialist claim, because its own evidence budget had not
+    // supplied that item, and the grounding check rejected the output.
+    const unsupplied = { ...evidence, id: "ev_fedcba9876543210" };
+    const prompt = synthesisPrompt({
+      ticker: "AAPL",
+      companyName: "Apple Inc.",
+      asOfDate: "2026-01-02",
+      evidence: [evidence],
+      specialists: [
+        {
+          agentName: "FINANCIALS",
+          output: {
+            rating: "NEUTRAL",
+            confidence: 0.7,
+            availability: "COMPLETE",
+            summary: "Revenue is reported.",
+            claims: [
+              {
+                category: "SUPPORTIVE",
+                kind: "FACT",
+                statement: "Revenue was reported as USD 100 for FY2025.",
+                confidence: 0.8,
+                evidenceIds: [evidence.id, unsupplied.id],
+                counterEvidenceIds: [unsupplied.id],
+                assumptions: [],
+              },
+            ],
+            warnings: [],
+            missingData: [],
+          },
+        },
+      ],
+    });
+    const body = JSON.parse(prompt.input);
+    expect(body.evidence.registry.map((item: { id: string }) => item.id)).toEqual([
+      evidence.id,
+    ]);
+    expect(body.specialists[0].claims[0]).toMatchObject({
+      evidenceIds: [evidence.id],
+      counterEvidenceIds: [],
+    });
+    expect(prompt.input).not.toContain(unsupplied.id);
   });
 });

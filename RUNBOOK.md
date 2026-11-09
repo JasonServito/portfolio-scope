@@ -648,9 +648,60 @@ growth before setting the flag. The flag is independent of
    the remaining companies. A company whose results filings are already
    extracted queues nothing; a new 8-K queues one fetch on the next refresh.
 
+#### 8-K item text and 10-Q risk-factor updates (parser `sec-filing-sections-v2`)
+
+With `SEC_CURRENT_REPORTS_ENABLED`, each 8-K's listed items (other than Item
+2.02, whose body only points at the press release, and Item 9.01, the
+exhibit list) are also read from the primary 8-K document as
+`CURRENT_REPORT_ITEM` passages labelled "Item 5.02", and the Exhibit 99.1 of
+an Item 7.01 or 8.01 filing is read when the index lists one (only a results
+filing must carry it). The queue covers the twelve newest non-amended 8-Ks of
+the window plus every Item 2.02 filing, skipping Item 9.01-only filings. With
+`SEC_FILING_TEXT_ENABLED`, the latest 10-Q's Part II Item 1A risk-factor
+update is extracted as `RISK_FACTORS`; a one-sentence "no material changes"
+update counts as present. No flag or environment variable changes.
+
+Production steps, each needing the owner's approval:
+
+1. Apply the additive migration
+   `20261105120000_sec_current_report_item_text` (one new
+   `SecFilingSectionKind` value, `CURRENT_REPORT_ITEM`; no backfill) with the
+   approved remote procedure (`npm run db:deploy:approved`) before the
+   application that writes it is deployed.
+2. Deploy the application. Stored v1 passages stay readable by research
+   until each filing is re-fetched.
+3. Trigger one ingestion for one ticker (the admin request in step 3 of the
+   SEC section) and follow its `SEC_FILING_FETCH` jobs in `/admin`. The parser
+   bump makes every stored extraction not current, so this one-time re-fetch
+   queues, per company, the latest 10-K and 10-Q and up to 24 8-Ks (at most
+   12 newest plus at most 12 results filings, overlapping in practice), each
+   at most once per six-hour bucket. An 8-K costs one SEC request (primary
+   document) for item text, two (index and exhibit) for an Item 2.02-only
+   filing, and three when it has both. Expect about 20 requests per company
+   (worst case 74), about 500 for all 25 companies (worst case about 1,850),
+   through the same identified client and eight-per-second rate gate; the
+   twice-daily stale-SEC schedule (at most five companies per pass) spreads
+   them over about two and a half days unless ingestion is triggered sooner.
+4. Inspect the state with the step 4 query: 8-K rows show
+   `CURRENT_REPORT_ITEM` and, for results filings, `PRESS_RELEASE`; a results
+   filing whose index lists no exhibit keeps its item text as
+   `PARTIALLY_COMPLETED` with `SEC_FILING_EXHIBIT_NOT_FOUND`.
+5. Record the stored bytes. Re-fetched 10-K, 10-Q, and exhibit documents
+   rewrite their existing content-addressed keys (no new bytes, a few hundred
+   R2 write operations in total). New objects are the primary 8-K documents
+   (typically 30-150 KB) and any Item 7.01 or 8.01 exhibits (50-500 KB):
+   roughly 25-60 MB for 25 companies, well inside the R2 free allowance.
+   PostgreSQL holds at most 60 item passages (about 24 KB) per 8-K. The
+   expected monthly change remains `$0 USD`.
+
 Research uses the stored reports on the next report generation: the News
 specialist lists the newest current reports with their filing dates and
-reports `NOT_AVAILABLE` for a company with none in the window. A job whose
+reports `NOT_AVAILABLE` for a company with none in the window. News receives
+the opening passage of each listed event (press release or item text) that
+fits its unchanged 3,200-character context; Risk receives the 10-Q
+risk-factor update and any Item 1.05, 2.05, 2.06, 3.01, or 4.02 text first,
+from a listed 8-K or one of the two newest unlisted ones, inside its
+unchanged 6,000-character context. A job whose
 snapshot holds current reports runs News as a fourth model call after the
 other three specialists settle. Every specialist call reserves the configured
 per-call output maximum, and input reservations count tokens with the pinned

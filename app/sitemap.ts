@@ -6,7 +6,6 @@ const publicRoutes = [
   "",
   "/privacy",
   "/disclaimer",
-  "/research",
   "/dashboard",
   "/holdings",
   "/watchlist",

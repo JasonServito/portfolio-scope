@@ -43,7 +43,7 @@ export default async function PrivateResearchDetailPage({
           </Link>
         </>
       }
-      description="Check the report's progress, then review its summary, strengths, risks, what to watch, and supporting evidence"
+      description="A short, sourced summary of what the company's latest filings show"
       eyebrow="Owner-only research report"
       title="Research run"
     >

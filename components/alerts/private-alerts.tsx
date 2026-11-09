@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { SeverityLabel } from "@/components/alerts/severity-label";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type PrivateAlert = {
   id: string;
@@ -65,6 +65,13 @@ export function PrivateAlerts({ alerts }: { alerts: PrivateAlert[] }) {
 
   return (
     <Card>
+      <CardHeader>
+        <CardTitle>Target price alerts</CardTitle>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Saved when a watchlist stock crosses the target you set. Resolve one
+          once you have reviewed it.
+        </p>
+      </CardHeader>
       <CardContent>
         {error ? (
           <p className="mb-3 text-sm text-destructive" role="alert">

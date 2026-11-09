@@ -187,6 +187,7 @@ enum SecFilingSectionKind {
   RISK_FACTORS
   MDA
   PRESS_RELEASE
+  CURRENT_REPORT_ITEM
 }
 
 enum SecFilingExtractionStatus {

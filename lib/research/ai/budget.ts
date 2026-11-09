@@ -190,6 +190,20 @@ function serializableBackoffMs(attempt: number) {
   return 10 * attempt + Math.floor(Math.random() * 40);
 }
 
+// The row locks are taken with `$queryRaw ... FOR UPDATE`, and Prisma reports
+// a conflict there as P2010 carrying the PostgreSQL code (40001 serialization
+// failure, 40P01 deadlock) rather than P2034. Left unretried, a conflicting
+// settle stranded its reservation and failed the whole research job.
+function isSerializationConflict(error: unknown) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code === "P2034") return true;
+  const databaseCode = (error.meta as { code?: unknown } | undefined)?.code;
+  return (
+    error.code === "P2010" &&
+    (databaseCode === "40001" || databaseCode === "40P01")
+  );
+}
+
 async function withSerializableRetry<T>(
   database: BudgetDatabase,
   operation: (transaction: Prisma.TransactionClient) => Promise<T>,
@@ -200,10 +214,12 @@ async function withSerializableRetry<T>(
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
     } catch (error) {
-      const retryable =
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2034";
-      if (!retryable || attempt === SERIALIZABLE_ATTEMPTS) throw error;
+      if (
+        !isSerializationConflict(error) ||
+        attempt === SERIALIZABLE_ATTEMPTS
+      ) {
+        throw error;
+      }
       await new Promise((resolve) =>
         setTimeout(resolve, serializableBackoffMs(attempt)),
       );

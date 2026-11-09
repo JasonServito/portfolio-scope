@@ -20,6 +20,8 @@ import {
 import { getSupportedCompany } from "@/lib/sec/company-registry";
 import {
   CURRENT_REPORT_FORM_TYPE,
+  currentReportReadsExhibit,
+  currentReportTextItemCodes,
   currentReportWindowStart,
   findExhibitDocument,
   PRESS_RELEASE_EXHIBIT_TYPE,
@@ -28,9 +30,12 @@ import {
 import {
   decodeFilingDocument,
   expectedFilingSectionKinds,
+  extractCurrentReportItems,
   extractFilingSections,
   FILING_TEXT_FORM_TYPES,
   SEC_FILING_SECTION_PARSER_VERSION,
+  type FilingSectionExtraction,
+  type FilingSectionKind,
 } from "@/lib/sec/filing-sections";
 import {
   SecIngestionError,
@@ -53,8 +58,10 @@ const DETERMINISTIC_EXTRACTION_ERROR_CODES = new Set([
   "SEC_FILING_EXHIBIT_NOT_FOUND",
   "SEC_FILING_EXHIBIT_NOT_EXPECTED",
 ]);
-// Item 2.02 results filings in a twelve-month window; a company files about
-// four, and the bound keeps one refresh from queueing an unusual backlog.
+// Per query of the twelve-month window: the newest 8-Ks of any item, and
+// every Item 2.02 results filing (about four a year). Research lists only
+// the newest four reports plus the newest results filing, so the bound keeps
+// one refresh from queueing an unusual backlog.
 const MAX_CURRENT_REPORT_FETCHES = 12;
 
 type FetchCandidate = {
@@ -62,6 +69,7 @@ type FetchCandidate = {
   accessionNumber: string;
   formType: string;
   primaryDocument: string | null;
+  itemCodes: string[];
   extraction: {
     status: SecFilingExtractionStatus;
     parserVersion: string;
@@ -121,8 +129,10 @@ export async function queueSecIngestion(
 /**
  * Queues one `SEC_FILING_FETCH` job for each filing whose passages are not
  * current: the latest 10-K and the latest 10-Q when `SEC_FILING_TEXT_ENABLED`
- * is set (M31), and every Item 2.02 results 8-K filed in the last twelve
- * months when `SEC_CURRENT_REPORTS_ENABLED` is set (M32). "Not current" means
+ * is set (M31), and, when `SEC_CURRENT_REPORTS_ENABLED` is set (M32), the
+ * twelve newest 8-Ks of the last twelve months plus every Item 2.02 results
+ * 8-K of that window, skipping any whose items carry neither text nor an
+ * exhibit to read (an Item 9.01-only filing). "Not current" means
  * no extraction with the current parser version, or a failed one whose error
  * was transient (fetch or storage). Jobs are keyed per filing, parser
  * version, and six-hour bucket, so a refresh that finds every filing current
@@ -168,6 +178,7 @@ export async function queueSecFilingDocumentFetches(input: {
     accessionNumber: true,
     formType: true,
     primaryDocument: true,
+    itemCodes: true,
     extraction: {
       select: { status: true, parserVersion: true, errorCode: true },
     },
@@ -194,23 +205,37 @@ export async function queueSecFilingDocumentFetches(input: {
     }
   }
   if (currentReports) {
-    // Every results filing in the window is fetched, newest first; an
-    // amendment is kept as metadata only and never fetched.
-    candidates.push(
-      ...(await db.secFiling.findMany({
-        where: {
-          secEntity: { cik: supported.cik },
-          formType: CURRENT_REPORT_FORM_TYPE,
-          isAmendment: false,
-          itemCodes: { has: RESULTS_ITEM_CODE },
-          filingDate: { gte: currentReportWindowStart(now) },
-          primaryDocument: { not: null },
-        },
+    // The newest reports of any item and every results filing in the window,
+    // newest first; an amendment is kept as metadata only and never fetched.
+    const window = {
+      secEntity: { cik: supported.cik },
+      formType: CURRENT_REPORT_FORM_TYPE,
+      isAmendment: false,
+      filingDate: { gte: currentReportWindowStart(now) },
+      primaryDocument: { not: null },
+    };
+    const query = (where: typeof window & { itemCodes?: { has: string } }) =>
+      db.secFiling.findMany({
+        where,
         orderBy: [{ filingDate: "desc" }, { accessionNumber: "desc" }],
         take: MAX_CURRENT_REPORT_FETCHES,
         select,
-      })),
-    );
+      });
+    const [newest, results] = await Promise.all([
+      query(window),
+      query({ ...window, itemCodes: { has: RESULTS_ITEM_CODE } }),
+    ]);
+    const seen = new Set<string>();
+    for (const filing of [...newest, ...results]) {
+      if (seen.has(filing.id)) continue;
+      seen.add(filing.id);
+      if (
+        currentReportTextItemCodes(filing.itemCodes).length > 0 ||
+        currentReportReadsExhibit(filing.itemCodes)
+      ) {
+        candidates.push(filing);
+      }
+    }
   }
   const bucket = sixHourBucket(now);
 
@@ -435,6 +460,7 @@ function documentExtension(primaryDocument: string, contentType: string) {
 async function recordFilingExtractionFailure(input: {
   filingId: string;
   formType: string;
+  itemCodes: readonly string[];
   rawSourceId: string | null;
   errorCode: string;
   errorMessage: string;
@@ -444,7 +470,7 @@ async function recordFilingExtractionFailure(input: {
     rawSourceId: input.rawSourceId,
     status: "FAILED" as const,
     parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
-    expectedSections: expectedFilingSectionKinds(input.formType),
+    expectedSections: expectedFilingSectionKinds(input.formType, input.itemCodes),
     extractedSections: [],
     truncatedSections: [],
     chunkCount: 0,
@@ -477,12 +503,16 @@ function fetchFailure(error: unknown) {
 }
 
 /**
- * Fetches one filing's document through the identified SEC client, stores it
- * content-addressed in private R2 as a `FILING_DOCUMENT` raw source, extracts
- * the expected sections, and replaces the filing's passages in PostgreSQL.
- * For a 10-K or 10-Q the document is the primary document in the payload;
- * for an Item 2.02 8-K it is the Exhibit 99.1 press release named on the
- * filing's index page, which is read first (M32). A failure after the filing
+ * Fetches one filing's documents through the identified SEC client, stores
+ * each content-addressed in private R2 as a `FILING_DOCUMENT` raw source,
+ * extracts the expected sections, and replaces the filing's passages in
+ * PostgreSQL. For a 10-K or 10-Q the document is the primary document in the
+ * payload. For an 8-K it is the primary document when the filing lists items
+ * with text (their CURRENT_REPORT_ITEM passages), and the Exhibit 99.1 named
+ * on the filing's index page, read first, when it lists Item 2.02, 7.01, or
+ * 8.01 (PRESS_RELEASE passages); each passage keeps the raw source of the
+ * document it came from. Only a results filing must carry the exhibit, so
+ * its absence elsewhere is not a missing state. A failure after the filing
  * lookup is recorded on the filing's extraction state before it is rethrown,
  * so the state is explicit and never blocks fact ingestion or page
  * rendering. One exception keeps evidence available: when no new document
@@ -552,6 +582,7 @@ export async function fetchSecFilingDocument(
       await recordFilingExtractionFailure({
         filingId: filing.id,
         formType: filing.formType,
+        itemCodes: filing.itemCodes,
         rawSourceId,
         errorCode: error.code,
         errorMessage: error.message,
@@ -561,127 +592,199 @@ export async function fetchSecFilingDocument(
     throw error;
   };
 
-  let documentName = input.primaryDocument;
+  type PlannedDocument = {
+    name: string;
+    extract: (html: string) => FilingSectionExtraction;
+  };
+  const documents: PlannedDocument[] = [];
+  let expectedSections: FilingSectionKind[] | null = null;
+  let exhibitNotFound = false;
   if (filing.formType === CURRENT_REPORT_FORM_TYPE) {
-    if (filing.isAmendment || !filing.itemCodes.includes(RESULTS_ITEM_CODE)) {
+    const textItems = currentReportTextItemCodes(filing.itemCodes);
+    const readsExhibit = currentReportReadsExhibit(filing.itemCodes);
+    if (filing.isAmendment || (textItems.length === 0 && !readsExhibit)) {
       return fail(
         null,
         new JobExecutionError(
           "SEC_FILING_EXHIBIT_NOT_EXPECTED",
           false,
-          "Only an Item 2.02 results 8-K carries a press-release exhibit to extract.",
+          "This 8-K lists no item with text or an exhibit to extract.",
         ),
       );
     }
-    let index: Awaited<ReturnType<SecEdgarClient["getFilingDocument"]>>;
-    try {
-      index = await client.getFilingDocument(
-        supported.cik,
-        input.accessionNumber,
-        `${input.accessionNumber}-index.html`,
+    expectedSections = expectedFilingSectionKinds(filing.formType, filing.itemCodes);
+    let exhibit: string | null = null;
+    if (readsExhibit) {
+      let index: Awaited<ReturnType<SecEdgarClient["getFilingDocument"]>>;
+      try {
+        index = await client.getFilingDocument(
+          supported.cik,
+          input.accessionNumber,
+          `${input.accessionNumber}-index.html`,
+        );
+      } catch (error) {
+        return fail(null, fetchFailure(error));
+      }
+      exhibit = findExhibitDocument(
+        decodeFilingDocument(index.body, index.contentType),
+        PRESS_RELEASE_EXHIBIT_TYPE,
       );
+      exhibitNotFound = !exhibit && filing.itemCodes.includes(RESULTS_ITEM_CODE);
+      if (exhibitNotFound && textItems.length === 0) {
+        return fail(
+          null,
+          new JobExecutionError(
+            "SEC_FILING_EXHIBIT_NOT_FOUND",
+            false,
+            "The 8-K filing index lists no Exhibit 99.1 press release.",
+            true,
+          ),
+        );
+      }
+    }
+    if (textItems.length > 0) {
+      documents.push({
+        name: input.primaryDocument,
+        extract: (html) => extractCurrentReportItems(html, filing.itemCodes),
+      });
+    }
+    if (exhibit) {
+      documents.push({
+        name: exhibit,
+        extract: (html) => extractFilingSections(html, CURRENT_REPORT_FORM_TYPE),
+      });
+    }
+  } else {
+    documents.push({
+      name: input.primaryDocument,
+      extract: (html) => extractFilingSections(html, filing.formType),
+    });
+  }
+
+  const fetched: Array<
+    PlannedDocument & {
+      document: Awaited<ReturnType<SecEdgarClient["getFilingDocument"]>>;
+    }
+  > = [];
+  for (const planned of documents) {
+    try {
+      fetched.push({
+        ...planned,
+        document: await client.getFilingDocument(
+          supported.cik,
+          input.accessionNumber,
+          planned.name,
+        ),
+      });
     } catch (error) {
       return fail(null, fetchFailure(error));
     }
-    const exhibit = findExhibitDocument(
-      decodeFilingDocument(index.body, index.contentType),
-      PRESS_RELEASE_EXHIBIT_TYPE,
-    );
-    if (!exhibit) {
+  }
+
+  const stored: Array<{
+    name: string;
+    digest: string;
+    key: string;
+    rawSourceId: string;
+    html: string;
+    extract: PlannedDocument["extract"];
+  }> = [];
+  for (const { name, document, extract } of fetched) {
+    const digest = createHash("sha256").update(document.body).digest("hex");
+    const objectKey = `sec/${supported.cik}/filings/${digest}.${documentExtension(
+      name,
+      document.contentType,
+    )}`;
+    let object: Awaited<ReturnType<ObjectStorage["put"]>>;
+    try {
+      object = await storage.put({
+        key: objectKey,
+        body: document.body,
+        contentType: document.contentType,
+        metadata: {
+          cik: supported.cik,
+          source: "sec-edgar",
+          sha256: digest,
+          accessionNumber: input.accessionNumber,
+        },
+      });
+    } catch (error) {
       return fail(
         null,
         new JobExecutionError(
-          "SEC_FILING_EXHIBIT_NOT_FOUND",
-          false,
-          "The 8-K filing index lists no Exhibit 99.1 press release.",
+          "SEC_STORAGE_ERROR",
           true,
+          "Raw SEC filing document storage failed.",
+          false,
+          { cause: error },
         ),
       );
     }
-    documentName = exhibit;
-  }
-
-  let document: Awaited<ReturnType<SecEdgarClient["getFilingDocument"]>>;
-  try {
-    document = await client.getFilingDocument(
-      supported.cik,
-      input.accessionNumber,
-      documentName,
-    );
-  } catch (error) {
-    return fail(null, fetchFailure(error));
-  }
-
-  const digest = createHash("sha256").update(document.body).digest("hex");
-  const objectKey = `sec/${supported.cik}/filings/${digest}.${documentExtension(
-    documentName,
-    document.contentType,
-  )}`;
-  let stored: Awaited<ReturnType<ObjectStorage["put"]>>;
-  try {
-    stored = await storage.put({
-      key: objectKey,
-      body: document.body,
-      contentType: document.contentType,
-      metadata: {
-        cik: supported.cik,
-        source: "sec-edgar",
-        sha256: digest,
-        accessionNumber: input.accessionNumber,
-      },
+    const rawSource = await prismaSecRepository.saveRawSource({
+      secEntityId: filing.secEntityId,
+      kind: "FILING_DOCUMENT",
+      sourceUrl: document.url,
+      objectKey: object.key,
+      sha256: digest,
+      contentType: object.contentType,
+      byteLength: object.byteLength,
+      retrievedAt: attemptedAt,
     });
-  } catch (error) {
-    return fail(
-      null,
-      new JobExecutionError(
-        "SEC_STORAGE_ERROR",
-        true,
-        "Raw SEC filing document storage failed.",
-        false,
-        { cause: error },
-      ),
-    );
+    stored.push({
+      name,
+      digest,
+      key: object.key,
+      rawSourceId: rawSource.id,
+      html: decodeFilingDocument(document.body, document.contentType),
+      extract,
+    });
   }
-  const rawSource = await prismaSecRepository.saveRawSource({
-    secEntityId: filing.secEntityId,
-    kind: "FILING_DOCUMENT",
-    sourceUrl: document.url,
-    objectKey: stored.key,
-    sha256: digest,
-    contentType: stored.contentType,
-    byteLength: stored.byteLength,
-    retrievedAt: attemptedAt,
-  });
 
-  let extraction: ReturnType<typeof extractFilingSections>;
-  try {
-    extraction = extractFilingSections(
-      decodeFilingDocument(document.body, document.contentType),
-      filing.formType,
-    );
-  } catch (error) {
-    return fail(
-      rawSource.id,
-      new JobExecutionError(
-        "SEC_FILING_EXTRACTION_FAILED",
-        false,
-        "The SEC filing document could not be parsed into sections.",
-        true,
-        { cause: error },
-      ),
-    );
+  const extractions: Array<{
+    rawSourceId: string;
+    extraction: FilingSectionExtraction;
+  }> = [];
+  for (const item of stored) {
+    try {
+      extractions.push({ rawSourceId: item.rawSourceId, extraction: item.extract(item.html) });
+    } catch (error) {
+      return fail(
+        item.rawSourceId,
+        new JobExecutionError(
+          "SEC_FILING_EXTRACTION_FAILED",
+          false,
+          "The SEC filing document could not be parsed into sections.",
+          true,
+          { cause: error },
+        ),
+      );
+    }
   }
+  const sections = extractions.flatMap(({ rawSourceId, extraction }) =>
+    extraction.sections.map((section) => ({ ...section, rawSourceId })),
+  );
+  const extractedSections = [...new Set(sections.map((section) => section.kind))];
+  const expected = expectedSections ?? extractions[0].extraction.expectedSections;
+  const extraction = {
+    parserVersion: SEC_FILING_SECTION_PARSER_VERSION,
+    expectedSections: expected,
+    missingSections: expected.filter((kind) => !extractedSections.includes(kind)),
+    truncatedSections: [
+      ...new Set(extractions.flatMap((item) => item.extraction.truncatedSections)),
+    ],
+  };
+  const primary = stored[0];
 
   const status: SecFilingExtractionStatus =
-    extraction.sections.length === 0
+    sections.length === 0
       ? "FAILED"
       : extraction.missingSections.length > 0
         ? "PARTIALLY_COMPLETED"
         : "COMPLETED";
-  const chunks = extraction.sections.flatMap((section) =>
+  const chunks = sections.flatMap((section) =>
     section.chunks.map((chunk) => ({
       filingId: filing.id,
-      rawSourceId: rawSource.id,
+      rawSourceId: section.rawSourceId,
       sectionKind: section.kind,
       sectionLabel: section.label,
       ordinal: chunk.ordinal,
@@ -691,18 +794,25 @@ export async function fetchSecFilingDocument(
       text: chunk.text,
     })),
   );
-  const extractedSections = extraction.sections.map((section) => section.kind);
+  // A results 8-K whose index lists no exhibit keeps that explicit code even
+  // when its other items' text was extracted.
+  const errorCode = exhibitNotFound
+    ? "SEC_FILING_EXHIBIT_NOT_FOUND"
+    : status === "FAILED"
+      ? "SEC_FILING_SECTIONS_NOT_FOUND"
+      : null;
   const state = {
-    rawSourceId: rawSource.id,
+    rawSourceId: primary.rawSourceId,
     status,
     parserVersion: extraction.parserVersion,
     expectedSections: extraction.expectedSections,
     extractedSections,
     truncatedSections: extraction.truncatedSections,
     chunkCount: chunks.length,
-    errorCode: status === "FAILED" ? "SEC_FILING_SECTIONS_NOT_FOUND" : null,
-    errorMessage:
-      status === "FAILED"
+    errorCode,
+    errorMessage: exhibitNotFound
+      ? "The 8-K filing index lists no Exhibit 99.1 press release."
+      : status === "FAILED"
         ? "No expected section heading was found in the filing document."
         : null,
     attemptedAt,
@@ -725,7 +835,7 @@ export async function fetchSecFilingDocument(
   });
   if (status === "FAILED") {
     throw new JobExecutionError(
-      "SEC_FILING_SECTIONS_NOT_FOUND",
+      errorCode ?? "SEC_FILING_SECTIONS_NOT_FOUND",
       false,
       "No expected section heading was found in the SEC filing document.",
       true,
@@ -734,10 +844,11 @@ export async function fetchSecFilingDocument(
   return {
     filingId: filing.id,
     formType: filing.formType,
-    document: documentName,
-    rawSourceId: rawSource.id,
-    objectKey: stored.key,
-    sha256: digest,
+    document: primary.name,
+    documents: stored.map((item) => item.name),
+    rawSourceId: primary.rawSourceId,
+    objectKey: primary.key,
+    sha256: primary.digest,
     extractionStatus: status,
     parserVersion: extraction.parserVersion,
     extractedSections,

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 
 import { BrandMark } from "@/components/layout/brand-mark";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { AnalyticsLink } from "@/components/analytics/analytics-link";
 import { buttonVariants } from "@/components/ui/button";
 import { publicNavigation, siteConfig } from "@/lib/site";
@@ -72,6 +73,7 @@ function PublicSiteHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2 lg:ml-2">
+          <ThemeToggle className="hidden sm:inline-flex" />
           <AnalyticsLink
             className={buttonVariants({ size: "sm" })}
             eventName="demo_opened"
@@ -105,6 +107,7 @@ function PublicSiteHeader() {
             {item.label}
           </Link>
         ))}
+        <ThemeToggle className="ml-auto sm:hidden" />
       </nav>
     </header>
   );
@@ -112,14 +115,14 @@ function PublicSiteHeader() {
 
 function PublicSiteFooter() {
   return (
-    <footer className="border-t bg-foreground text-background">
+    <footer className="border-t bg-footer text-footer-foreground">
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-10 md:grid-cols-[1.2fr_1fr_1fr] lg:px-8">
         <div className="max-w-md">
           <div className="flex items-center gap-3">
-            <BrandMark className="bg-background text-foreground" />
+            <BrandMark className="bg-footer-foreground text-footer" />
             <p className="font-semibold">{siteConfig.name}</p>
           </div>
-          <p className="mt-4 text-sm leading-6 text-background/65">
+          <p className="mt-4 text-sm leading-6 text-footer-foreground/65">
             A non-commercial stock dashboard for understanding portfolios,
             following companies, and reviewing research.
           </p>
@@ -129,7 +132,6 @@ function PublicSiteFooter() {
             ["/dashboard?demo=true", "Read-only demo"],
             ["/holdings", "Holdings"],
             ["/watchlist", "Watchlist"],
-            ["/research", "Sample research"],
           ]}
           title="Explore"
         />
@@ -142,8 +144,8 @@ function PublicSiteFooter() {
           title="Project"
         />
       </div>
-      <div className="border-t border-background/15">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-6 py-5 text-xs text-background/55 sm:flex-row sm:items-center sm:justify-between lg:px-8">
+      <div className="border-t border-footer-foreground/15">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-6 py-5 text-xs text-footer-foreground/55 sm:flex-row sm:items-center sm:justify-between lg:px-8">
           <p>Educational project. Not investment advice or a brokerage.</p>
           <p>
             SEC EDGAR facts · Attributed TradingView widgets · Sample demo data
@@ -164,12 +166,12 @@ function FooterGroup({
   return (
     <div>
       <p className="text-sm font-semibold">{title}</p>
-      <ul className="mt-4 space-y-3 text-sm text-background/65">
+      <ul className="mt-4 space-y-3 text-sm text-footer-foreground/65">
         {links.map(([href, label]) => (
           <li key={href}>
             {href.startsWith("http") ? (
               <a
-                className="transition hover:text-background focus-visible:text-background"
+                className="transition hover:text-footer-foreground focus-visible:text-footer-foreground"
                 href={href}
                 rel="noreferrer"
                 target="_blank"
@@ -178,7 +180,7 @@ function FooterGroup({
               </a>
             ) : (
               <Link
-                className="transition hover:text-background focus-visible:text-background"
+                className="transition hover:text-footer-foreground focus-visible:text-footer-foreground"
                 href={href}
                 prefetch={false}
               >

@@ -13,8 +13,14 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { getDemoPortfolioAnalyticsByPeriods } from "@/lib/portfolio/analytics";
-import { getDemoRiskAlertsWithAnalytics } from "@/lib/portfolio/alerts-data";
+import {
+  getDemoPortfolioAnalyticsByPeriods,
+  getOwnedPortfolioAnalyticsByPeriods,
+} from "@/lib/portfolio/analytics";
+import {
+  getDemoRiskAlertsWithAnalytics,
+  getOwnedRiskAlertsWithAnalytics,
+} from "@/lib/portfolio/alerts-data";
 
 const date = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const decimal = (value: number) => new Prisma.Decimal(value);
@@ -101,5 +107,29 @@ describe("portfolio analytics query reuse", () => {
     expect(alerts).toEqual(expect.any(Array));
     expect(mocks.portfolioFindFirst).toHaveBeenCalledOnce();
     expect(mocks.watchlistFindMany).toHaveBeenCalledOnce();
+  });
+
+  it("scopes signed-in analytics and review signals to the session owner", async () => {
+    const analyticsPromise = getOwnedPortfolioAnalyticsByPeriods(
+      "user-a",
+      "portfolio-a",
+      ["1M", "1D"],
+    );
+    const alerts = await getOwnedRiskAlertsWithAnalytics(
+      "user-a",
+      analyticsPromise,
+    );
+
+    expect(mocks.portfolioFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "portfolio-a", userId: "user-a" },
+      }),
+    );
+    expect(mocks.watchlistFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-a" } }),
+    );
+    expect(
+      alerts.find((alert) => alert.type === "CONCENTRATION")?.message,
+    ).toContain("of your portfolio");
   });
 });
