@@ -20,12 +20,10 @@ provide financial advice.
 2. Change the performance period and open **Holdings** to compare positions.
 3. Open AAPL to review market context, portfolio exposure, SEC-backed
    financials, and trends.
-4. Open **Sample research** to review the summary, strengths, risks, missing
-   information, and sources.
-5. Visit **Watchlist**, **Earnings**, and **Alerts** to see the remaining core
+4. Visit **Watchlist**, **Earnings**, and **Alerts** to see the remaining core
    workflows.
 
-The public demo is read-only. Account changes and private research require
+The public demo is read-only. Account changes and research reports require
 sign-in.
 
 ## Run Locally

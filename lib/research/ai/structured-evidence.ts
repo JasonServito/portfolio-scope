@@ -97,11 +97,11 @@ const MANDATORY_DERIVED_FOR_FINANCIALS = new Set([
   "FREE_CASH_FLOW_MARGIN:ANNUAL",
   "DEBT_TO_EQUITY:INSTANT",
 ]);
-const MANDATORY_DERIVED_FOR_RISK = new Set([
-  "DEBT_TO_EQUITY:INSTANT",
-  "CURRENT_RATIO:INSTANT",
-  "NET_CASH:INSTANT",
-]);
+// Risk owns the financial summary table, which already restates debt-to-equity,
+// the current ratio, and cash minus long-term debt, so those derived items stay
+// available to Risk without being mandatory; the freed context holds Risk
+// Factors passages instead.
+const MANDATORY_DERIVED_FOR_RISK = new Set<string>();
 const MANDATORY_DERIVED_FOR_SYNTHESIS = new Set(["REVENUE_GROWTH_YOY:ANNUAL"]);
 
 const metricLabels = new Map(

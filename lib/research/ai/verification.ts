@@ -117,16 +117,16 @@ export function applyClaimVerification(
   const changed = verification.results.some(
     (result) => result.status !== "SUPPORTED",
   );
+  const removed = verification.results.some(
+    (result) =>
+      result.status === "UNSUPPORTED" || result.status === "CONTRADICTED",
+  );
   return {
     ...output,
     claims,
     rating: ratingForClaims(claims),
-    // Free-form synthesis prose may repeat a rejected or overstated claim.
-    // Do not let that prose bypass the filter; never ask the verifier to rewrite it.
     ...(changed
       ? {
-          summary:
-            "The claim support check found limitations in the draft analysis. The retained strengths and risks are shown below; partial support and disagreements require review of the cited sources.",
           confidence: Math.min(
             output.confidence,
             ...claims.map((claim) => claim.confidence),
@@ -139,6 +139,16 @@ export function applyClaimVerification(
               ? `${unsupported} draft claim${unsupported === 1 ? " was" : "s were"} removed because the cited evidence did not establish ${unsupported === 1 ? "it" : "them"}; remaining claims show any limits.`
               : "Some draft claims were limited after checking their cited sources.",
           ],
+        }
+      : {}),
+    // Free-form synthesis prose may repeat a removed claim, so it is left out
+    // once any claim is removed as unsupported or contradicted; never ask the
+    // verifier to rewrite it. When claims are only partially supported, they
+    // stay with their label and the prose is kept.
+    ...(removed
+      ? {
+          summary:
+            "Some draft points did not fully match their sources, so the overall summary was left out. The points below passed the source check; check the cited sources for any marked as partially supported.",
           disagreements: [],
           whatWouldChange: [],
         }

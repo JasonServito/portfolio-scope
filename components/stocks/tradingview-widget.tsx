@@ -3,6 +3,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 
+import { useTheme } from "@/components/layout/theme-toggle";
+
+// TradingView's dark background is near black; match the dark card instead.
+const DARK_CHART_BACKGROUND = "#242927";
+
 export function buildTradingViewSymbol(exchange: string, ticker: string) {
   const normalizedExchange = exchange.trim().toUpperCase();
   const normalizedTicker = ticker.trim().toUpperCase();
@@ -23,8 +28,10 @@ export function TradingViewWidget({
     "loading",
   );
   const symbol = buildTradingViewSymbol(exchange, ticker);
+  const theme = useTheme();
 
   useEffect(() => {
+    if (!theme) return;
     if (!container.current || !symbol) {
       setStatus("failed");
       return;
@@ -43,7 +50,8 @@ export function TradingViewWidget({
       symbol,
       interval: "D",
       timezone: "Etc/UTC",
-      theme: "light",
+      theme,
+      ...(theme === "dark" ? { backgroundColor: DARK_CHART_BACKGROUND } : {}),
       style: "1",
       locale: "en",
       allow_symbol_change: false,
@@ -63,7 +71,7 @@ export function TradingViewWidget({
     return () => {
       element.replaceChildren();
     };
-  }, [symbol]);
+  }, [symbol, theme]);
 
   const tradingViewUrl = symbol
     ? `https://www.tradingview.com/symbols/${symbol.replace(":", "-")}/`

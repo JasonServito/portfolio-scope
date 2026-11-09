@@ -53,7 +53,7 @@ export function DataState({
     <div
       className={cn(
         "flex flex-col items-center rounded-2xl border bg-muted/30 px-6 py-12 text-center",
-        warning && "border-amber-300 bg-amber-50",
+        warning && "border-caution-border bg-caution-muted",
         failure && "border-destructive/30 bg-destructive/5",
       )}
       role={failure ? "alert" : "status"}
@@ -61,7 +61,7 @@ export function DataState({
       <span
         className={cn(
           "flex size-11 items-center justify-center rounded-xl bg-background text-muted-foreground shadow-sm",
-          warning && "text-amber-800",
+          warning && "text-caution-foreground",
           failure && "text-destructive",
         )}
       >

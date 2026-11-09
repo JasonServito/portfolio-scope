@@ -2,9 +2,10 @@
  * Form 8-K current reports (M32).
  *
  * The submissions feed lists every 8-K with its item codes. Research keeps
- * the reports filed in the last twelve months as dated event evidence, and
- * for an Item 2.02 results filing it fetches the Exhibit 99.1 press release
- * named on the filing's index page. Nothing here touches 10-K or 10-Q
+ * the reports filed in the last twelve months as dated event evidence. The
+ * text of each report's listed items is read from the primary 8-K document,
+ * and for an Item 2.02, 7.01, or 8.01 filing the Exhibit 99.1 named on the
+ * filing's index page is read as well. Nothing here touches 10-K or 10-Q
  * handling, and no other exhibit or form is read.
  */
 
@@ -12,6 +13,32 @@ export const CURRENT_REPORT_FORM_TYPE = "8-K";
 export const RESULTS_ITEM_CODE = "2.02";
 export const PRESS_RELEASE_EXHIBIT_TYPE = "EX-99.1";
 export const CURRENT_REPORT_WINDOW_DAYS = 365;
+
+// Items whose Exhibit 99.1 is read. Only a results filing is expected to
+// carry one; for a Regulation FD or other-event filing it is read when the
+// index lists one, and its absence is not a missing state.
+const EXHIBIT_ITEM_CODES = new Set([RESULTS_ITEM_CODE, "7.01", "8.01"]);
+// Items whose own text is not extracted: an Item 2.02 body only points at
+// the press release, and Item 9.01 only lists the exhibits.
+const NON_TEXT_ITEM_CODES = new Set([RESULTS_ITEM_CODE, "9.01"]);
+/** Items whose text is evidence of a company risk as well as an event. */
+export const RISK_EVENT_ITEM_CODES: ReadonlySet<string> = new Set([
+  "1.05",
+  "2.05",
+  "2.06",
+  "3.01",
+  "4.02",
+]);
+
+/** The listed items whose text is extracted from the primary 8-K document. */
+export function currentReportTextItemCodes(itemCodes: readonly string[]) {
+  return itemCodes.filter((code) => !NON_TEXT_ITEM_CODES.has(code));
+}
+
+/** Whether the filing's Exhibit 99.1 is read for these items. */
+export function currentReportReadsExhibit(itemCodes: readonly string[]) {
+  return itemCodes.some((code) => EXHIBIT_ITEM_CODES.has(code));
+}
 
 export function isCurrentReportForm(formType: string) {
   return /^8-K(?:\/A)?$/.test(formType);
@@ -76,10 +103,20 @@ const ITEM_TITLES: Record<string, string> = {
   "9.01": "Financial Statements and Exhibits",
 };
 
+/** The official item title, or null for an unknown code. */
+export function currentReportItemTitle(code: string) {
+  return ITEM_TITLES[code] ?? null;
+}
+
 /** "2.02 (Results of Operations and Financial Condition)", or the bare code when it is not a known item. */
 export function describeItemCode(code: string) {
   const title = ITEM_TITLES[code];
   return title ? `${code} (${title})` : code;
+}
+
+/** The item code of an extracted 8-K item section label ("Item 5.02"), or null. */
+export function itemCodeFromSectionLabel(label: string) {
+  return /^Item (\d{1,2}\.\d{2})$/.exec(label)?.[1] ?? null;
 }
 
 const TABLE_ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;

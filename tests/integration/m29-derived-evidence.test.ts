@@ -37,6 +37,7 @@ import {
 import {
   executeResearchAgent,
   executeResearchSynthesis,
+  VALUATION_DATA_GAP,
 } from "@/lib/research/background";
 import { getOwnedResearchJob, runResearch } from "@/lib/research/orchestrator";
 
@@ -461,10 +462,6 @@ describe("M29 derived and structured research evidence", () => {
     const peerTable = findFixtureEvidence(snapshot, {
       evidenceType: "PEER_COMPARISON_TABLE",
     });
-    const debtToEquity = findFixtureEvidence(snapshot, {
-      evidenceType: "DERIVED_METRIC",
-      metricId: "DEBT_TO_EQUITY",
-    });
     const riskFactorsPassage = findFixtureEvidence(snapshot, {
       evidenceType: "SEC_FILING_PASSAGE",
       sectionKind: "RISK_FACTORS",
@@ -472,8 +469,17 @@ describe("M29 derived and structured research evidence", () => {
     });
     expect(requests[0].input).toContain(escaped(summaryTable.excerpt));
     expect(requests[1].input).toContain(escaped(peerTable.excerpt));
-    expect(requests[2].input).toContain(escaped(debtToEquity.excerpt));
+    // Risk reads its leverage and liquidity values from the summary table,
+    // which leaves room for more than one Risk Factors passage.
+    expect(requests[2].input).toContain(escaped(summaryTable.excerpt));
     expect(requests[2].input).toContain(escaped(riskFactorsPassage.excerpt));
+    expect(
+      snapshot.evidence.filter(
+        (item) =>
+          item.metadata.sectionKind === "RISK_FACTORS" &&
+          requests[2].input.includes(escaped(item.excerpt)),
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
     expect(requests[3].input).toContain(escaped(summaryTable.excerpt));
     expect(requests[3].input).toContain(escaped(peerTable.excerpt));
     expect(requests[3].input).toContain(escaped(riskFactorsPassage.excerpt));
@@ -511,6 +517,15 @@ describe("M29 derived and structured research evidence", () => {
       promptVersion: AI_PROMPT_VERSION,
       retrievalVersion: AI_RETRIEVAL_VERSION,
     });
+    // The deterministic valuation gap closes every AI report's missing
+    // information but never reaches a model prompt.
+    expect(stored.report?.missingDataJson).toEqual([
+      ...AAPL_GROUNDED_SYNTHESIS_WITHOUT_CURRENT_REPORTS.missingData,
+      VALUATION_DATA_GAP,
+    ]);
+    for (const request of requests) {
+      expect(request.input).not.toContain(VALUATION_DATA_GAP);
+    }
     expect(stored.report?.claims).toHaveLength(7);
     const evidenceRows = stored.report!.claims.flatMap((claim) => claim.evidence);
     expect(evidenceRows.filter((row) => row.sourceKind === "DERIVED").length).toBe(

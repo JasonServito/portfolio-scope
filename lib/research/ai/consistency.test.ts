@@ -102,6 +102,21 @@ describe("numeric tokens", () => {
       new Set(["-31796000000"]),
     );
   });
+
+  it("treats periodic-report section labels as labels but keeps Form 8-K item codes as values", () => {
+    expect(
+      numericTokens(
+        "Part I, Item 1A Risk Factors and Part II, Item 7 (MD&A) of the 10-K; see item 7A and Items 1C.",
+      ),
+    ).toEqual(new Set());
+    expect(numericTokens("the 10-Q Part II Item 1A risk factors")).toEqual(
+      new Set(),
+    );
+    expect(numericTokens("Item 10 lists 3 directors")).toEqual(new Set(["3"]));
+    expect(numericTokens("a Form 8-K filed under Item 2.02")).toEqual(
+      new Set(["2.02"]),
+    );
+  });
 });
 
 describe("numeric agreement with cited excerpts", () => {
@@ -137,14 +152,42 @@ describe("numeric agreement with cited excerpts", () => {
     ).toEqual([]);
   });
 
+  it("accepts a section label that the cited excerpt does not state", () => {
+    const passage = evidence(
+      "ev_p",
+      "The Company's operations and performance depend significantly on global and regional economic conditions.",
+      "SEC_FILING",
+    );
+    const byId = new Map([[passage.id, passage]]);
+    expect(
+      unsupportedNumericTokens(
+        claim({
+          statement:
+            "The 10-K Item 1A risk factors say performance depends on global and regional economic conditions.",
+          evidenceIds: [passage.id],
+        }),
+        byId,
+      ),
+    ).toEqual([]);
+    expect(
+      unsupportedNumericTokens(
+        claim({
+          statement: "Item 1A lists 12 risks to performance.",
+          evidenceIds: [passage.id],
+        }),
+        byId,
+      ),
+    ).toEqual(["12"]);
+  });
+
   it("reports numbers or units absent from the cited supporting excerpts", () => {
     const byId = new Map([[supporting.id, supporting]]);
     expect(
       unsupportedNumericTokens(
-        claim({ statement: "Revenue was 391 billion USD." }),
+        claim({ statement: "Revenue was 391 million USD." }),
         byId,
       ),
-    ).toEqual(["391billion"]);
+    ).toEqual(["391million"]);
     expect(
       unsupportedNumericTokens(
         claim({ statement: "Revenue grew 30 percent." }),
@@ -154,6 +197,59 @@ describe("numeric agreement with cited excerpts", () => {
     expect(
       unsupportedNumericTokens(claim({ evidenceIds: ["ev_missing"] }), byId),
     ).toHaveLength(3);
+  });
+});
+
+describe("rounded restatements of cited values", () => {
+  const facts = evidence(
+    "ev_r",
+    "Long-term debt: 71,340,000,000 USD. Derived net cash at 2026-06-27: -31,796,000,000 USD. Long-term debt-to-equity: 0.66. Current ratio: 1.872. Revenue growth: 16.4 percent. Diluted EPS: 1.57 USD per share. Services revenue of $27.4 billion.",
+  );
+  const byId = new Map([[facts.id, facts]]);
+  const unsupported = (statement: string) =>
+    unsupportedNumericTokens(
+      claim({ statement, evidenceIds: [facts.id] }),
+      byId,
+    );
+
+  it("accepts a correct rounding at the stated precision and scale", () => {
+    expect(unsupported("Long-term debt was $71.3 billion.")).toEqual([]);
+    expect(unsupported("Long-term debt was about $71 billion.")).toEqual([]);
+    expect(unsupported("Long-term debt was 71,340 million USD.")).toEqual([]);
+    expect(unsupported("Net cash was -$31.8 billion at 2026-06-27.")).toEqual(
+      [],
+    );
+    expect(unsupported("The current ratio was 1.87, or about 1.9.")).toEqual(
+      [],
+    );
+    expect(unsupported("Revenue grew 16 percent.")).toEqual([]);
+    expect(unsupported("Diluted EPS was $1.6 per share.")).toEqual([]);
+  });
+
+  it("rejects a wrong rounding, scale, sign, or unit", () => {
+    expect(unsupported("Long-term debt was $71.4 billion.")).toEqual([
+      "71.4billion",
+    ]);
+    expect(unsupported("Long-term debt was $71.3 million.")).toEqual([
+      "71.3million",
+    ]);
+    expect(unsupported("Net debt was $31.8 billion.")).toEqual(["31.8billion"]);
+    expect(unsupported("Revenue grew 16.4 times.")).toEqual(["16.4"]);
+    expect(unsupported("Revenue grew 16.")).toEqual(["16"]);
+    expect(unsupported("Debt-to-equity was 66 percent.")).toEqual(["66%"]);
+  });
+
+  it("rejects coarse roundings and never adds precision", () => {
+    expect(unsupported("Debt-to-equity was about 0.7.")).toEqual(["0.7"]);
+    expect(unsupported("Long-term debt was about $70 billion.")).toEqual([
+      "70billion",
+    ]);
+    expect(unsupported("Services revenue was $27.43 billion.")).toEqual([
+      "27.43billion",
+    ]);
+    expect(unsupported("Services revenue was 27,430,000,000 USD.")).toEqual([
+      "27430000000",
+    ]);
   });
 });
 
@@ -231,7 +327,12 @@ describe("rating, availability, and kind agreement", () => {
         { ...base, claims: [claim({ statement: "Revenue was 400 billion USD." })] },
         [supporting],
       ),
-    ).toMatch(/does not appear with the same unit/);
+    ).toEqual({
+      message:
+        "A claim stated a number that does not appear with the same unit in its cited supporting evidence.",
+      repairDetail:
+        "claim 1 states 400billion, which its cited supporting excerpts do not contain",
+    });
     expect(
       getOutputConsistencyIssue(
         {
@@ -261,24 +362,65 @@ describe("rating, availability, and kind agreement", () => {
         },
         [supporting, derived],
       ),
-    ).toMatch(/labeled DERIVED does not cite a derived evidence item/);
+    ).toEqual({
+      message: "A claim labeled DERIVED does not cite a derived evidence item.",
+      repairDetail: "claim 1 is labeled DERIVED but cites no DERIVED evidence",
+    });
     expect(
       getOutputConsistencyIssue(
         { ...base, rating: "BULLISH", claims: [risk] },
         [supporting],
       ),
-    ).toBe("The BULLISH rating does not agree with the claim categories.");
+    ).toEqual({
+      message: "The BULLISH rating does not agree with the claim categories.",
+      repairDetail: null,
+    });
     expect(
       getOutputConsistencyIssue(
         { ...base, availability: "NOT_AVAILABLE", claims: [supportive] },
         [supporting],
-      ),
+      )?.message,
     ).toMatch(/must not return claims/);
     expect(
       getOutputConsistencyIssue(
         { ...base, availability: "PARTIAL", claims: [] },
         [supporting],
-      ),
+      )?.message,
     ).toMatch(/must report NOT_AVAILABLE/);
+  });
+
+  it("names every failing claim and its unsupported number tokens for the repair", () => {
+    const supporting = evidence(
+      "ev_a",
+      "Revenue was 391,035,000,000 USD for the period ending 2025-09-27.",
+    );
+    const issue = getOutputConsistencyIssue(
+      {
+        rating: "NEUTRAL",
+        confidence: 0.5,
+        summary: "Summary.",
+        warnings: [],
+        missingData: [],
+        claims: [
+          claim(),
+          claim({
+            statement:
+              "Revenue was 391,035,000,000 USD, up 9 percent, in the 10-K filed 2025-10-31.",
+          }),
+          claim({
+            kind: "DERIVED",
+            statement: "Revenue was 391,035,000,000 USD.",
+          }),
+        ],
+      },
+      [supporting],
+    );
+    // The first failure decides the fixed message; the detail lists them all.
+    expect(issue).toEqual({
+      message:
+        "A claim stated a number that does not appear with the same unit in its cited supporting evidence.",
+      repairDetail:
+        "claim 2 states 2025-10-31, 9%, which its cited supporting excerpts do not contain; claim 3 is labeled DERIVED but cites no DERIVED evidence",
+    });
   });
 });

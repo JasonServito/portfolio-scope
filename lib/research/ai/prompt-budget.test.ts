@@ -341,6 +341,21 @@ describe("m33 prompt envelope with the AAPL fixture", () => {
     ).not.toThrow();
   });
 
+  it("gives Risk the 10-Q Risk Factors update ahead of the 10-K passages", () => {
+    const risk = specialists.find((item) => item.agent === "RISK")!;
+    const passages = risk.evidence.filter(
+      (item) => item.metadata.evidenceType === "SEC_FILING_PASSAGE",
+    );
+    expect(passages[0].metadata).toMatchObject({
+      formType: "10-Q",
+      sectionKind: "RISK_FACTORS",
+      chunkOrdinal: 0,
+    });
+    expect(
+      passages.filter((item) => item.metadata.formType === "10-K").length,
+    ).toBeGreaterThan(0);
+  });
+
   it("supplies at least one filing passage to every model specialist and the cited passages to synthesis", () => {
     for (const item of specialists) {
       const passages = item.evidence.filter(
@@ -375,7 +390,7 @@ describe("m33 prompt envelope with the AAPL fixture", () => {
     }
   });
 
-  it("gives the News specialist every listed current report, its coverage statement, and a press-release passage", () => {
+  it("gives the News specialist every listed current report, its coverage statement, a press-release passage, and an 8-K item passage", () => {
     const news = deferred[0];
     const types = news.evidence.map((item) => item.metadata.evidenceType);
     expect(
@@ -394,10 +409,17 @@ describe("m33 prompt envelope with the AAPL fixture", () => {
       ),
     ).toBe(true);
     expect(
+      news.evidence.some(
+        (item) =>
+          item.metadata.evidenceType === "SEC_FILING_PASSAGE" &&
+          item.metadata.sectionKind === "CURRENT_REPORT_ITEM",
+      ),
+    ).toBe(true);
+    expect(
       news.evidence.every(
         (item) =>
           item.metadata.evidenceType !== "SEC_FILING_PASSAGE" ||
-          item.metadata.sectionKind === "PRESS_RELEASE",
+          item.metadata.formType === "8-K",
       ),
     ).toBe(true);
     expect(news.input).toContain("What remains unknown");

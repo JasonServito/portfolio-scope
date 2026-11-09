@@ -128,7 +128,8 @@ const forbiddenPersonalAllocation =
 const forbiddenStockPriceTarget =
   /\b(?:price\s+target|target\s+price)\b|\bfair\s+value\s+(?:is|would\s+be|could\s+be|of)\s+[$€£]?\s*\d[\d,.]*\s+per\s+share\b/i;
 const forbiddenStockPricePredictions = [
-  /\b(?:stocks?|(?<!per\s)shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
+  // A share count ("diluted shares would fall") is not a share price.
+  /\b(?:stocks?|(?<!per\s|(?:diluted|basic|weighted[- ]average)\s)shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
   /\b(?:stock|share)\s+price\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|increase|decrease|reach|hit|trade(?:\s+at)?|be\s+worth|outperform|underperform)\b/i,
   /\b(?:stocks?|shares?)\s+(?:will|would|should|could|may|(?:is|are)\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:increase|decrease)\s+(?:in\s+(?:price|value)|to\s+[$€£]?\d)\b/i,
   /(?:^|[.!?]\s+|")\s*(?:the\s+)?price\s+(?:will|would|should|could|may|is\s+(?:expected|likely|projected|forecast)\s+to)\s+(?:rise|fall|increase|decrease|reach|hit|trade(?:\s+at)?|be\s+worth)\b/i,
@@ -141,17 +142,32 @@ const forbiddenStockPricePredictions = [
 export class ModelOutputSafetyError extends Error {
   readonly code = "AI_UNSAFE_OUTPUT";
 
-  constructor(message: string) {
+  /**
+   * repairDetail quotes the flagged model text for the repair request only;
+   * it is never logged.
+   */
+  constructor(
+    message: string,
+    readonly repairDetail: string | null = null,
+  ) {
     super(message);
     this.name = "ModelOutputSafetyError";
   }
 }
 
-/** A schema-valid, safely cited output whose numbers, rating, or availability disagree with its own claims or cited excerpts. */
+/**
+ * A schema-valid, safely cited output whose numbers, rating, or availability
+ * disagree with its own claims or cited excerpts. The message is a fixed
+ * application string for logs; repairDetail names the failing claims and
+ * number tokens for the repair request only.
+ */
 export class ModelOutputConsistencyError extends Error {
   readonly code = "AI_INCONSISTENT_OUTPUT";
 
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly repairDetail: string | null = null,
+  ) {
     super(message);
     this.name = "ModelOutputConsistencyError";
   }
@@ -220,13 +236,111 @@ export function getModelOutputSafetyIssue(output: unknown) {
   return null;
 }
 
+const SAFETY_PATTERNS = [
+  ...forbiddenRecommendations,
+  forbiddenPersonalContext,
+  forbiddenPersonalAllocation,
+  forbiddenStockPriceTarget,
+  ...forbiddenStockPricePredictions,
+];
+
+/** The first model phrase a safety pattern matched, so a repair can reword it. */
+function flaggedSafetyPhrase(output: unknown) {
+  for (const value of collectStringLeaves(output)) {
+    for (const pattern of SAFETY_PATTERNS) {
+      const match = value.match(pattern);
+      if (match) return match[0].trim().slice(0, 120);
+    }
+  }
+  return null;
+}
+
+/**
+ * Drops a repeated citation inside one claim: an id listed twice, or listed
+ * as both supporting and counter evidence, where it stays supporting so the
+ * number check still reads its excerpt. A repeated id cites nothing new, so
+ * removing it changes no claim and no grounding; every remaining id is still
+ * checked by validateGroundedOutput.
+ */
+export function withDistinctClaimReferences<T extends GroundedModelOutput>(
+  output: T,
+): T {
+  return {
+    ...output,
+    claims: output.claims.map((claim) => {
+      const evidenceIds = [...new Set(claim.evidenceIds)];
+      return {
+        ...claim,
+        evidenceIds,
+        counterEvidenceIds: [...new Set(claim.counterEvidenceIds)].filter(
+          (id) => !evidenceIds.includes(id),
+        ),
+      };
+    }),
+  };
+}
+
+const MAX_CLAIM_EVIDENCE_IDS = 6;
+
+/**
+ * A passage of a Form 8-K (its item text or press release) does not itself
+ * state the filing date or item codes; the dated current-report item of the
+ * same filing does. When a claim cites such a passage but not that filing's
+ * dated item, and the item was supplied to the same call, the item is added
+ * as a supporting citation, so the date and item codes the claim states are
+ * checked against the filing's own record rather than rejected. No other
+ * citation is added, and the number check stays exactly as strict.
+ */
+export function withCitedCurrentReportItems<T extends GroundedModelOutput>(
+  output: T,
+  evidence: readonly ResearchEvidence[],
+): T {
+  const itemByAccession = new Map<string, string>();
+  for (const item of evidence) {
+    if (item.metadata.evidenceType === "SEC_CURRENT_REPORT" && item.accessionNumber) {
+      itemByAccession.set(item.accessionNumber, item.id);
+    }
+  }
+  if (itemByAccession.size === 0) return output;
+  const passageItem = new Map<string, string>();
+  for (const item of evidence) {
+    const reportItem = item.accessionNumber
+      ? itemByAccession.get(item.accessionNumber)
+      : undefined;
+    if (item.metadata.evidenceType === "SEC_FILING_PASSAGE" && reportItem) {
+      passageItem.set(item.id, reportItem);
+    }
+  }
+  return {
+    ...output,
+    claims: output.claims.map((claim) => {
+      const evidenceIds = [...claim.evidenceIds];
+      for (const id of claim.evidenceIds) {
+        const reportItem = passageItem.get(id);
+        if (
+          reportItem &&
+          !evidenceIds.includes(reportItem) &&
+          evidenceIds.length < MAX_CLAIM_EVIDENCE_IDS
+        ) {
+          evidenceIds.push(reportItem);
+        }
+      }
+      return evidenceIds.length === claim.evidenceIds.length
+        ? claim
+        : { ...claim, evidenceIds };
+    }),
+  };
+}
+
 export function validateGroundedOutput<T extends GroundedModelOutput>(
   output: T,
   evidence: ResearchEvidence[],
 ) {
   const allowed = new Set(evidence.map((item) => item.id));
   const safetyIssue = getModelOutputSafetyIssue(output);
-  if (safetyIssue) throw new ModelOutputSafetyError(safetyIssue);
+  if (safetyIssue) {
+    throw new ModelOutputSafetyError(safetyIssue, flaggedSafetyPhrase(output));
+  }
 
   const claimKeys = new Set<string>();
   for (const claim of output.claims) {
@@ -250,7 +364,12 @@ export function validateGroundedOutput<T extends GroundedModelOutput>(
     }
   }
   const consistencyIssue = getOutputConsistencyIssue(output, evidence);
-  if (consistencyIssue) throw new ModelOutputConsistencyError(consistencyIssue);
+  if (consistencyIssue) {
+    throw new ModelOutputConsistencyError(
+      consistencyIssue.message,
+      consistencyIssue.repairDetail,
+    );
+  }
   return output;
 }
 

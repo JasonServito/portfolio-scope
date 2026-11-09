@@ -23,6 +23,8 @@ import {
   ModelOutputConsistencyError,
   ModelOutputSafetyError,
   validateGroundedOutput,
+  withCitedCurrentReportItems,
+  withDistinctClaimReferences,
   type GroundedModelOutput,
   type ResearchEvidence,
 } from "@/lib/research/ai/schemas";
@@ -88,6 +90,8 @@ export async function runValidatedModelCall<T>(
     schema: z.ZodType<T>;
     schemaName: string;
     validate: (output: T) => void;
+    /** Removes harmless redundancy from a schema-valid output before it is validated. */
+    normalize?: (output: T) => T;
     maxAttempts: 1 | 2;
     prompt: (repairFeedback?: string) => Prompt;
     userId: string;
@@ -234,9 +238,10 @@ export async function runValidatedModelCall<T>(
     const parsed = input.schema.safeParse(generated.output);
     try {
       if (!parsed.success) throw parsed.error;
-      input.validate(parsed.data);
+      const output = input.normalize ? input.normalize(parsed.data) : parsed.data;
+      input.validate(output);
       return {
-        output: parsed.data,
+        output,
         providerResult: generated,
         reservation,
         attemptNumber,
@@ -274,13 +279,30 @@ export async function runValidatedModelCall<T>(
           { cause: error },
         );
       }
-      // The check messages are fixed application strings, never model or
-      // user text, so they are safe to echo back as repair guidance.
-      repairFeedback = `The prior response failed the required runtime schema, evidence safety, or consistency checks${checkFailure ? `: ${error.message}` : "."} Return a corrected object only; cite only supplied evidence ids, state numbers exactly as they appear in cited evidence with the same unit, keep the rating and availability consistent with the claims, and do not add recommendations.`;
+      repairFeedback = `The prior response failed ${failedCheck(error)} Return a corrected object only; cite only supplied evidence ids, state numbers exactly as they appear in cited evidence with the same unit, keep the rating and availability consistent with the claims, and do not add recommendations.`;
     }
   }
 
   throw new GroundedModelCallError("AI_MODEL_OUTPUT_INVALID", false, true);
+}
+
+/**
+ * Names the check the rejected output failed for its single repair request:
+ * the safety rule that tripped, the consistency rule with every failing claim
+ * and its exact unsupported number tokens, or the schema issue paths. Only
+ * the repair request carries the claim detail; logs keep rejectionReason.
+ */
+function failedCheck(error: unknown) {
+  if (error instanceof ModelOutputSafetyError) {
+    return `the safety check: ${error.message}${error.repairDetail ? ` Flagged text: "${error.repairDetail}"; describe the business fact instead.` : ""}`;
+  }
+  if (error instanceof ModelOutputConsistencyError) {
+    return `the consistency check: ${error.message}${error.repairDetail ? ` Failing claims: ${error.repairDetail}.` : ""}`;
+  }
+  if (error instanceof z.ZodError) {
+    return `the output schema check (${rejectionReason(error)}).`;
+  }
+  return "the required runtime checks.";
 }
 
 /**
@@ -318,6 +340,10 @@ export function runGroundedModelCall<T extends GroundedModelOutput>(
     {
       ...input,
       maxAttempts: 2,
+      normalize: (output) =>
+        withDistinctClaimReferences(
+          withCitedCurrentReportItems(output, input.evidence),
+        ),
       validate: (output) => {
         validateGroundedOutput(output, input.evidence);
       },

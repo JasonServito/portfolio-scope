@@ -2,11 +2,13 @@ import Link from "next/link";
 
 import { SessionControls } from "@/components/auth/session-controls";
 import { BrandMark } from "@/components/layout/brand-mark";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth/session";
 
 const privateNavigation = [
   ["/app", "Dashboard"],
+  ["/app/holdings", "Holdings"],
   ["/app/watchlist", "Watchlist"],
   ["/app/earnings", "Earnings"],
   ["/app/alerts", "Alerts"],
@@ -66,7 +68,8 @@ export default async function ProtectedAppLayout({
               Public demo
             </Link>
           </nav>
-          <div className="ml-auto md:ml-0">
+          <div className="ml-auto flex items-center gap-1 md:ml-0">
+            <ThemeToggle />
             <SessionControls />
           </div>
         </div>
@@ -89,7 +92,7 @@ export default async function ProtectedAppLayout({
       <div id="private-content">{children}</div>
       <footer className="border-t bg-background">
         <div className="mx-auto flex max-w-7xl flex-col gap-2 px-6 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between lg:px-8">
-          <p>Educational portfolio tracking — not financial advice.</p>
+          <p>Educational portfolio tracking. Not financial advice.</p>
           <nav aria-label="Legal" className="flex gap-4">
             <Link
               className="underline-offset-4 hover:text-foreground hover:underline focus-visible:text-foreground"

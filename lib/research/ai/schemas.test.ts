@@ -146,6 +146,25 @@ describe("model output safety", () => {
 
     expect(getModelOutputSafetyIssue(cyclic)).toMatch(/investment action/i);
   });
+
+  it("treats a share count as a business fact, not a share-price prediction", () => {
+    for (const statement of [
+      "Diluted shares would fall if buybacks continue.",
+      "Weighted-average diluted shares may rise with stock-based compensation.",
+      "Basic shares could fall further.",
+    ]) {
+      expect(getModelOutputSafetyIssue({ summary: statement })).toBeNull();
+    }
+    for (const statement of [
+      "Apple shares could fall after the report.",
+      "MSFT could rise.",
+      "NVDA could outperform Microsoft on revenue growth.",
+    ]) {
+      expect(getModelOutputSafetyIssue({ summary: statement })).toMatch(
+        /stock-price target or prediction/,
+      );
+    }
+  });
 });
 
 describe("model output consistency gate", () => {
